@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
-  percent: 14
+  completed_plans: 2
+  percent: 29
 ---
 
 # Project State
@@ -21,27 +21,27 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 1 of 6 (Typed Contract, CI and Media Info)
-Plan: 1 of 7 in current phase
-Status: Executing (wave 1 of 5)
-Last activity: 2026-09-15 — Plan 01-01 complete: Android SDK + headless emulator on danserver, private GitHub repo wired as `github` remote, docs/TOOLCHAIN.md, COVERAGE.md and 01-VALIDATION.md written
+Plan: 2 of 7 in current phase
+Status: Executing (wave 1 of 5 complete; wave 2 next)
+Last activity: 2026-09-15 — Plan 01-02 complete: three byte-reproducible corpus clips (portrait rotation via tkhd patch, small low-bitrate, no-audio), drift-gated ground-truth sidecars, mirror script and README
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 35 min
-- Total execution time: 0.6 hours
+- Total plans completed: 2
+- Average duration: 30 min
+- Total execution time: 1.0 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 1 | 35 min | 35 min |
+| 1 | 2 | 60 min | 30 min |
 
 **Recent Trend:**
-- Last 5 plans: 35 min
+- Last 5 plans: 35 min, 25 min
 - Trend: -
 
 *Updated after each plan completion*
@@ -59,6 +59,8 @@ Recent decisions affecting current work:
 - [01-01]: Android SDK + headless emulator installed on danserver (JDK 17, cmdline-tools, platform-tools, platforms;android-36, build-tools;36.1.0, system-images;android-35;google_apis;x86_64); `dan` added to `kvm` group, requires `sg kvm -c` until next full re-login. Recipe recorded in `.claude/CLAUDE.md` lane notes.
 - [01-01]: `github.com/danieljamesjohnson/compress_video` created private, added as `github` remote alongside danserver `origin`; default Actions workflow token permission set to `read`.
 - [01-01]: 01-VALIDATION.md's Per-Task Verification Map has 20 rows (matching the actual total task count across all 7 phase-1 plans), not the 21 the plan's own acceptance criteria expected — an off-by-one authoring bug in the plan text, not a missing task. See 01-01-SUMMARY.md Deviations.
+- [01-02]: Corpus clips generated with ffmpeg on danserver; portrait rotation done via a direct `tkhd`-matrix byte patch (`corpus/patch_rotation.py`) because `ffmpeg -metadata:s:v:0 rotate=` is a verified no-op on the installed ffmpeg 6.1.1. Sidecars record rotation as unsigned clockwise degrees and dimensions as displayed (post-rotation), not ffprobe's raw signed/coded values — see `corpus/README.md`.
+- [01-02]: Added `-threads 1 -x264-params threads=1:sliced_threads=0` to every libx264 encode in `generate_corpus.sh` after discovering the default multi-threaded rate control made regenerated clips non-byte-identical, violating the plan's reproducibility must-have. See 01-02-SUMMARY.md Deviations.
 
 ### Pending Todos
 
@@ -81,5 +83,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-15
-Stopped at: Completed 01-01-PLAN.md
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

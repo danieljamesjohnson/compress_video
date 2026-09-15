@@ -54,7 +54,7 @@ Plans:
 **Wave 1**
 
 - [x] 01-01-PLAN.md — Android toolchain and emulator on danserver, private GitHub repo, toolchain pins, API-coverage declaration, validation contract
-- [ ] 01-02-PLAN.md — Generated corpus: three phone-shaped clips with a real display matrix, ground-truth sidecars and a drift verifier
+- [x] 01-02-PLAN.md — Generated corpus: three phone-shaped clips with a real display matrix, ground-truth sidecars and a drift verifier
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -166,7 +166,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Contract, CI and Media Info | 0/7 | Not started | - |
+| 1. Typed Contract, CI and Media Info | 2/7 | In progress | - |
 | 2. Android Compression on Media3 | 0/TBD | Not started | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
