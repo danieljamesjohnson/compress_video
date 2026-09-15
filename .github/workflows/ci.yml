@@ -105,6 +105,11 @@ jobs:
       - name: Analyze
         run: flutter analyze --fatal-infos --fatal-warnings
 
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
       - name: Verify corpus has not drifted
         run: bash corpus/verify_corpus.sh
 
@@ -143,7 +148,19 @@ jobs:
 
       - name: Build iOS (CocoaPods)
         working-directory: example
-        run: flutter build ios --simulator --no-codesign
+        run: |
+          set -euo pipefail
+          # Flutter's project migrator can rewrite ios/Podfile and ios/Runner.xcodeproj on
+          # first run against a newer stable than the one the template was generated from,
+          # which can leave the just-migrated Podfile.lock out of sync with the CocoaPods
+          # sandbox check ("The sandbox is not in sync with the Podfile.lock"). Retry once
+          # after clearing the CocoaPods install state so the retry starts from a Podfile
+          # and lockfile that were actually generated together.
+          flutter build ios --simulator --no-codesign || {
+            echo "::warning::iOS build failed, likely a CocoaPods sandbox/Podfile.lock mismatch from Flutter's project migration. Clearing Pods state and retrying once."
+            rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
+            flutter build ios --simulator --no-codesign
+          }
 
       - name: Resolve an available iOS simulator
         id: ios_sim
@@ -175,7 +192,13 @@ jobs:
 
       - name: Build macOS
         working-directory: example
-        run: flutter build macos --debug
+        run: |
+          set -euo pipefail
+          flutter build macos --debug || {
+            echo "::warning::macOS build failed, likely the same CocoaPods sandbox/Podfile.lock mismatch as the iOS build. Clearing Pods state and retrying once."
+            rm -rf macos/Pods macos/Podfile.lock macos/.symlinks
+            flutter build macos --debug
+          }
 
       - name: XCTest - macOS Runner
         working-directory: example/macos
