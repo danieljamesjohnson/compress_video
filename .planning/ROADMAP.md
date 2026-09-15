@@ -89,9 +89,39 @@ Plans:
   4. Two jobs started together each have their own 0-100 progress stream and completion future. Cancelling one resolves it as Cancelled and deletes its partial file. Failures (unsupported input, out of space) arrive as typed errors and never crash the app.
   5. A pre-flight estimate for a clip and options returns output size and duration without encoding, within the documented tolerance of the real result. Output lands in the chosen directory/name or a unique cache name, and `clearCache()` deletes only the plugin's files. The Android build uses Media3 Transformer, minSdk 23 and compileSdk 36, contains no `.so` files, and builds on the current stable AGP/Kotlin.
 
-**Plans**: TBD
-**Research**: Not flagged. Media3 Transformer, `VideoEncoderSettings`, `Presentation` and `ClippingConfiguration` are covered in research/STACK.md. The preset table (maxLongSide × bitrate) is a measurement task on the corpus, not a research task.
-**Notes**: This phase sets the observable behaviour that Phase 3 must match. Write the README preset constants from measured sizes here so later docs are generated, not written from memory.
+**Plans**: 7 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — High-bitrate 60 fps portrait corpus clip and a structurally damaged clip, with derived sidecars, an edge probe, the filled validation contract and the coverage declaration
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md — Pigeon compression contract, the Dart type surface, and the tracer: one call turns the high-bitrate clip into a smaller upright MP4 through Media3 on the emulator
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-03-PLAN.md — `SizeGuard`: presets, explicit max-long-side / bitrate / target-MB targets, the 30 fps cap, even dimensions and the never-upscale rule
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-04-PLAN.md — Never-larger pre-check and post-check, the transmux fast path with a measured speed ratio, and `doc/PRESETS.md` generated from measurement
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 02-05-PLAN.md — Audio passthrough, re-encode and strip with channel mixing; trim; upright output and no black bars proven by sampling the compressed file
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 02-06-PLAN.md — Per-job progress and cancellation, idempotent cancel, the full 22-code error mapping and the pre-flight free-space check
+
+**Wave 7** *(blocked on Waves 4 and 6 completion)*
+
+- [ ] 02-07-PLAN.md — Pre-flight estimate sharing one resolver with the real job, output placement and a bounded `clearCache()`, the APK native-library and 16 KB proof, and CI wiring
+
+**Research**: Not flagged. Media3 Transformer, `VideoEncoderSettings`, `Presentation` and `ClippingConfiguration` are covered in research/STACK.md. The preset table (maxLongSide × bitrate) is a measurement task on the corpus, not a research task. A phase research pass ran anyway and produced `02-RESEARCH.md`, which pinned media3 1.11.1 live, verified the Transformer main-Looper contract, and found every existing corpus clip too low-bitrate to exercise a real encode — the reason plan 02-01 exists.
+**Notes**: This phase sets the observable behaviour that Phase 3 must match. Write the README preset constants from measured sizes here so later docs are generated, not written from memory. The gate for this phase is the local emulator: GitHub Actions is refused on an account billing limit (QUESTIONS.md #6), so CI wiring is written and committed but a refused run is recorded as an external blocker, never as a task failure.
 
 ### Phase 3: Apple Compression to Parity
 
@@ -167,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 0/TBD | Not started | - |
+| 2. Android Compression on Media3 | 0/7 | Planned | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
