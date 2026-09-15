@@ -18,6 +18,16 @@
 #     coded ones ffprobe reports directly on the video stream.
 #   - crossPlatform fields must match exactly across platforms; tolerant
 #     fields (bitrate, frame rate) may differ within a documented tolerance.
+#   - thumbnailProbe is derived for every clip that carries the 8-bucket
+#     colour-patch schedule (currently portrait_rot90.mp4 and
+#     portrait_hibitrate_1080p60.mp4). edgeProbe is derived only for
+#     portrait_hibitrate_1080p60.mp4, which alone carries the white border.
+#
+# truncated_mdat.mp4 is deliberately excluded from sidecar derivation: it is
+# a structurally damaged fixture whose whole point is that decoding its media
+# data fails, so it has no "ground truth" to derive beyond "ffprobe can still
+# read a video stream and a duration from it" - checked separately below,
+# never diffed against a `.expected.json`.
 
 set -euo pipefail
 
@@ -39,6 +49,24 @@ PATCH_CENTER_Y=$((PATCH_BOX_Y + PATCH_BOX_H / 2))
 PROBE_POSITION_MS=1500
 PROBE_COMPARE_MS=1000
 RGB_TOLERANCE=24
+
+# Clips carrying the 8-bucket colour-patch schedule (thumbnailProbe).
+PATCH_CLIPS=(portrait_rot90.mp4 portrait_hibitrate_1080p60.mp4)
+# The one clip that also carries the white edge border (edgeProbe).
+EDGE_CLIP=portrait_hibitrate_1080p60.mp4
+EDGE_BORDER_PX=24
+EDGE_INSET_PX=4
+EDGE_RGB_TOLERANCE=48
+# The deliberately damaged clip: no sidecar, checked separately below.
+DAMAGED_CLIP=truncated_mdat.mp4
+
+is_patch_clip() {
+  local needle="$1" c
+  for c in "${PATCH_CLIPS[@]}"; do
+    [ "$c" = "$needle" ] && return 0
+  done
+  return 1
+}
 
 fail() {
   echo "ERROR: $1" >&2
@@ -129,7 +157,11 @@ derive_sidecar() {
     --argjson frameRateToleranceFps 0.5 \
     '{videoBitrateBps:$videoBitrateBps, videoBitrateTolerancePct:$videoBitrateTolerancePct, frameRateFps:$frameRateFps, frameRateToleranceFps:$frameRateToleranceFps}')
 
-  if [ "$clip" = "portrait_rot90.mp4" ]; then
+  local result
+  result=$(jq -n --argjson crossPlatform "$cross_platform" --argjson tolerant "$tolerant" \
+    '{crossPlatform:$crossPlatform, tolerant:$tolerant}')
+
+  if is_patch_clip "$clip"; then
     # Transform the patch centre from CODED coordinates (where drawbox drew
     # it) to DISPLAYED coordinates (what a decoder that applies the tkhd
     # matrix - i.e. every real player, and ffmpeg's default -autorotate -
@@ -166,15 +198,79 @@ derive_sidecar() {
       --argjson rgbTolerance "$RGB_TOLERANCE" \
       '{positionMs:$positionMs, patchXPx:$patchXPx, patchYPx:$patchYPx, expectedRgb:$expectedRgb, rgbTolerance:$rgbTolerance}')
 
-    jq -n --argjson crossPlatform "$cross_platform" --argjson tolerant "$tolerant" --argjson thumbnailProbe "$thumbnail_probe" \
-      '{crossPlatform:$crossPlatform, tolerant:$tolerant, thumbnailProbe:$thumbnailProbe}'
-  else
-    jq -n --argjson crossPlatform "$cross_platform" --argjson tolerant "$tolerant" \
-      '{crossPlatform:$crossPlatform, tolerant:$tolerant}'
+    result=$(jq -n --argjson base "$result" --argjson thumbnailProbe "$thumbnail_probe" '$base + {thumbnailProbe:$thumbnailProbe}')
   fi
+
+  if [ "$clip" = "$EDGE_CLIP" ]; then
+    # Four points, each inset EDGE_INSET_PX from the midpoint of one
+    # DISPLAYED edge. EDGE_INSET_PX (4) is well inside EDGE_BORDER_PX (24),
+    # so every point lands inside the painted white border regardless of
+    # rotation. sample_rgb already samples displayed coordinates.
+    local t_s
+    t_s=$(awk -v ms="$PROBE_POSITION_MS" 'BEGIN{printf "%.3f", ms/1000}')
+    local top_x=$((width_px / 2)) top_y="$EDGE_INSET_PX"
+    local bottom_x=$((width_px / 2)) bottom_y=$((height_px - EDGE_INSET_PX))
+    local left_x="$EDGE_INSET_PX" left_y=$((height_px / 2))
+    local right_x=$((width_px - EDGE_INSET_PX)) right_y=$((height_px / 2))
+
+    local tr tg tb br bg bb lr lg lb rr rg rb
+    read -r tr tg tb <<< "$(sample_rgb "$top_x" "$top_y" "$t_s" "$clip")"
+    read -r br bg bb <<< "$(sample_rgb "$bottom_x" "$bottom_y" "$t_s" "$clip")"
+    read -r lr lg lb <<< "$(sample_rgb "$left_x" "$left_y" "$t_s" "$clip")"
+    read -r rr rg rb <<< "$(sample_rgb "$right_x" "$right_y" "$t_s" "$clip")"
+
+    local name pr pg pb dr dg db entry
+    for entry in "bottom:$br:$bg:$bb" "left:$lr:$lg:$lb" "right:$rr:$rg:$rb"; do
+      IFS=: read -r name pr pg pb <<< "$entry"
+      dr=$(( tr - pr )); dr=${dr#-}
+      dg=$(( tg - pg )); dg=${dg#-}
+      db=$(( tb - pb )); db=${db#-}
+      if [ "$dr" -gt "$EDGE_RGB_TOLERANCE" ] || [ "$dg" -gt "$EDGE_RGB_TOLERANCE" ] || [ "$db" -gt "$EDGE_RGB_TOLERANCE" ]; then
+        fail "edge probe: $name border sample (${pr},${pg},${pb}) disagrees with top (${tr},${tg},${tb}) beyond tolerance ${EDGE_RGB_TOLERANCE} for $clip"
+      fi
+    done
+
+    if [ "$tr" -le "$EDGE_RGB_TOLERANCE" ] && [ "$tg" -le "$EDGE_RGB_TOLERANCE" ] && [ "$tb" -le "$EDGE_RGB_TOLERANCE" ]; then
+      fail "edge probe: border colour (${tr},${tg},${tb}) is not distinguishable from black (tolerance ${EDGE_RGB_TOLERANCE}) for $clip - probe is useless"
+    fi
+
+    local edge_probe
+    edge_probe=$(jq -n \
+      --argjson borderPx "$EDGE_BORDER_PX" \
+      --argjson insetPx "$EDGE_INSET_PX" \
+      --argjson expectedRgb "[$tr,$tg,$tb]" \
+      --argjson rgbTolerance "$EDGE_RGB_TOLERANCE" \
+      '{borderPx:$borderPx, insetPx:$insetPx, expectedRgb:$expectedRgb, rgbTolerance:$rgbTolerance}')
+
+    result=$(jq -n --argjson base "$result" --argjson edgeProbe "$edge_probe" '$base + {edgeProbe:$edgeProbe}')
+  fi
+
+  echo "$result"
 }
 
-CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4)
+# Assert the deliberately damaged clip still probes as a video file with a
+# readable duration, without deriving (or diffing against) any sidecar.
+check_damaged_clip() {
+  local clip="$1"
+  if [ ! -f "$clip" ]; then
+    fail "$clip not found - run generate_corpus.sh first"
+  fi
+  if [ ! -s "$clip" ]; then
+    fail "$clip is empty"
+  fi
+  local has_video duration
+  has_video=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "$clip" 2>/dev/null || true)
+  if [ "$has_video" != "video" ]; then
+    fail "$clip does not probe as a video stream (got '${has_video}') - the damaged fixture must still be readable as a video file"
+  fi
+  duration=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$clip" 2>/dev/null || true)
+  if [ -z "$duration" ]; then
+    fail "$clip has no readable duration - the damaged fixture must still report one"
+  fi
+  echo "CHECK: $clip still probes as video (duration ${duration}s), no sidecar by design"
+}
+
+CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4)
 STATUS=0
 
 for clip in "${CLIPS[@]}"; do
@@ -204,5 +300,7 @@ for clip in "${CLIPS[@]}"; do
     fi
   fi
 done
+
+check_damaged_clip "$DAMAGED_CLIP"
 
 exit "$STATUS"

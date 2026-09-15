@@ -95,6 +95,25 @@ thumbnails instead of dimensions.
 colour bucket) by more than `rgbTolerance` in at least one channel — a probe that can't tell two
 buckets apart would pass every implementation, including a broken one.
 
+`thumbnailProbe` fields: `positionMs` (time to request the thumbnail at), `patchXPx`/`patchYPx`
+(displayed-coordinate centre of the colour patch), `expectedRgb` (the sampled colour at that
+moment), `rgbTolerance` (JPEG-loss allowance). Present only on the two clips carrying the colour
+patch, `portrait_rot90.mp4` and `portrait_hibitrate_1080p60.mp4`.
+
+## Edge probe contract (`edgeProbe`)
+
+`portrait_hibitrate_1080p60.mp4` alone also carries `edgeProbe`, a small self-checking block that
+makes "no letterboxing" checkable the same way `thumbnailProbe` makes "correct orientation"
+checkable: `borderPx` (24, the painted border's coded thickness), `insetPx` (4, how far in from
+each displayed edge the sample points sit — always inside the border regardless of rotation),
+`expectedRgb` (the sampled near-white colour), `rgbTolerance` (48, wider than the thumbnail
+probe's because border sampling averages a coarser area near a hard edge). `verify_corpus.sh`
+samples all four edge midpoints (top, bottom, left, right, in displayed coordinates) and fails
+naming the clip if any of the four disagree with each other beyond `rgbTolerance`, or if the
+sampled colour cannot be told apart from pure black by more than `rgbTolerance` in any channel —
+a probe that cannot distinguish the border from letterbox padding would pass a broken
+implementation just as easily as a correct one.
+
 ## Why `portrait_hibitrate_1080p60.mp4` exists
 
 Every Phase 1 corpus clip was measured live and found far below every preset bitrate Phase 2

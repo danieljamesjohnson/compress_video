@@ -1,0 +1,40 @@
+{
+  "crossPlatform": {
+    "durationMs": 4000,
+    "durationToleranceMs": 34,
+    "hasAudio": true,
+    "heightPx": 1920,
+    "isHdr": false,
+    "rotationDegrees": 90,
+    "sizeBytes": 4454349,
+    "videoCodec": "h264",
+    "widthPx": 1080
+  },
+  "edgeProbe": {
+    "borderPx": 24,
+    "expectedRgb": [
+      255,
+      255,
+      255
+    ],
+    "insetPx": 4,
+    "rgbTolerance": 48
+  },
+  "thumbnailProbe": {
+    "expectedRgb": [
+      255,
+      255,
+      0
+    ],
+    "patchXPx": 920,
+    "patchYPx": 1700,
+    "positionMs": 1500,
+    "rgbTolerance": 24
+  },
+  "tolerant": {
+    "frameRateFps": 60.000,
+    "frameRateToleranceFps": 0.5,
+    "videoBitrateBps": 8764164,
+    "videoBitrateTolerancePct": 25
+  }
+}
