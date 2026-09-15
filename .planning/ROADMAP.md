@@ -66,7 +66,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-05-PLAN.md — Thumbnails on Android: upright bytes and unique files at an exact millisecond, with boundary and concurrency coverage
+- [x] 01-05-PLAN.md — Thumbnails on Android: upright bytes and unique files at an exact millisecond, with boundary and concurrency coverage
 - [ ] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -166,7 +166,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Contract, CI and Media Info | 4/7 | In progress | - |
+| 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 0/TBD | Not started | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |

@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
-  percent: 57
+  completed_plans: 5
+  percent: 71
 ---
 
 # Project State
@@ -21,28 +21,28 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 1 of 6 (Typed Contract, CI and Media Info)
-Plan: 4 of 7 in current phase
-Status: Executing (wave 3 of 5 complete; wave 4 next)
-Last activity: 2026-09-15 — Plan 01-04 complete: full INFO-01 media-info contract (Pigeon-generated typed channel, Kotlin Probe/MediaMath/Arguments) proven end-to-end on the real Android emulator; CI now regenerates the Pigeon contract, runs native Gradle unit tests, and runs the emulator integration suite on every push (green after 4 CI-only fix iterations)
+Plan: 5 of 7 in current phase
+Status: Executing (wave 4 of 5 in progress — 01-05 done, 01-06 next)
+Last activity: 2026-09-15 — Plan 01-05 complete: both thumbnail calls (getThumbnail, getThumbnailFile) working end-to-end on the Android emulator, rotation-correct at an exact requested millisecond, with boundary/scaling/quality/uniqueness/error/concurrency all covered (25 emulator integration tests, 37 native unit tests); CI green (run 35002031136)
 
-Progress: [██████░░░░] 57%
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
+- Total plans completed: 5
 - Average duration: 50 min
-- Total execution time: 3.4 hours
+- Total execution time: 4.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 4 | 202 min | 50 min |
+| 1 | 5 | 249 min | 50 min |
 
 **Recent Trend:**
-- Last 5 plans: 35 min, 25 min, 50 min, 92 min
-- Trend: up (01-04 needed 4 CI-only fix iterations to reach a real green run — regeneration diff scope, gitignored Gradle wrapper, emulator disk space, then a self-inflicted toolcache-deletion regression from the disk-space fix itself)
+- Last 5 plans: 35 min, 25 min, 50 min, 92 min, 47 min
+- Trend: down from 01-04's spike (01-05 hit one real platform quirk — getScaledFrameAtTime's fit-within-box dst dimensions — caught by its own test and fixed within the same task; no CI-only fix iterations were needed this time)
 
 *Updated after each plan completion*
 
@@ -67,6 +67,8 @@ Recent decisions affecting current work:
 - [01-04]: `MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER`/`_COLOR_STANDARD`/`_COLOR_RANGE` were confirmed live (via the "Added in API level" badges on developer.android.com) to be API level 30, not the 24/29 secondary-source guesses in 01-RESEARCH.md's Open Questions — HDR detection is gated on `Build.VERSION.SDK_INT >= 30`. `METADATA_KEY_ROTATION` does not exist; the correct constant is `METADATA_KEY_VIDEO_ROTATION` (confirmed via `javap` against the android-36 platform jar).
 - [01-04]: Pigeon's own generated Dart output is not `dart format`-clean. Both the local workflow and CI's regeneration step now run `dart format lib/src/messages.g.dart` immediately after `dart run pigeon`, and the contract's regeneration diff check in CI is scoped to only its own four files (not a bare `git diff --exit-code`, which also caught Flutter's unrelated `analysis_options.yaml` migrator rewrites).
 - [01-04]: CI's `android` job now regenerates and diff-gates the Pigeon contract, runs the plugin module's native Gradle unit tests, and runs a real `reactivecircus/android-emulator-runner` (API 35, google_apis, x86_64) integration suite on every push — reached green (run 34997517360) after fixing the diff scope, the gitignored `example/android/gradlew` wrapper not existing on a fresh checkout, the emulator's userdata partition not fitting `ubuntu-latest`'s free disk space, and a regression where the disk-space fix's own deletion list included the hosted toolcache (Flutter SDK + JDK) the job still needed.
+- [01-05]: `MediaMetadataRetriever.getScaledFrameAtTime`'s `dstWidth`/`dstHeight` are a fit-within bounding box (scaled by whichever dimension is more constraining), not independent exact targets — confirmed live on the emulator (a `maxDimensionPx=1919` request returned height 1918, not 1919) rather than from documentation. Every decoded thumbnail frame is now unconditionally snapped to the exact `MediaMath.scaledSize` target with one `Bitmap.createScaledBitmap` pass, on every API level, so the pure-math contract is exactly what callers observe.
+- [01-05]: `INFO-02` stays unchecked in `REQUIREMENTS.md` — also declared by 01-06 and 01-07, both still pending in this phase; `gsd-tools query requirements.ready-ids` reports it `blocked`, not `ready`. Same shared-ID gate pattern as `BULD-03`/`INFO-01`/`BULD-05` in 01-04.
 
 ### Pending Todos
 
@@ -89,5 +91,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-15
-Stopped at: Completed 01-04-PLAN.md
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
