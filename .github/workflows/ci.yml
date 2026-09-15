@@ -111,11 +111,19 @@ jobs:
         # immediately after `pigeon` because Pigeon's own generator output is not
         # dart-format-clean (long lines, non-idiomatic wrapping) - the committed
         # lib/src/messages.g.dart is formatted, so this step must format too or the diff
-        # below would be non-empty on every run, not just on real drift.
+        # below would be non-empty on every run, not just on real drift. The diff is
+        # scoped to only the contract's own files: Flutter's project migrators can
+        # rewrite analysis_options.yaml (see "Reset files..." below) the moment a newer
+        # `flutter analyze` touches it, and an unscoped `git diff --exit-code` would fail
+        # on that unrelated drift instead of on a real Pigeon contract mismatch.
         run: |
           dart run pigeon --input pigeons/messages.dart
           dart format lib/src/messages.g.dart
-          git diff --exit-code
+          git diff --exit-code -- \
+            pigeons/messages.dart \
+            lib/src/messages.g.dart \
+            android/src/main/kotlin/com/danjjohnson/compress_video/Messages.g.kt \
+            darwin/compress_video/Sources/compress_video/Messages.g.swift
 
       - name: Run Android native unit tests
         working-directory: example/android
