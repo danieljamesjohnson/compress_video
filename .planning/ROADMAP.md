@@ -94,7 +94,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — High-bitrate 60 fps portrait corpus clip and a structurally damaged clip, with derived sidecars, an edge probe, the filled validation contract and the coverage declaration
+- [x] 02-01-PLAN.md — High-bitrate 60 fps portrait corpus clip and a structurally damaged clip, with derived sidecars, an edge probe, the filled validation contract and the coverage declaration
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -197,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 0/7 | Planned | - |
+| 2. Android Compression on Media3 | 1/7 | In progress | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |

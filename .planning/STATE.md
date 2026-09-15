@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 14
-  completed_plans: 5
-  percent: 71
+  completed_plans: 6
+  percent: 43
 ---
 
 # Project State
@@ -21,28 +21,29 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
-Plan: 0 of 7 in current phase
-Status: Executing Phase 2 (wave 1 of 7); Phase 2 planned, checker passed
-Last activity: 2026-09-15 — Phase 2 planned (7 plans, 7 waves); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
+Plan: 1 of 7 in current phase
+Status: Executing Phase 2 (wave 1 of 7 complete; wave 2 next — 02-02)
+Last activity: 2026-09-15 — 02-01 complete (high-bitrate + damaged corpus fixtures, edge probe, filled 02-VALIDATION.md and COVERAGE.md); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
-Progress: [███████░░░] 71% (unchanged until 01-06 re-verifies green and is re-summarized as complete)
+Progress: [████░░░░░░] 43% (6/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 50 min
-- Total execution time: 4.2 hours
+- Total plans completed: 6
+- Average duration: 45 min
+- Total execution time: 4.5 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5 | 249 min | 50 min |
+| 2 | 1 | 20 min | 20 min |
 
 **Recent Trend:**
-- Last 5 plans: 35 min, 25 min, 50 min, 92 min, 47 min
-- Trend: down from 01-04's spike (01-05 hit one real platform quirk — getScaledFrameAtTime's fit-within-box dst dimensions — caught by its own test and fixed within the same task; no CI-only fix iterations were needed this time)
+- Last 5 plans: 25 min, 50 min, 92 min, 47 min, 20 min
+- Trend: down from 01-04's spike; 02-01 (fixtures + validation contract only, no engine code) was the fastest plan so far
 - 01-06 (not yet counted as completed — halted, see Blockers/Concerns): 166 min elapsed, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, final fix unverified due to a GitHub Actions billing block
 
 *Updated after each plan completion*
@@ -73,6 +74,8 @@ Recent decisions affecting current work:
 - [01-06]: Gated the modern AVFoundation `load(_:)` API on `#available(iOS 16, macOS 13, *)` — the more conservative of 01-RESEARCH.md's two conflicting sourced minimums — since gating on the lower bound would crash at runtime if wrong, not just skip an optimisation.
 - [01-06]: `videoCodec` degrades to `unknown` on the legacy (pre-iOS-16/macOS-13) AVFoundation path only: casting `AVAssetTrack.formatDescriptions: [Any]` to `[CMFormatDescription]` has no permitted Swift spelling here — `as?` is a hard compiler error under this project's warnings-as-errors build ("conditional downcast will always succeed"), and `as!` is banned by the threat model.
 - [01-06]: `AVAssetImageGenerator.maximumSize` is a fit-within bounding box, not independent exact output dimensions — confirmed live in CI, the Apple-side twin of 01-05's Android `getScaledFrameAtTime` finding. Thumbnails.swift now snaps the decoded `CGImage` to the exact `MediaMath.scaledSize` target via one `CGContext` draw pass, mirroring Android's `Bitmap.createScaledBitmap` fix.
+- [02-01]: Added `portrait_hibitrate_1080p60.mp4` (mandelbrot lavfi source, 60fps, ~8.7Mbps H.264 + AAC, 90deg tkhd matrix, white edge border) and `truncated_mdat.mp4` (faststart-then-truncated, sidecar-less by design) to the corpus, since every Phase 1 clip is far below every Phase 2 preset bitrate and all Phase 1 clips are 30fps. `verify_corpus.sh` generalized its single-clip `thumbnailProbe` branch to a patch-carrying-clip list and added a self-checking `edgeProbe` block for the new clip.
+- [02-01]: `02-VALIDATION.md`'s Per-Task Verification Map has 21 rows (matching the actual total task count across all 7 phase-2 plans — 3 tasks x 7 plans), not the 20 the plan's own `must_haves`/acceptance criteria expected — the same class of off-by-one authoring bug as 01-01's (that one undercounted; this one overcounts), documented rather than dropping a real task's row. See 02-01-SUMMARY.md Deviations.
 
 ### Pending Todos
 
@@ -102,5 +105,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-15
-Stopped at: 01-06-PLAN.md code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
-Resume file: None — resume by re-running CI once billing is resolved; no PLAN.md re-execution needed
+Stopped at: Completed 02-01-PLAN.md (Phase 2 corpus fixtures, edge probe, filled validation contract). Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
+Resume file: None — next is 02-02-PLAN.md (Pigeon compression contract + tracer)
