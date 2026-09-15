@@ -311,15 +311,29 @@ struct MediaInfoMessage: Hashable, CustomStringConvertible {
 ///
 /// Generated class from Pigeon that represents data sent in messages.
 struct CompressRequestMessage: Hashable, CustomStringConvertible {
-  /// Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
-  /// (the preset's own value is already resolved into this field by the time it crosses the
-  /// channel, so `null` here means "use the input's own long side").
+  /// Explicit cap on the output's longer displayed side, in pixels, or `null` when the caller
+  /// did not set `CompressOptions.maxLongSidePx` -- in which case `SizeGuard` falls back to
+  /// [presetMaxLongSidePx]. Never the preset's own value pre-resolved into this field (that
+  /// was 02-02's tracer-only shape); this field is `null` unless the caller explicitly set it,
+  /// which is what lets the native side tell "explicit override" apart from "use the preset".
   var maxLongSidePx: Int64? = nil
-  /// Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
-  /// no explicit bitrate.
+  /// Explicit target video bitrate, in bits per second, or `null` when the caller did not set
+  /// `CompressOptions.videoBitrateBps` -- in which case `SizeGuard` resolves it from
+  /// [targetSizeMb] if set, else scales [presetVideoBitrateBps] by the actual output
+  /// resolution and frame rate (SizeGuard.kt rule 6; this is the fix for the incumbent's
+  /// fixed-bitrate-regardless-of-resolution defect, PITFALLS.md row 13).
   var videoBitrateBps: Int64? = nil
   /// Target output file size, in megabytes, or `null` when no target size was requested.
   var targetSizeMb: Double? = nil
+  /// The selected `CompressPreset`'s own nominal long-side cap, in pixels, always sent
+  /// regardless of any [maxLongSidePx] override -- the reference value SizeGuard's bitrate
+  /// scaling formula divides by. The preset enum itself never crosses the channel (02-02
+  /// decision, unchanged); only its two resolved numbers do.
+  var presetMaxLongSidePx: Int64
+  /// The selected `CompressPreset`'s own nominal video bitrate, in bits per second, always
+  /// sent regardless of any [videoBitrateBps] override -- the reference value SizeGuard scales
+  /// when neither an explicit bitrate nor a [targetSizeMb] was requested.
+  var presetVideoBitrateBps: Int64
   /// Cap on the output's frame rate, in frames per second. Never upscales the input's own
   /// frame rate — the effective cap is `min(maxFps, input fps)`.
   var maxFps: Int64
@@ -353,20 +367,24 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
     let maxLongSidePx: Int64? = nilOrValue(pigeonVar_list[0])
     let videoBitrateBps: Int64? = nilOrValue(pigeonVar_list[1])
     let targetSizeMb: Double? = nilOrValue(pigeonVar_list[2])
-    let maxFps = pigeonVar_list[3] as! Int64
-    let audioMode = pigeonVar_list[4] as! AudioModeMessage
-    let audioBitrateBps: Int64? = nilOrValue(pigeonVar_list[5])
-    let audioChannels: Int64? = nilOrValue(pigeonVar_list[6])
-    let trimStartMs: Int64? = nilOrValue(pigeonVar_list[7])
-    let trimEndMs: Int64? = nilOrValue(pigeonVar_list[8])
-    let outputPath: String? = nilOrValue(pigeonVar_list[9])
-    let videoCodec = pigeonVar_list[10] as! String
-    let hdrMode = pigeonVar_list[11] as! String
+    let presetMaxLongSidePx = pigeonVar_list[3] as! Int64
+    let presetVideoBitrateBps = pigeonVar_list[4] as! Int64
+    let maxFps = pigeonVar_list[5] as! Int64
+    let audioMode = pigeonVar_list[6] as! AudioModeMessage
+    let audioBitrateBps: Int64? = nilOrValue(pigeonVar_list[7])
+    let audioChannels: Int64? = nilOrValue(pigeonVar_list[8])
+    let trimStartMs: Int64? = nilOrValue(pigeonVar_list[9])
+    let trimEndMs: Int64? = nilOrValue(pigeonVar_list[10])
+    let outputPath: String? = nilOrValue(pigeonVar_list[11])
+    let videoCodec = pigeonVar_list[12] as! String
+    let hdrMode = pigeonVar_list[13] as! String
 
     return CompressRequestMessage(
       maxLongSidePx: maxLongSidePx,
       videoBitrateBps: videoBitrateBps,
       targetSizeMb: targetSizeMb,
+      presetMaxLongSidePx: presetMaxLongSidePx,
+      presetVideoBitrateBps: presetVideoBitrateBps,
       maxFps: maxFps,
       audioMode: audioMode,
       audioBitrateBps: audioBitrateBps,
@@ -383,6 +401,8 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
       maxLongSidePx,
       videoBitrateBps,
       targetSizeMb,
+      presetMaxLongSidePx,
+      presetVideoBitrateBps,
       maxFps,
       audioMode,
       audioBitrateBps,
@@ -398,7 +418,7 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return MessagesPigeonInternal.deepEquals(lhs.maxLongSidePx, rhs.maxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.videoBitrateBps, rhs.videoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.targetSizeMb, rhs.targetSizeMb) && MessagesPigeonInternal.deepEquals(lhs.maxFps, rhs.maxFps) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.audioBitrateBps, rhs.audioBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.audioChannels, rhs.audioChannels) && MessagesPigeonInternal.deepEquals(lhs.trimStartMs, rhs.trimStartMs) && MessagesPigeonInternal.deepEquals(lhs.trimEndMs, rhs.trimEndMs) && MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.hdrMode, rhs.hdrMode)
+    return MessagesPigeonInternal.deepEquals(lhs.maxLongSidePx, rhs.maxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.videoBitrateBps, rhs.videoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.targetSizeMb, rhs.targetSizeMb) && MessagesPigeonInternal.deepEquals(lhs.presetMaxLongSidePx, rhs.presetMaxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.presetVideoBitrateBps, rhs.presetVideoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.maxFps, rhs.maxFps) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.audioBitrateBps, rhs.audioBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.audioChannels, rhs.audioChannels) && MessagesPigeonInternal.deepEquals(lhs.trimStartMs, rhs.trimStartMs) && MessagesPigeonInternal.deepEquals(lhs.trimEndMs, rhs.trimEndMs) && MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.hdrMode, rhs.hdrMode)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -406,6 +426,8 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
     MessagesPigeonInternal.deepHash(value: maxLongSidePx, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: videoBitrateBps, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: targetSizeMb, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: presetMaxLongSidePx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: presetVideoBitrateBps, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: maxFps, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: audioMode, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: audioBitrateBps, hasher: &hasher)
@@ -418,7 +440,7 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
   }
 
   public var description: String {
-    return "CompressRequestMessage(maxLongSidePx: \(String(describing: maxLongSidePx)), videoBitrateBps: \(String(describing: videoBitrateBps)), targetSizeMb: \(String(describing: targetSizeMb)), maxFps: \(String(describing: maxFps)), audioMode: \(String(describing: audioMode)), audioBitrateBps: \(String(describing: audioBitrateBps)), audioChannels: \(String(describing: audioChannels)), trimStartMs: \(String(describing: trimStartMs)), trimEndMs: \(String(describing: trimEndMs)), outputPath: \(String(describing: outputPath)), videoCodec: \(String(describing: videoCodec)), hdrMode: \(String(describing: hdrMode)))"
+    return "CompressRequestMessage(maxLongSidePx: \(String(describing: maxLongSidePx)), videoBitrateBps: \(String(describing: videoBitrateBps)), targetSizeMb: \(String(describing: targetSizeMb)), presetMaxLongSidePx: \(String(describing: presetMaxLongSidePx)), presetVideoBitrateBps: \(String(describing: presetVideoBitrateBps)), maxFps: \(String(describing: maxFps)), audioMode: \(String(describing: audioMode)), audioBitrateBps: \(String(describing: audioBitrateBps)), audioChannels: \(String(describing: audioChannels)), trimStartMs: \(String(describing: trimStartMs)), trimEndMs: \(String(describing: trimEndMs)), outputPath: \(String(describing: outputPath)), videoCodec: \(String(describing: videoCodec)), hdrMode: \(String(describing: hdrMode)))"
   }
 }
 

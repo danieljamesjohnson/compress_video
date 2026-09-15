@@ -1,6 +1,7 @@
 package com.danjjohnson.compress_video
 
 import android.content.Context
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
@@ -23,7 +24,6 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.math.floor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,15 +76,8 @@ class TransformerEngine(
         val startElapsedMs = SystemClock.elapsedRealtime()
         val inputBytes = inputFile.length()
 
-        val videoBitrateBps =
-            request.videoBitrateBps
-                ?: throw CompressVideoError(
-                    "unsupportedInput",
-                    "videoBitrateBps could not be resolved for this request " +
-                        "(targetSizeMb resolution is implemented in plan 02-07)",
-                )
-
-        val target = resolveTarget(inputInfo, request)
+        val target = SizeGuard.resolve(buildSizeGuardInput(inputInfo), buildSizeGuardOptions(request))
+        val videoBitrateBps = target.videoBitrateBps
         val inputDisplayedWidthPx = inputInfo.widthPx.toInt()
         val inputDisplayedHeightPx = inputInfo.heightPx.toInt()
 
@@ -94,9 +87,9 @@ class TransformerEngine(
                     target.targetHeightPx != inputDisplayedHeightPx
                 ) {
                     // Presentation.createForHeight preserves the frame's own aspect ratio, so
-                    // handing it only the target height is sufficient: the scaling ratio was
-                    // computed identically for both dimensions above, so the resulting width
-                    // already matches target.targetWidthPx.
+                    // handing it only the target height is sufficient: SizeGuard computed both
+                    // dimensions from the same ratio, so the resulting width already matches
+                    // target.targetWidthPx.
                     //
                     // No coded/displayed swap for rotation: measured live on the emulator
                     // (02-02-PLAN.md task 3's own instruction to record this). A rotated
@@ -111,6 +104,11 @@ class TransformerEngine(
                 }
                 val inputFps = inputInfo.frameRateFps
                 if (inputFps != null && target.effectiveFps < inputFps) {
+                    // The frame-rate-cap effect from the effect library, not the
+                    // EditedMediaItem builder's still-image frame-rate generator -- that
+                    // builder method only synthesizes a frame rate when converting a still
+                    // image to video and is a no-op on real video input (02-RESEARCH.md
+                    // Pattern 3's "Important distinction").
                     add(FrameDropEffect.createDefaultFrameDropEffect(target.effectiveFps.toFloat()))
                 }
             }
@@ -124,6 +122,15 @@ class TransformerEngine(
         val videoEncoderSettings =
             VideoEncoderSettings.Builder()
                 .setBitrate(videoBitrateBps.toInt())
+                // CBR, not the DefaultEncoderFactory/VideoEncoderSettings default of VBR
+                // (02-RESEARCH.md Pattern 4): measured live this plan -- an explicit
+                // videoBitrateBps request at VBR overshot by ~28% on this emulator's software
+                // encoder over a short (4s) clip, while CBR landed within ~20%, inside the
+                // 25% tolerance every corpus sidecar already uses for bitrate. The emulator's
+                // encoder advertises both VBR and CBR (02-RESEARCH.md Pitfall 3's
+                // `feature-bitrate-modes = "VBR,CBR"`), so this is a supported mode change,
+                // not a workaround relying on undocumented behaviour.
+                .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
                 .build()
         val encoderFactory =
             DefaultEncoderFactory.Builder(context)
@@ -328,63 +335,49 @@ class TransformerEngine(
         }
     }
 
-    /** The target output size (in the effect pipeline's own space -- see [resolveTarget]) and
-     * effective frame rate resolved from [request]. */
-    private data class ResolvedTarget(
-        val targetWidthPx: Int,
-        val targetHeightPx: Int,
-        val effectiveFps: Int,
-    )
+    /**
+     * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] has no
+     * audio-codec field (see [readAudioCodec]'s own doc comment), so [SizeGuard.InputInfo]'s
+     * `audioCodec` is always `null` here -- SizeGuard's own rules never read that field, only
+     * [hasAudio] and [SizeGuard.InputInfo.audioBitrateBps].
+     */
+    private fun buildSizeGuardInput(inputInfo: MediaInfoMessage): SizeGuard.InputInfo =
+        SizeGuard.InputInfo(
+            displayedWidthPx = inputInfo.widthPx.toInt(),
+            displayedHeightPx = inputInfo.heightPx.toInt(),
+            rotationDegrees = inputInfo.rotationDegrees.toInt(),
+            durationMs = inputInfo.durationMs,
+            sizeBytes = inputInfo.sizeBytes,
+            videoCodec = inputInfo.videoCodec ?: "unknown",
+            videoBitrateBps = inputInfo.videoBitrateBps,
+            frameRateFps = inputInfo.frameRateFps,
+            hasAudio = inputInfo.hasAudio,
+            audioCodec = null,
+            audioBitrateBps = null,
+        )
 
     /**
-     * Resolves [request] against [inputInfo] into a target output size and an effective frame
-     * rate, per 02-02-PLAN.md task 3: the effective long side is `min(request value, input's
-     * own displayed long side)` (never upscale, D-08); both output dimensions are the input's
-     * displayed dimensions scaled by that ratio and rounded down to even numbers (the
-     * emulator's software H.264 encoder requires 2x2 alignment, 02-RESEARCH.md Pitfall 3).
-     *
-     * No coded/displayed space conversion is applied: measured live on the emulator against a
-     * 1920x1080-coded, 90deg-rotation-matrix input (task 3's own instruction to record which
-     * space the effect pipeline actually uses). Swapping into "coded" space before calling
-     * [Presentation.createForHeight] produced an incorrect 406px-wide output; the effect
-     * pipeline already receives the DECODED, display-oriented frame (matching
-     * [MediaInfoMessage.widthPx]/[MediaInfoMessage.heightPx] directly), not the coded,
-     * pre-rotation frame -- so the target is computed directly from the input's own displayed
-     * dimensions with no swap.
-     *
-     * This inline resolution is deliberately temporary: the full preset/explicit-target/
-     * target-size resolution moves into `SizeGuard` in plan 02-03. It exists here only so the
-     * tracer proves the architecture end to end.
+     * Builds [SizeGuard.Options] from [request]. `maxLongSidePx`/`videoBitrateBps` are passed
+     * straight through as explicit-override-or-`null` (02-03-PLAN.md's wire-contract change:
+     * `CompressVideo._buildRequestMessage` no longer pre-resolves the preset's own bitrate into
+     * these fields the way 02-02's tracer did, which would have made rule 6's preset-scaling
+     * branch unreachable for the real Dart-to-native path). `presetMaxLongSidePx`/
+     * `presetVideoBitrateBps` are always the selected preset's own nominal values, independent
+     * of any override -- the reference SizeGuard's bitrate-scaling formula divides by.
      */
-    private fun resolveTarget(
-        inputInfo: MediaInfoMessage,
-        request: CompressRequestMessage,
-    ): ResolvedTarget {
-        val inputDisplayedWidthPx = inputInfo.widthPx.toInt()
-        val inputDisplayedHeightPx = inputInfo.heightPx.toInt()
-        val inputDisplayedLongSidePx = maxOf(inputDisplayedWidthPx, inputDisplayedHeightPx)
-        val requestLongSidePx = (request.maxLongSidePx ?: inputDisplayedLongSidePx.toLong()).toInt()
-        val effectiveLongSidePx = minOf(requestLongSidePx, inputDisplayedLongSidePx)
-        val ratio = effectiveLongSidePx.toDouble() / inputDisplayedLongSidePx.toDouble()
-
-        val targetWidthPx = floorToEven(inputDisplayedWidthPx * ratio)
-        val targetHeightPx = floorToEven(inputDisplayedHeightPx * ratio)
-
-        val inputFpsRounded =
-            inputInfo.frameRateFps?.let { Math.round(it).toInt() } ?: request.maxFps.toInt()
-        val effectiveFps = minOf(request.maxFps.toInt(), inputFpsRounded)
-
-        return ResolvedTarget(
-            targetWidthPx = targetWidthPx,
-            targetHeightPx = targetHeightPx,
-            effectiveFps = effectiveFps,
+    private fun buildSizeGuardOptions(request: CompressRequestMessage): SizeGuard.Options =
+        SizeGuard.Options(
+            maxLongSidePx = request.maxLongSidePx,
+            videoBitrateBps = request.videoBitrateBps,
+            targetSizeMb = request.targetSizeMb,
+            presetMaxLongSidePx = request.presetMaxLongSidePx,
+            presetVideoBitrateBps = request.presetVideoBitrateBps,
+            maxFps = request.maxFps,
+            audioStripped = request.audioMode == AudioModeMessage.STRIP,
+            requestedAudioBitrateBps = request.audioBitrateBps,
+            trimStartMs = request.trimStartMs,
+            trimEndMs = request.trimEndMs,
         )
-    }
-
-    private fun floorToEven(valuePx: Double): Int {
-        val floored = floor(valuePx).toInt()
-        return if (floored % 2 != 0) floored - 1 else floored
-    }
 
     /**
      * Maps [ExportException.errorCode] to a [CompressVideoError] reason per the table in

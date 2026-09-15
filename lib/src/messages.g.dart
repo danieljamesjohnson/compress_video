@@ -257,6 +257,8 @@ class CompressRequestMessage {
     this.maxLongSidePx,
     this.videoBitrateBps,
     this.targetSizeMb,
+    required this.presetMaxLongSidePx,
+    required this.presetVideoBitrateBps,
     required this.maxFps,
     required this.audioMode,
     this.audioBitrateBps,
@@ -268,17 +270,33 @@ class CompressRequestMessage {
     required this.hdrMode,
   });
 
-  /// Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
-  /// (the preset's own value is already resolved into this field by the time it crosses the
-  /// channel, so `null` here means "use the input's own long side").
+  /// Explicit cap on the output's longer displayed side, in pixels, or `null` when the caller
+  /// did not set `CompressOptions.maxLongSidePx` -- in which case `SizeGuard` falls back to
+  /// [presetMaxLongSidePx]. Never the preset's own value pre-resolved into this field (that
+  /// was 02-02's tracer-only shape); this field is `null` unless the caller explicitly set it,
+  /// which is what lets the native side tell "explicit override" apart from "use the preset".
   int? maxLongSidePx;
 
-  /// Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
-  /// no explicit bitrate.
+  /// Explicit target video bitrate, in bits per second, or `null` when the caller did not set
+  /// `CompressOptions.videoBitrateBps` -- in which case `SizeGuard` resolves it from
+  /// [targetSizeMb] if set, else scales [presetVideoBitrateBps] by the actual output
+  /// resolution and frame rate (SizeGuard.kt rule 6; this is the fix for the incumbent's
+  /// fixed-bitrate-regardless-of-resolution defect, PITFALLS.md row 13).
   int? videoBitrateBps;
 
   /// Target output file size, in megabytes, or `null` when no target size was requested.
   double? targetSizeMb;
+
+  /// The selected `CompressPreset`'s own nominal long-side cap, in pixels, always sent
+  /// regardless of any [maxLongSidePx] override -- the reference value SizeGuard's bitrate
+  /// scaling formula divides by. The preset enum itself never crosses the channel (02-02
+  /// decision, unchanged); only its two resolved numbers do.
+  int presetMaxLongSidePx;
+
+  /// The selected `CompressPreset`'s own nominal video bitrate, in bits per second, always
+  /// sent regardless of any [videoBitrateBps] override -- the reference value SizeGuard scales
+  /// when neither an explicit bitrate nor a [targetSizeMb] was requested.
+  int presetVideoBitrateBps;
 
   /// Cap on the output's frame rate, in frames per second. Never upscales the input's own
   /// frame rate — the effective cap is `min(maxFps, input fps)`.
@@ -320,6 +338,8 @@ class CompressRequestMessage {
       maxLongSidePx,
       videoBitrateBps,
       targetSizeMb,
+      presetMaxLongSidePx,
+      presetVideoBitrateBps,
       maxFps,
       audioMode,
       audioBitrateBps,
@@ -342,15 +362,17 @@ class CompressRequestMessage {
       maxLongSidePx: result[0] as int?,
       videoBitrateBps: result[1] as int?,
       targetSizeMb: result[2] as double?,
-      maxFps: result[3]! as int,
-      audioMode: result[4]! as AudioModeMessage,
-      audioBitrateBps: result[5] as int?,
-      audioChannels: result[6] as int?,
-      trimStartMs: result[7] as int?,
-      trimEndMs: result[8] as int?,
-      outputPath: result[9] as String?,
-      videoCodec: result[10]! as String,
-      hdrMode: result[11]! as String,
+      presetMaxLongSidePx: result[3]! as int,
+      presetVideoBitrateBps: result[4]! as int,
+      maxFps: result[5]! as int,
+      audioMode: result[6]! as AudioModeMessage,
+      audioBitrateBps: result[7] as int?,
+      audioChannels: result[8] as int?,
+      trimStartMs: result[9] as int?,
+      trimEndMs: result[10] as int?,
+      outputPath: result[11] as String?,
+      videoCodec: result[12]! as String,
+      hdrMode: result[13]! as String,
     );
   }
 
@@ -366,6 +388,8 @@ class CompressRequestMessage {
     return _deepEquals(maxLongSidePx, other.maxLongSidePx) &&
         _deepEquals(videoBitrateBps, other.videoBitrateBps) &&
         _deepEquals(targetSizeMb, other.targetSizeMb) &&
+        _deepEquals(presetMaxLongSidePx, other.presetMaxLongSidePx) &&
+        _deepEquals(presetVideoBitrateBps, other.presetVideoBitrateBps) &&
         _deepEquals(maxFps, other.maxFps) &&
         _deepEquals(audioMode, other.audioMode) &&
         _deepEquals(audioBitrateBps, other.audioBitrateBps) &&
@@ -383,7 +407,7 @@ class CompressRequestMessage {
 
   @override
   String toString() {
-    return 'CompressRequestMessage(maxLongSidePx: $maxLongSidePx, videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, maxFps: $maxFps, audioMode: $audioMode, audioBitrateBps: $audioBitrateBps, audioChannels: $audioChannels, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, outputPath: $outputPath, videoCodec: $videoCodec, hdrMode: $hdrMode)';
+    return 'CompressRequestMessage(maxLongSidePx: $maxLongSidePx, videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, presetMaxLongSidePx: $presetMaxLongSidePx, presetVideoBitrateBps: $presetVideoBitrateBps, maxFps: $maxFps, audioMode: $audioMode, audioBitrateBps: $audioBitrateBps, audioChannels: $audioChannels, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, outputPath: $outputPath, videoCodec: $videoCodec, hdrMode: $hdrMode)';
   }
 }
 

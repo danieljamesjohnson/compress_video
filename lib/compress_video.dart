@@ -225,14 +225,6 @@ class CompressVideo {
     CompressOptions options,
   ) {
     final PresetSpec presetSpec = kPresetSpecs[options.preset]!;
-    final int resolvedMaxLongSidePx =
-        options.maxLongSidePx ?? presetSpec.maxLongSidePx;
-    // A `targetSizeMb` request resolves its own video bitrate natively; leaving this `null`
-    // here (rather than the preset's value) is what lets the native side tell "no explicit
-    // bitrate was requested" apart from "800000 bps was requested".
-    final int? resolvedVideoBitrateBps =
-        options.videoBitrateBps ??
-        (options.targetSizeMb != null ? null : presetSpec.videoBitrateBps);
 
     final AudioOptions audio = options.audio;
     int? audioBitrateBps;
@@ -243,9 +235,15 @@ class CompressVideo {
     }
 
     return messages.CompressRequestMessage(
-      maxLongSidePx: resolvedMaxLongSidePx,
-      videoBitrateBps: resolvedVideoBitrateBps,
+      // Explicit-override-or-null, unlike 02-02's tracer-only shape: `SizeGuard` (native)
+      // needs to tell "the caller set this" apart from "resolve it from the preset", which a
+      // pre-flattened value could not express. See `presetMaxLongSidePx`/
+      // `presetVideoBitrateBps` below for the preset's own reference values.
+      maxLongSidePx: options.maxLongSidePx,
+      videoBitrateBps: options.videoBitrateBps,
       targetSizeMb: options.targetSizeMb,
+      presetMaxLongSidePx: presetSpec.maxLongSidePx,
+      presetVideoBitrateBps: presetSpec.videoBitrateBps,
       maxFps: options.maxFps,
       audioMode: switch (audio.mode) {
         AudioMode.passthrough => messages.AudioModeMessage.passthrough,

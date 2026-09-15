@@ -342,18 +342,36 @@ data class MediaInfoMessage (
  */
 data class CompressRequestMessage (
   /**
-   * Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
-   * (the preset's own value is already resolved into this field by the time it crosses the
-   * channel, so `null` here means "use the input's own long side").
+   * Explicit cap on the output's longer displayed side, in pixels, or `null` when the caller
+   * did not set `CompressOptions.maxLongSidePx` -- in which case `SizeGuard` falls back to
+   * [presetMaxLongSidePx]. Never the preset's own value pre-resolved into this field (that
+   * was 02-02's tracer-only shape); this field is `null` unless the caller explicitly set it,
+   * which is what lets the native side tell "explicit override" apart from "use the preset".
    */
   val maxLongSidePx: Long? = null,
   /**
-   * Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
-   * no explicit bitrate.
+   * Explicit target video bitrate, in bits per second, or `null` when the caller did not set
+   * `CompressOptions.videoBitrateBps` -- in which case `SizeGuard` resolves it from
+   * [targetSizeMb] if set, else scales [presetVideoBitrateBps] by the actual output
+   * resolution and frame rate (SizeGuard.kt rule 6; this is the fix for the incumbent's
+   * fixed-bitrate-regardless-of-resolution defect, PITFALLS.md row 13).
    */
   val videoBitrateBps: Long? = null,
   /** Target output file size, in megabytes, or `null` when no target size was requested. */
   val targetSizeMb: Double? = null,
+  /**
+   * The selected `CompressPreset`'s own nominal long-side cap, in pixels, always sent
+   * regardless of any [maxLongSidePx] override -- the reference value SizeGuard's bitrate
+   * scaling formula divides by. The preset enum itself never crosses the channel (02-02
+   * decision, unchanged); only its two resolved numbers do.
+   */
+  val presetMaxLongSidePx: Long,
+  /**
+   * The selected `CompressPreset`'s own nominal video bitrate, in bits per second, always
+   * sent regardless of any [videoBitrateBps] override -- the reference value SizeGuard scales
+   * when neither an explicit bitrate nor a [targetSizeMb] was requested.
+   */
+  val presetVideoBitrateBps: Long,
   /**
    * Cap on the output's frame rate, in frames per second. Never upscales the input's own
    * frame rate — the effective cap is `min(maxFps, input fps)`.
@@ -403,16 +421,18 @@ data class CompressRequestMessage (
       val maxLongSidePx = pigeonVar_list[0] as Long?
       val videoBitrateBps = pigeonVar_list[1] as Long?
       val targetSizeMb = pigeonVar_list[2] as Double?
-      val maxFps = pigeonVar_list[3] as Long
-      val audioMode = pigeonVar_list[4] as AudioModeMessage
-      val audioBitrateBps = pigeonVar_list[5] as Long?
-      val audioChannels = pigeonVar_list[6] as Long?
-      val trimStartMs = pigeonVar_list[7] as Long?
-      val trimEndMs = pigeonVar_list[8] as Long?
-      val outputPath = pigeonVar_list[9] as String?
-      val videoCodec = pigeonVar_list[10] as String
-      val hdrMode = pigeonVar_list[11] as String
-      return CompressRequestMessage(maxLongSidePx, videoBitrateBps, targetSizeMb, maxFps, audioMode, audioBitrateBps, audioChannels, trimStartMs, trimEndMs, outputPath, videoCodec, hdrMode)
+      val presetMaxLongSidePx = pigeonVar_list[3] as Long
+      val presetVideoBitrateBps = pigeonVar_list[4] as Long
+      val maxFps = pigeonVar_list[5] as Long
+      val audioMode = pigeonVar_list[6] as AudioModeMessage
+      val audioBitrateBps = pigeonVar_list[7] as Long?
+      val audioChannels = pigeonVar_list[8] as Long?
+      val trimStartMs = pigeonVar_list[9] as Long?
+      val trimEndMs = pigeonVar_list[10] as Long?
+      val outputPath = pigeonVar_list[11] as String?
+      val videoCodec = pigeonVar_list[12] as String
+      val hdrMode = pigeonVar_list[13] as String
+      return CompressRequestMessage(maxLongSidePx, videoBitrateBps, targetSizeMb, presetMaxLongSidePx, presetVideoBitrateBps, maxFps, audioMode, audioBitrateBps, audioChannels, trimStartMs, trimEndMs, outputPath, videoCodec, hdrMode)
     }
   }
   fun toList(): List<Any?> {
@@ -420,6 +440,8 @@ data class CompressRequestMessage (
       maxLongSidePx,
       videoBitrateBps,
       targetSizeMb,
+      presetMaxLongSidePx,
+      presetVideoBitrateBps,
       maxFps,
       audioMode,
       audioBitrateBps,
@@ -439,7 +461,7 @@ data class CompressRequestMessage (
       return true
     }
     val other = other as CompressRequestMessage
-    return MessagesPigeonUtils.deepEquals(this.maxLongSidePx, other.maxLongSidePx) && MessagesPigeonUtils.deepEquals(this.videoBitrateBps, other.videoBitrateBps) && MessagesPigeonUtils.deepEquals(this.targetSizeMb, other.targetSizeMb) && MessagesPigeonUtils.deepEquals(this.maxFps, other.maxFps) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.audioBitrateBps, other.audioBitrateBps) && MessagesPigeonUtils.deepEquals(this.audioChannels, other.audioChannels) && MessagesPigeonUtils.deepEquals(this.trimStartMs, other.trimStartMs) && MessagesPigeonUtils.deepEquals(this.trimEndMs, other.trimEndMs) && MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.hdrMode, other.hdrMode)
+    return MessagesPigeonUtils.deepEquals(this.maxLongSidePx, other.maxLongSidePx) && MessagesPigeonUtils.deepEquals(this.videoBitrateBps, other.videoBitrateBps) && MessagesPigeonUtils.deepEquals(this.targetSizeMb, other.targetSizeMb) && MessagesPigeonUtils.deepEquals(this.presetMaxLongSidePx, other.presetMaxLongSidePx) && MessagesPigeonUtils.deepEquals(this.presetVideoBitrateBps, other.presetVideoBitrateBps) && MessagesPigeonUtils.deepEquals(this.maxFps, other.maxFps) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.audioBitrateBps, other.audioBitrateBps) && MessagesPigeonUtils.deepEquals(this.audioChannels, other.audioChannels) && MessagesPigeonUtils.deepEquals(this.trimStartMs, other.trimStartMs) && MessagesPigeonUtils.deepEquals(this.trimEndMs, other.trimEndMs) && MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.hdrMode, other.hdrMode)
   }
 
   override fun hashCode(): Int {
@@ -447,6 +469,8 @@ data class CompressRequestMessage (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.maxLongSidePx)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.videoBitrateBps)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.targetSizeMb)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.presetMaxLongSidePx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.presetVideoBitrateBps)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.maxFps)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.audioMode)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.audioBitrateBps)
@@ -459,7 +483,7 @@ data class CompressRequestMessage (
     return result
   }
   override fun toString(): String {
-    return "CompressRequestMessage(maxLongSidePx=$maxLongSidePx, videoBitrateBps=$videoBitrateBps, targetSizeMb=$targetSizeMb, maxFps=$maxFps, audioMode=$audioMode, audioBitrateBps=$audioBitrateBps, audioChannels=$audioChannels, trimStartMs=$trimStartMs, trimEndMs=$trimEndMs, outputPath=$outputPath, videoCodec=$videoCodec, hdrMode=$hdrMode)"
+    return "CompressRequestMessage(maxLongSidePx=$maxLongSidePx, videoBitrateBps=$videoBitrateBps, targetSizeMb=$targetSizeMb, presetMaxLongSidePx=$presetMaxLongSidePx, presetVideoBitrateBps=$presetVideoBitrateBps, maxFps=$maxFps, audioMode=$audioMode, audioBitrateBps=$audioBitrateBps, audioChannels=$audioChannels, trimStartMs=$trimStartMs, trimEndMs=$trimEndMs, outputPath=$outputPath, videoCodec=$videoCodec, hdrMode=$hdrMode)"
   }
 }
 
