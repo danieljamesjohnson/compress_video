@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.planning/**'
+      - '**/*.md'
+      - 'QUESTIONS.md'
+      - '.mission-control/**'
+  pull_request:
+    paths-ignore:
+      - '.planning/**'
+      - '**/*.md'
+      - 'QUESTIONS.md'
+      - '.mission-control/**'
+  workflow_dispatch:
+
+# The repository's default Actions workflow token permission is already read-only
+# (set in plan 01-01); this makes it explicit at the workflow level too.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decides whether the 10x-billed macOS job needs to run at all. A push/PR that only
+  # touches Android or Dart-only paths skips it entirely.
+  changes:
+    name: Detect Apple-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      apple: ${{ steps.filter.outputs.apple }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether Apple-relevant paths changed
+        id: filter
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no meaningful push range to diff against; always run
+          # the expensive job rather than guess.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+
+          # A first push on a new branch, or a force-push, reports an all-zero `before`
+          # SHA; an unresolvable base is also possible after history rewrites. Both cases
+          # deliberately fail OPEN (run the Apple job) rather than silently skipping it -
+          # a broken base reference must never turn the Apple gate off.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --name-only "$BASE" "$HEAD" | grep -Eq '^(darwin/|pigeons/|lib/|example/|pubspec\.yaml$|\.github/workflows/ci\.yml$)'; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "apple=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Verify corpus has not drifted
+        run: bash corpus/verify_corpus.sh
+
+      - name: Verify example corpus mirror matches canonical corpus
+        run: |
+          bash corpus/sync_to_example.sh
+          git diff --exit-code example/assets/corpus
+
+      - name: Run Dart unit tests
+        run: flutter test
+
+      - name: Dry-run publish
+        run: dart pub publish --dry-run
+
+      - name: Build debug APK
+        working-directory: example
+        run: flutter build apk --debug
+
+  apple:
+    name: Apple
+    runs-on: macos-latest
+    needs: changes
+    if: needs.changes.outputs.apple == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS (CocoaPods)
+        working-directory: example
+        run: flutter build ios --simulator --no-codesign
+
+      - name: Resolve an available iOS simulator
+        id: ios_sim
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available --json \
+            | jq -r '
+                .devices
+                | to_entries
+                | map(select(.key | contains("iOS")))
+                | map(.value) | flatten
+                | map(select(.isAvailable))
+                | .[0].udid // empty
+              ')
+          if [ -z "$UDID" ]; then
+            echo "No available iOS simulator found on this runner image" >&2
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: XCTest - iOS Runner
+        working-directory: example/ios
+        run: |
+          xcodebuild test \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -destination "platform=iOS Simulator,id=${{ steps.ios_sim.outputs.udid }}"
+
+      - name: Build macOS
+        working-directory: example
+        run: flutter build macos --debug
+
+      - name: XCTest - macOS Runner
+        working-directory: example/macos
+        run: |
+          xcodebuild test \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -destination 'platform=macOS'
+
+      - name: Enable Swift Package Manager
+        run: flutter config --enable-swift-package-manager
+
+      - name: Clean example (SPM proof)
+        working-directory: example
+        run: flutter clean
+
+      - name: Build iOS via Swift Package Manager
+        working-directory: example
+        run: flutter build ios --simulator --no-codesign
