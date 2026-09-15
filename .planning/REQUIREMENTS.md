@@ -16,7 +16,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **CORE-05**: Output is never larger than the input: when the encode would be bigger, the plugin returns the original bytes (copied to the output path) and the result says so
 - [ ] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
 - [ ] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
-- [ ] **CORE-08**: Caller can cap the output frame rate (default cap 30 fps); resolution and frame rate are never upscaled
+- [x] **CORE-08**: Caller can cap the output frame rate (default cap 30 fps); resolution and frame rate are never upscaled
 - [ ] **CORE-09**: Caller can choose the output directory and file name; the default is a unique name in the app cache directory, and a `clearCache()` removes only files the plugin created
 
 ### Orientation, codecs and HDR
@@ -107,7 +107,7 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | CORE-05 | Phase 2 | Pending |
 | CORE-06 | Phase 2 | Pending |
 | CORE-07 | Phase 3 | Pending |
-| CORE-08 | Phase 2 | Pending |
+| CORE-08 | Phase 2 | Complete |
 | CORE-09 | Phase 2 | Pending |
 | ORNT-01 | Phase 2 | Pending |
 | CDEC-01 | Phase 4 | Pending |
@@ -135,6 +135,7 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | RELS-03 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 33 total (this file first said 32, but it lists 33 IDs)
 - Mapped to phases: 33
 - Unmapped: 0 ✓

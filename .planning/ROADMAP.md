@@ -102,7 +102,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-03-PLAN.md — `SizeGuard`: presets, explicit max-long-side / bitrate / target-MB targets, the 30 fps cap, even dimensions and the never-upscale rule
+- [x] 02-03-PLAN.md — `SizeGuard`: presets, explicit max-long-side / bitrate / target-MB targets, the 30 fps cap, even dimensions and the never-upscale rule
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

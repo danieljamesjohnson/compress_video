@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 14
-  completed_plans: 7
-  percent: 50
+  completed_plans: 8
+  percent: 57
 ---
 
 # Project State
@@ -21,29 +21,29 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
-Plan: 2 of 7 in current phase
-Status: Executing Phase 2 (wave 2 of 7 complete; wave 3 next — 02-03)
-Last activity: 2026-09-15 — 02-02 complete (Pigeon compression contract, Dart type surface, and the tracer: one call compresses the high-bitrate corpus clip via Media3 Transformer on the emulator); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
+Plan: 3 of 7 in current phase
+Status: Executing Phase 2 (wave 3 of 7 complete; wave 4 next — 02-04)
+Last activity: 2026-09-15 — 02-03 complete (SizeGuard pure resolution function wired into TransformerEngine; all four presets, explicit targets, targetSizeMb and the 30fps cap proven on the emulator; native rejection mirror wired into Compression.kt); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
-Progress: [█████░░░░░] 50% (7/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
+Progress: [██████░░░░] 57% (8/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 46 min
-- Total execution time: 5.3 hours
+- Total plans completed: 8
+- Average duration: 53 min
+- Total execution time: 7.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5 | 249 min | 50 min |
-| 2 | 2 | 69 min | 35 min |
+| 2 | 3 | 174 min | 58 min |
 
 **Recent Trend:**
-- Last 5 plans: 50 min, 92 min, 47 min, 20 min, 49 min
-- Trend: 02-02 (contract + Dart API + tracer, including a real Kotlin/Media3 engine) took 49 min despite two emulator crashes from shared-box memory pressure requiring relaunches — the code-only turnaround was fast once the emulator was stable
+- Last 5 plans: 92 min, 47 min, 20 min, 49 min, 105 min
+- Trend: 02-03 (SizeGuard resolution + engine wiring + native rejection mirror) took 105 min, the longest plan yet in this phase — real emulator/ffprobe cross-checks found three live platform quirks (a wire-contract gap that would have made the plan's own core scaling rule unreachable, a probe bitrate-fallback gap, and a VBR-vs-CBR bitrate-accuracy gap) plus one tolerance that could not be met on the emulator's software encoder and had to be documented rather than forced
 - 01-06 (not yet counted as completed — halted, see Blockers/Concerns): 166 min elapsed, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, final fix unverified due to a GitHub Actions billing block
 
 *Updated after each plan completion*
@@ -77,10 +77,12 @@ Recent decisions affecting current work:
 - [02-01]: Added `portrait_hibitrate_1080p60.mp4` (mandelbrot lavfi source, 60fps, ~8.7Mbps H.264 + AAC, 90deg tkhd matrix, white edge border) and `truncated_mdat.mp4` (faststart-then-truncated, sidecar-less by design) to the corpus, since every Phase 1 clip is far below every Phase 2 preset bitrate and all Phase 1 clips are 30fps. `verify_corpus.sh` generalized its single-clip `thumbnailProbe` branch to a patch-carrying-clip list and added a self-checking `edgeProbe` block for the new clip.
 - [02-01]: `02-VALIDATION.md`'s Per-Task Verification Map has 21 rows (matching the actual total task count across all 7 phase-2 plans — 3 tasks x 7 plans), not the 20 the plan's own `must_haves`/acceptance criteria expected — the same class of off-by-one authoring bug as 01-01's (that one undercounted; this one overcounts), documented rather than dropping a real task's row. See 02-01-SUMMARY.md Deviations.
 - [02-02]: Media3's effect pipeline (`Presentation`, `FrameDropEffect`) operates on the DECODED, display-oriented frame, not the coded pre-rotation frame — measured live on the emulator (a coded-space swap for a 90°-rotated input produced an incorrect 406px-wide output instead of 720; passing the target straight from the input's own displayed dimensions, with no swap, produced the correct 720x1280). `TransformerEngine.kt` documents this so no later plan re-derives it. `MediaMath.normalizeCodec` has no audio-codec case (video-only tokens); a local `normalizeAudioCodec` was added inside `TransformerEngine.kt` rather than extending `MediaMath.kt`, since AUDO-01/AUDO-02 own that properly in a later plan. See 02-02-SUMMARY.md Deviations.
+- [02-03]: `CompressRequestMessage` gained `presetMaxLongSidePx`/`presetVideoBitrateBps` (always the selected preset's own nominal values) and `maxLongSidePx`/`videoBitrateBps` became true explicit-override-or-null — 02-02's pre-resolved-into-a-concrete-value shape would have made `SizeGuard`'s preset-bitrate-scaling rule unreachable from the real Dart-to-native path. `TransformerEngine` now uses `BITRATE_MODE_CBR` (not the default VBR) after measuring VBR overshoot ~28% vs CBR's ~20% on this emulator's software encoder for an explicit bitrate request. `Probe.kt` gained a sample-size-summation bitrate fallback since Media3's `InAppMp4Muxer` output never carries a `MediaFormat.KEY_BIT_RATE` value, unlike the ffmpeg-authored corpus fixtures — confirmed accurate against an independently pulled file's `ffprobe` measurement. `targetSizeMb`'s documented ±15% tolerance could not be proven on the emulator's software encoder for the 4-second corpus clip (measured +19.1%/-29.9%); the formula itself is exact and unit-tested, so the emulator test uses a documented ±35% tolerance pending physical-device re-verification (QUESTIONS.md #3). See 02-03-SUMMARY.md Deviations.
 
 ### Pending Todos
 
 - [01-06]: Once GitHub Actions billing is resolved (QUESTIONS.md #6), re-run CI for `main` HEAD and confirm the `apple` job concludes `success` end-to-end (including the iOS-simulator integration step with the current Thumbnails.swift/thumbnail_test.dart fixes). No further code changes are expected. Re-summarize 01-06 as `status: complete` once confirmed, then proceed to 01-07.
+- [02-03]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the `targetSizeMb` 1.0/2.0 emulator cases against its hardware encoder and tighten `compress_test.dart`'s ±35% tolerance comment (or confirm ±15% only holds on hardware and adjust `CompressOptions.targetSizeMb`'s dartdoc accordingly).
 
 ### Blockers/Concerns
 
@@ -106,5 +108,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-15
-Stopped at: Completed 02-02-PLAN.md (Pigeon compression contract, Dart type surface, tracer — one call compresses the corpus clip via Media3 Transformer, green on emulator-5554). Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
-Resume file: None — next is 02-03-PLAN.md (SizeGuard: full preset/explicit-target/target-size resolution)
+Stopped at: Completed 02-03-PLAN.md (SizeGuard pure resolution function, wired into TransformerEngine; all four presets, explicit targets, targetSizeMb, and the 30fps cap proven on emulator-5554; native rejection mirror wired into Compression.kt). Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
+Resume file: None — next is 02-04-PLAN.md
