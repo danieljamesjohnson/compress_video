@@ -90,4 +90,29 @@ object MediaMath {
         positionMs: Long,
         durationMs: Long,
     ): Long = if (positionMs > durationMs) durationMs else positionMs
+
+    /**
+     * Rounds `valuePx` down to the nearest even integer, then floors the result at `16` --
+     * the emulator's only H.264 encoder (`c2.android.avc.encoder`) advertises `alignment =
+     * "2x2"` (both dimensions must be even) and `size-range = "16x16-2048x2048"`
+     * (02-RESEARCH.md Pitfall 3, live-measured this phase). `[SizeGuard]` uses this for both
+     * output dimensions so an odd or sub-minimum target is never handed to the encoder.
+     *
+     * `16` is itself even, so flooring after the even-rounding step cannot reintroduce an odd
+     * result.
+     */
+    fun floorToEvenMin16(valuePx: Double): Int {
+        val floored = floor(valuePx).toInt()
+        val evened = if (floored % 2 != 0) floored - 1 else floored
+        return maxOf(evened, 16)
+    }
+
+    /**
+     * Rounds a frame rate half-up to the nearest integer: `.5` rounds away from zero (`29.5`
+     * -> `30`), matching [roundHalfUpMs]'s own rule but returning an `Int` frame count rather
+     * than a `Long` millisecond value. Used to compare a fractional source frame rate (for
+     * example NTSC's `29.97`) against an integer `maxFps` cap without a source at `29.97`
+     * being incorrectly treated as below a `30` cap.
+     */
+    fun roundFpsHalfUp(fps: Double): Int = floor(fps + 0.5).toInt()
 }

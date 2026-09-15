@@ -114,4 +114,39 @@ internal class MediaMathTest {
     fun clampPositionMs_aboveDuration_clampsDownToDuration() {
         assertEquals(4000L, MediaMath.clampPositionMs(4001L, 4000L))
     }
+
+    @Test
+    fun floorToEvenMin16_exactlyEvenInput_passesThroughUnchanged() {
+        assertEquals(720, MediaMath.floorToEvenMin16(720.0))
+    }
+
+    @Test
+    fun floorToEvenMin16_oddInput_roundsDownToTheEvenBelow() {
+        assertEquals(718, MediaMath.floorToEvenMin16(719.9))
+        // An exact odd integer must also round down, not just a fractional odd-adjacent value.
+        assertEquals(718, MediaMath.floorToEvenMin16(719.0))
+    }
+
+    @Test
+    fun floorToEvenMin16_belowTheFloor_clampsUpTo16() {
+        assertEquals(16, MediaMath.floorToEvenMin16(10.0))
+        // An odd value below the floor must still land on 16, not on 15 or 14.
+        assertEquals(16, MediaMath.floorToEvenMin16(15.0))
+    }
+
+    @Test
+    fun roundFpsHalfUp_belowTheHalfBoundary_roundsDown() {
+        assertEquals(29, MediaMath.roundFpsHalfUp(29.4))
+    }
+
+    @Test
+    fun roundFpsHalfUp_exactlyAtTheHalfBoundary_roundsUp() {
+        assertEquals(30, MediaMath.roundFpsHalfUp(29.5))
+    }
+
+    @Test
+    fun roundFpsHalfUp_ntscFrameRate_roundsUpTo30() {
+        // 29.97 fps (NTSC) must count as 30 when compared against an integer maxFps cap.
+        assertEquals(30, MediaMath.roundFpsHalfUp(29.97))
+    }
 }
