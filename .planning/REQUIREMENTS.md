@@ -94,15 +94,51 @@ Explicitly excluded. Documented to prevent scope creep.
 
 Which phases cover which requirements. Updated during roadmap creation.
 
+Behaviour requirements with no platform named are mapped to Phase 2 (Android), where they are
+first delivered. Phase 3 (Apple) must pass the same corpus tests as a parity gate, and it owns
+the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | | |
+| CORE-01 | Phase 3 | Pending |
+| CORE-02 | Phase 2 | Pending |
+| CORE-03 | Phase 2 | Pending |
+| CORE-04 | Phase 2 | Pending |
+| CORE-05 | Phase 2 | Pending |
+| CORE-06 | Phase 2 | Pending |
+| CORE-07 | Phase 3 | Pending |
+| CORE-08 | Phase 2 | Pending |
+| CORE-09 | Phase 2 | Pending |
+| ORNT-01 | Phase 2 | Pending |
+| CDEC-01 | Phase 4 | Pending |
+| CDEC-02 | Phase 4 | Pending |
+| CDEC-03 | Phase 4 | Pending |
+| AUDO-01 | Phase 2 | Pending |
+| AUDO-02 | Phase 2 | Pending |
+| AUDO-03 | Phase 4 | Pending |
+| JOBS-01 | Phase 2 | Pending |
+| JOBS-02 | Phase 2 | Pending |
+| JOBS-03 | Phase 5 | Pending |
+| JOBS-04 | Phase 5 | Pending |
+| JOBS-05 | Phase 5 | Pending |
+| INFO-01 | Phase 1 | Pending |
+| INFO-02 | Phase 1 | Pending |
+| INFO-03 | Phase 2 | Pending |
+| BULD-01 | Phase 2 | Pending |
+| BULD-02 | Phase 3 | Pending |
+| BULD-03 | Phase 1 | Pending |
+| BULD-04 | Phase 3 | Pending |
+| BULD-05 | Phase 1 | Pending |
+| TEST-01 | Phase 4 | Pending |
+| RELS-01 | Phase 6 | Pending |
+| RELS-02 | Phase 6 | Pending |
+| RELS-03 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 0
-- Unmapped: 32 ⚠️
+- v1 requirements: 33 total (this file first said 32, but it lists 33 IDs)
+- Mapped to phases: 33
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-15*
-*Last updated: 2026-09-15 after initial definition*
+*Last updated: 2026-09-15 after roadmap creation (traceability filled)*
