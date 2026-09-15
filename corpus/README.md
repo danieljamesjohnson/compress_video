@@ -1,9 +1,10 @@
 # Corpus
 
-Three ffmpeg-generated clips that mirror real phone video structurally, plus a machine-derived
-`*.expected.json` sidecar per clip. The same sidecar is asserted against by one integration test
-file run on both the Android emulator and the iOS simulator, so "media info is correct" is a
-single cross-platform assertion instead of an opinion re-derived twice.
+Five ffmpeg-generated clips that mirror real phone video structurally (four healthy, one
+deliberately damaged), plus a machine-derived `*.expected.json` sidecar per healthy clip. The
+same sidecar is asserted against by one integration test file run on both the Android emulator
+and the iOS simulator, so "media info is correct" is a single cross-platform assertion instead
+of an opinion re-derived twice.
 
 Real phone clips (iPhone Dolby Vision, Pixel HLG) are requested from Dan in `QUESTIONS.md` #4 and
 join this corpus in Phase 4 — these synthetic clips cover Phase 1's rotation/unit/null bug classes
@@ -14,13 +15,15 @@ in the meantime, and the generation script stays committed so they are always re
 | File | What it is |
 |---|---|
 | `patch_rotation.py` | Direct `tkhd` display-matrix patcher. Stdlib-only (`struct`). |
-| `generate_corpus.sh` | Reproducible ffmpeg generation of the three clips; self-asserts every structural property before declaring success. |
+| `generate_corpus.sh` | Reproducible ffmpeg generation of all five clips; self-asserts every structural property before declaring success. |
 | `verify_corpus.sh` | The single producer of `*.expected.json`. `--write` regenerates the sidecars; default mode diffs derived content against the committed sidecars and fails on any drift. |
 | `sync_to_example.sh` | Mirrors clips + sidecars into `example/assets/corpus/`, verified by `sha256sum`. Fails loudly if `example/` doesn't exist yet. |
 | `portrait_rot90.mp4` | 1920x1080 coded, H.264 + AAC stereo, ~4s, 90° clockwise `tkhd` display matrix (phone-portrait structure), burnt-in ms timecode, 8-bucket colour-patch schedule for the thumbnail probe. |
 | `small_480p.mp4` | 854x480, H.264 + AAC, low bitrate, no display matrix. |
 | `noaudio_720p.mp4` | 1280x720, H.264, no audio stream, no display matrix. |
-| `*.expected.json` | Ground-truth sidecar per clip, in platform-facing units (see below). |
+| `portrait_hibitrate_1080p60.mp4` | 1920x1080 coded, 60fps, high-entropy (`mandelbrot` source) H.264 at ~8.7Mbps + AAC stereo, ~4s, 90° clockwise `tkhd` display matrix, same colour-patch schedule as `portrait_rot90.mp4` plus a 24px pure-white border. Proves genuine compression, the 30fps frame-rate cap, upright output and no letterboxing all in one fixture (Phase 2). |
+| `truncated_mdat.mp4` | 854x480, H.264 + AAC, faststart-encoded then truncated to 60% of its byte length. `moov` (and duration) survive; the media data does not — drives a real platform-codec decode failure (Phase 2). |
+| `*.expected.json` | Ground-truth sidecar per healthy clip, in platform-facing units (see below). `truncated_mdat.mp4` has none — see below. |
 
 ## Regenerating
 
@@ -91,3 +94,43 @@ thumbnails instead of dimensions.
 `verify_corpus.sh` asserts the probe actually distinguishes 1000ms from 1500ms (an adjacent
 colour bucket) by more than `rgbTolerance` in at least one channel — a probe that can't tell two
 buckets apart would pass every implementation, including a broken one.
+
+## Why `portrait_hibitrate_1080p60.mp4` exists
+
+Every Phase 1 corpus clip was measured live and found far below every preset bitrate Phase 2
+defines: `portrait_rot90.mp4` is ~193 kbps for a 1080x1920 displayed frame, `small_480p.mp4` is a
+hardcoded 300 kbps, `noaudio_720p.mp4` is ~76 kbps — and the lowest Phase 2 preset (p360) starts
+at 800 kbps. Run a "preset shrinks the file" test against those clips alone and it can only ever
+hit the never-larger (`usedOriginal: true`) path, never the real encode path — the opposite of
+what the test claims to prove. They are also all 30fps, so a frame-rate cap would be silently
+untested.
+
+`portrait_hibitrate_1080p60.mp4` fixes both at once: a high-entropy `mandelbrot` lavfi source
+(the encoder can't cheat the bitrate on a static or low-detail image) encoded at 60fps and a
+target ~8 Mbps — its measured source bitrate lands around 8.7 Mbps, strictly above every preset
+bitrate this phase defines, so a preset encode of it can only get smaller by genuinely
+re-encoding. It carries the same 90° clockwise `tkhd` matrix and colour-patch schedule as
+`portrait_rot90.mp4`, so the existing rotation/thumbnail-probe contract applies to it unchanged.
+
+## White-border edge probe (no-letterbox check)
+
+`portrait_hibitrate_1080p60.mp4` is painted with a solid pure-white 24px border around the whole
+coded frame, drawn after the colour patch so nothing overwrites it. `verify_corpus.sh` derives an
+`edgeProbe` sidecar block by sampling four points, each inset 4px from the midpoint of one
+displayed edge, and asserts all four agree with each other and are distinguishable from black by
+more than `rgbTolerance`. A rotation-correct, non-letterboxed output should sample that same
+near-white colour at all four edge midpoints after a compress pass. A broken implementation that
+pads the output with black bars (e.g. mismatched aspect ratio handling, or a "safe area" crop
+that misses the true frame edges) would instead sample black or a mix of black and border colour
+at one or more of those points — which is exactly what `edgeProbe.rgbTolerance` is tight enough
+to catch.
+
+## `truncated_mdat.mp4` has no sidecar, on purpose
+
+`truncated_mdat.mp4` is deliberately structurally damaged (faststart-encoded, then truncated to
+60% of its byte length) so that its `moov` atom survives — ffprobe still reports a video stream
+and a duration for it — but its media data does not, so a decode of it reaches the platform codec
+and fails there. It is never fed to a "does the output match ground truth" sidecar assertion;
+`verify_corpus.sh` only asserts it still probes as a video file with a readable duration. Do not
+add a `.expected.json` for it — a sidecar implies "this clip's ground truth is derivable",
+which is exactly the property this fixture does not have.
