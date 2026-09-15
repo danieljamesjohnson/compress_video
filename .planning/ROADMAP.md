@@ -44,7 +44,17 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A missing or non-video file produces a typed error with a reason on every platform. It never produces `null` or a crash.
   4. Every quantity crossing the channel is a Pigeon-generated field whose unit is in its name and documented in the Dart API. No hand-written method-channel maps remain.
   5. A push to the repository triggers CI on a Linux runner (Android) and a macOS runner (iOS/macOS). CI builds the plugin and example, runs Dart and native unit tests, and goes red on any analyzer warning.
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Android toolchain and emulator on danserver, private GitHub repo, toolchain pins, API-coverage declaration, validation contract
+- [ ] 01-02-PLAN.md — Generated corpus: three phone-shaped clips with a real display matrix, ground-truth sidecars and a drift verifier
+- [ ] 01-03-PLAN.md — Plugin package scaffold, shared `darwin/` Apple tree, typed error taxonomy, CI on Linux and macOS
+- [ ] 01-04-PLAN.md — Pigeon contract and the end-to-end media-info tracer: Dart API to Kotlin to MediaMetadataRetriever, green on the emulator
+- [ ] 01-05-PLAN.md — Thumbnails on Android: upright bytes and unique files at an exact millisecond, with boundary and concurrency coverage
+- [ ] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner
+- [ ] 01-07-PLAN.md — Cross-platform parity gate, full pipeline green, phase sign-off
+
 **Research**: Needed. Check current AGP/Kotlin/Pigeon versions and the plugin template for SPM + CocoaPods. Work out how to install the Android SDK and emulator on headless Linux with an AMD GPU (KVM acceleration), and how to run emulators on GitHub Actions.
 **Notes**: Apple-side verification in this phase uses the GitHub Actions macOS runner, because SSH to the MacBook Air is blocked (QUESTIONS.md #1). Create the corpus directory with the first clips (portrait, already-small, no audio) here. Phase 4 expands it.
 
@@ -123,7 +133,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Contract, CI and Media Info | 0/TBD | Not started | - |
+| 1. Typed Contract, CI and Media Info | 0/7 | Not started | - |
 | 2. Android Compression on Media3 | 0/TBD | Not started | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
