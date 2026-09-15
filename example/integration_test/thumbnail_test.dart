@@ -233,7 +233,13 @@ void main() {
 
       final String resultPath = await compressVideo.getThumbnailFile(path);
 
-      expect(resultPath, contains('/cache/compress_video/'));
+      expect(
+        resultPath,
+        anyOf(
+          contains('/cache/compress_video/'), // Android's context.cacheDir
+          contains('/Caches/compress_video/'), // Apple's .cachesDirectory
+        ),
+      );
       expect(
         resultPath,
         isNot(startsWith(Directory.systemTemp.path)),

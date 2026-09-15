@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import Foundation
 import Security
@@ -153,8 +154,45 @@ final class Thumbnails: ThumbnailHostApi {
       generator.maximumSize = CGSize(width: targetSize.width, height: targetSize.height)
     }
 
-    let cgImage = try await copyCGImage(generator: generator, at: requestedTime)
-    return try encodeJpeg(cgImage, quality: quality)
+    let decodedImage = try await copyCGImage(generator: generator, at: requestedTime)
+    // AVAssetImageGenerator's `maximumSize` is a fit-within bounding box (scaled by whichever
+    // dimension is more constraining), not two independent exact output dimensions -- the same
+    // platform quirk 01-05-SUMMARY.md documented for Android's getScaledFrameAtTime (confirmed
+    // live: a maxDimensionPx=1919 request came back at height 1918, not 1919, because
+    // MediaMath.scaledSize's independently-rounded target box isn't perfectly proportional to
+    // the source's exact aspect ratio). Snap to the exact target unconditionally so the
+    // observable output matches MediaMath.scaledSize's pure-math contract exactly, regardless
+    // of platform decode-box rounding.
+    let exactlySizedImage = resizedIfNeeded(decodedImage, to: targetSize)
+    return try encodeJpeg(exactlySizedImage, quality: quality)
+  }
+
+  /// Resizes `cgImage` to exactly `targetSize` if it isn't already that size, drawing into a
+  /// fresh device-RGB bitmap context. Falls back to the original image (never crashes) if the
+  /// context cannot be created.
+  private func resizedIfNeeded(_ cgImage: CGImage, to targetSize: (width: Int, height: Int)) -> CGImage {
+    if cgImage.width == targetSize.width && cgImage.height == targetSize.height {
+      return cgImage
+    }
+    guard
+      let context = CGContext(
+        data: nil,
+        width: targetSize.width,
+        height: targetSize.height,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      )
+    else {
+      return cgImage
+    }
+    context.interpolationQuality = .high
+    context.draw(
+      cgImage,
+      in: CGRect(x: 0, y: 0, width: targetSize.width, height: targetSize.height)
+    )
+    return context.makeImage() ?? cgImage
   }
 
   /// Generates the image at `time` using the completion-handler generation API (works down to
