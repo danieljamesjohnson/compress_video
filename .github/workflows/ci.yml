@@ -151,8 +151,16 @@ jobs:
         # all installed. Remove large preinstalled toolchains this project never uses
         # (this plugin has no native .so/NDK code) to reclaim space, on top of shrinking
         # the requested partition size below.
+        #
+        # Deliberately NOT deleting $AGENT_TOOLSDIRECTORY (/opt/hostedtoolcache): the
+        # first attempt at this fix removed it here, which also deletes the Flutter SDK
+        # (subosito/flutter-action) and JDK (actions/setup-java) this same job already
+        # set up and still needs for every step after this one -- the very next run
+        # broke differently (sdkmanager's install calls silently no-opped and the
+        # emulator's own pre-launch "kill any stale instance" adb call became fatal).
+        # dotnet + the Android NDK alone are enough headroom for the ~2.9GB shortfall.
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/share/boost || true
           df -h /
 
       - name: Run emulator integration tests
