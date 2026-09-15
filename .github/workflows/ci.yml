@@ -121,6 +121,18 @@ jobs:
       - name: Run Dart unit tests
         run: flutter test
 
+      - name: Reset files Flutter's own tooling may have rewritten
+        # subosito/flutter-action tracks "stable", which moves forward independently of the
+        # Flutter version docs/TOOLCHAIN.md pins for local development. Newer Flutter tooling
+        # runs project migrators against older-shaped generated files (analysis_options.yaml,
+        # Xcode project files, Podfiles) the moment it touches them, rewriting already-committed
+        # files in the runner's working tree. That is harmless to every check above (they
+        # already ran against whatever the migrated content was) but makes `dart pub publish
+        # --dry-run` report a "checked-in files are modified in git" warning and exit non-zero.
+        # This is an ephemeral CI checkout, not a shared worktree, so resetting tracked files to
+        # HEAD here is safe and only affects this one validation step.
+        run: git checkout -- .
+
       - name: Dry-run publish
         run: dart pub publish --dry-run
 
@@ -145,6 +157,18 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      # Our plugin ships both a podspec and a Package.swift (sharedDarwinSource). Recent
+      # Flutter defaults to treating an all-SPM-capable plugin set as reason to prefer Swift
+      # Package Manager integration even when the app project still has CocoaPods integration
+      # (a committed Podfile) - flutter build then reports "All plugins found for ios are Swift
+      # Packages, but your project still has CocoaPods integration" and produces a
+      # "sandbox is not in sync with the Podfile.lock" Xcode error. Force SPM off explicitly so
+      # the CocoaPods-path builds below genuinely exercise CocoaPods, matching what the podspec
+      # and committed Podfiles are meant to prove; the dedicated SPM step further down flips
+      # this back on to prove that path separately.
+      - name: Force CocoaPods integration for the CocoaPods-path builds
+        run: flutter config --no-enable-swift-package-manager
 
       - name: Build iOS (CocoaPods)
         working-directory: example
