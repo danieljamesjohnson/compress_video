@@ -169,3 +169,11 @@ None - no external service configuration required.
 ---
 *Phase: 01-typed-contract-ci-and-media-info*
 *Completed: 2026-09-15*
+
+## Self-Check: PASSED
+
+- FOUND: corpus/patch_rotation.py, corpus/generate_corpus.sh, corpus/verify_corpus.sh, corpus/sync_to_example.sh, corpus/README.md
+- FOUND: corpus/portrait_rot90.mp4, corpus/small_480p.mp4, corpus/noaudio_720p.mp4
+- FOUND: corpus/portrait_rot90.expected.json, corpus/small_480p.expected.json, corpus/noaudio_720p.expected.json
+- FOUND commits: 4c55b35, 21238e7, 9d50987, 1e8272a
+- Final re-run of `generate_corpus.sh` + `verify_corpus.sh` + all plan-level acceptance criteria after all edits: all pass, `git status --short` clean (no drift).
