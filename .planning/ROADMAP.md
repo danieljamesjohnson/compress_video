@@ -62,7 +62,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-04-PLAN.md — Pigeon contract and the end-to-end media-info tracer: Dart API to Kotlin to MediaMetadataRetriever, green on the emulator
+- [x] 01-04-PLAN.md — Pigeon contract and the end-to-end media-info tracer: Dart API to Kotlin to MediaMetadataRetriever, green on the emulator
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -166,7 +166,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Contract, CI and Media Info | 3/7 | In progress | - |
+| 1. Typed Contract, CI and Media Info | 4/7 | In progress | - |
 | 2. Android Compression on Media3 | 0/TBD | Not started | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
