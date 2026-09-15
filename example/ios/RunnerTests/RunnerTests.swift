@@ -140,6 +140,27 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(MediaMath.clampPositionMs(4001, durationMs: 4000), 4000)
   }
 
+  // MARK: - scaledSize + clampPositionMs as composed by the thumbnail path
+
+  func testThumbnailPathComposesDisplayedSizeThenScaledSizeForACappedRequest() {
+    // Mirrors Thumbnails.extractThumbnailJpeg's own composition: MediaMath.displayedSize
+    // first (rotation-correct), then MediaMath.scaledSize against the requested cap.
+    let displayed = MediaMath.displayedSize(codedWidthPx: 1920, codedHeightPx: 1080, rotationDegrees: 90)
+    let target = MediaMath.scaledSize(
+      displayedWidthPx: displayed.width,
+      displayedHeightPx: displayed.height,
+      maxDimensionPx: 960
+    )
+    XCTAssertEqual(target.height, 960)
+    XCTAssertEqual(target.width, 540)
+  }
+
+  func testThumbnailPathClampsAPastEndPositionToTheLastFrame() {
+    // Mirrors the clamp Thumbnails.extractThumbnailJpeg applies before building the
+    // requested CMTime, so a caller asking past the end still gets the last frame.
+    XCTAssertEqual(MediaMath.clampPositionMs(9000, durationMs: 4000), 4000)
+  }
+
   // MARK: - MediaMath.rotationDegrees(from:)
 
   func testRotationDegreesIdentityTransformIsZero() {

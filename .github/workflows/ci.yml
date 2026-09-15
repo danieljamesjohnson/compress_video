@@ -290,6 +290,22 @@ jobs:
             -scheme Runner \
             -destination "platform=iOS Simulator,id=${{ steps.ios_sim.outputs.udid }}"
 
+      - name: Boot the iOS simulator for the corpus integration suite
+        # xcodebuild's own test action above boots the simulator for the duration of that
+        # run and may leave it shut down afterward; boot explicitly and wait for readiness so
+        # `flutter test integration_test -d <udid>` below always has a running device to
+        # attach to.
+        run: |
+          xcrun simctl boot "${{ steps.ios_sim.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.ios_sim.outputs.udid }}" -b
+
+      - name: Run corpus integration tests on the iOS simulator
+        # Runs the same corpus integration suite (media_info_test.dart, thumbnail_test.dart)
+        # the Android emulator runs, on a concrete simulator resolved above rather than a
+        # hard-coded device name.
+        working-directory: example
+        run: flutter test integration_test -d "${{ steps.ios_sim.outputs.udid }}"
+
       - name: Build macOS
         working-directory: example
         run: |

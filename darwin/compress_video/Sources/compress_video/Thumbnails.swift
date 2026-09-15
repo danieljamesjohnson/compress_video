@@ -1,0 +1,318 @@
+import AVFoundation
+import CoreMedia
+import Foundation
+import Security
+
+#if os(iOS)
+  import Flutter
+  import UIKit
+#elseif os(macOS)
+  import Cocoa
+  import FlutterMacOS
+#endif
+
+/// `ThumbnailHostApi` implementation: extracts a rotation-correct poster frame via
+/// `AVAssetImageGenerator`, exactly as `Probe` does for media info.
+///
+/// `getThumbnail` and `getThumbnailFile` share one frame-extraction-and-encode path
+/// (`extractThumbnailJpeg`) so the two entry points can never drift apart in how they convert
+/// `positionMs`, scale, or encode -- only where the resulting bytes end up differs.
+final class Thumbnails: ThumbnailHostApi {
+  func getThumbnail(
+    path: String,
+    positionMs: Int64,
+    quality: Int64,
+    maxDimensionPx: Int64?
+  ) async throws -> FlutterStandardTypedData {
+    try Arguments.requireValidThumbnailArgs(
+      positionMs: positionMs,
+      quality: quality,
+      maxDimensionPx: maxDimensionPx,
+      outputPath: nil
+    )
+    let jpegData = try await extractThumbnailJpeg(
+      path: path,
+      positionMs: positionMs,
+      quality: quality,
+      maxDimensionPx: maxDimensionPx
+    )
+    return FlutterStandardTypedData(bytes: jpegData)
+  }
+
+  func getThumbnailFile(
+    path: String,
+    positionMs: Int64,
+    quality: Int64,
+    maxDimensionPx: Int64?,
+    outputPath: String?
+  ) async throws -> String {
+    try Arguments.requireValidThumbnailArgs(
+      positionMs: positionMs,
+      quality: quality,
+      maxDimensionPx: maxDimensionPx,
+      outputPath: outputPath
+    )
+    let jpegData = try await extractThumbnailJpeg(
+      path: path,
+      positionMs: positionMs,
+      quality: quality,
+      maxDimensionPx: maxDimensionPx
+    )
+    return try writeJpegAtomically(jpegData, outputPath: outputPath)
+  }
+
+  /// Reads the requested frame from `path` at `positionMs` and returns it JPEG-encoded at
+  /// `quality`, with the longer displayed side capped at `maxDimensionPx` (never upscaled).
+  ///
+  /// `positionMs` is clamped to the media's duration (a value past the end returns the last
+  /// frame rather than erroring, matching `MediaMath.clampPositionMs`'s pinned contract) and
+  /// then used to build the requested `CMTime` at a timescale of 1000 -- the single conversion
+  /// point in this class, mirroring the single multiply on Android. `appliesPreferredTrackTransform`
+  /// is set explicitly (its documented default is `false`) and both time tolerances are zero,
+  /// so the returned frame is the exact one at the requested moment, upright.
+  private func extractThumbnailJpeg(
+    path: String,
+    positionMs: Int64,
+    quality: Int64,
+    maxDimensionPx: Int64?
+  ) async throws -> Data {
+    let standardizedPath = try Arguments.requireReadableMediaFile(path)
+    let asset = AVURLAsset(url: URL(fileURLWithPath: standardizedPath))
+
+    let duration: CMTime
+    let videoTracks: [AVAssetTrack]
+    do {
+      if #available(iOS 16, macOS 13, *) {
+        duration = try await asset.load(.duration)
+        videoTracks = try await asset.loadTracks(withMediaType: .video)
+      } else {
+        try await awaitLegacyLoad(asset, keys: ["duration", "tracks"])
+        duration = asset.duration
+        videoTracks = asset.tracks(withMediaType: .video)
+      }
+    } catch let error as CompressVideoError {
+      throw error
+    } catch {
+      throw CompressVideoError(
+        code: "unsupportedInput",
+        message: "The platform could not read this file as media",
+        details: error.localizedDescription
+      )
+    }
+
+    guard let track = videoTracks.first else {
+      throw CompressVideoError(code: "unsupportedInput", message: "No video track found", details: nil)
+    }
+
+    let naturalSize: CGSize
+    let preferredTransform: CGAffineTransform
+    do {
+      if #available(iOS 16, macOS 13, *) {
+        naturalSize = try await track.load(.naturalSize)
+        preferredTransform = try await track.load(.preferredTransform)
+      } else {
+        try await awaitLegacyLoad(track, keys: ["naturalSize", "preferredTransform"])
+        naturalSize = track.naturalSize
+        preferredTransform = track.preferredTransform
+      }
+    } catch let error as CompressVideoError {
+      throw error
+    } catch {
+      throw CompressVideoError(
+        code: "unsupportedInput",
+        message: "Could not read the video track",
+        details: error.localizedDescription
+      )
+    }
+
+    let rotationDegrees = MediaMath.rotationDegrees(from: preferredTransform)
+    let displayedSize = MediaMath.displayedSize(
+      codedWidthPx: Int(naturalSize.width.rounded()),
+      codedHeightPx: Int(naturalSize.height.rounded()),
+      rotationDegrees: rotationDegrees
+    )
+    let targetSize = MediaMath.scaledSize(
+      displayedWidthPx: displayedSize.width,
+      displayedHeightPx: displayedSize.height,
+      maxDimensionPx: maxDimensionPx.map { Int($0) }
+    )
+
+    // durationMs -> the single ms-timescale conversion point on this platform. The requested
+    // CMTime below reuses this same timescale symbolically (never a second `1000` literal),
+    // so the clamped positionMs is expressed at exactly the timescale this conversion produced.
+    let convertedDuration = CMTimeConvertScale(duration, timescale: 1000, method: .roundHalfAwayFromZero)
+    let clampedPositionMs = MediaMath.clampPositionMs(positionMs, durationMs: convertedDuration.value)
+    let requestedTime = CMTime(value: clampedPositionMs, timescale: convertedDuration.timescale)
+
+    let generator = AVAssetImageGenerator(asset: asset)
+    // Documented default is false -- every rotated thumbnail comes back sideways without this.
+    generator.appliesPreferredTrackTransform = true
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    if maxDimensionPx != nil {
+      generator.maximumSize = CGSize(width: targetSize.width, height: targetSize.height)
+    }
+
+    let cgImage = try await copyCGImage(generator: generator, at: requestedTime)
+    return try encodeJpeg(cgImage, quality: quality)
+  }
+
+  /// Generates the image at `time` using the completion-handler generation API (works down to
+  /// iOS 13, unlike the async `image(at:)` API which requires a newer minimum), surfacing a
+  /// generation failure as `unsupportedInput`.
+  private func copyCGImage(generator: AVAssetImageGenerator, at time: CMTime) async throws -> CGImage {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CGImage, Error>) in
+      generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, cgImage, _, result, error in
+        switch result {
+        case .succeeded:
+          if let cgImage {
+            continuation.resume(returning: cgImage)
+          } else {
+            continuation.resume(
+              throwing: CompressVideoError(
+                code: "unsupportedInput",
+                message: "No frame could be decoded at the requested position",
+                details: nil
+              )
+            )
+          }
+        default:
+          continuation.resume(
+            throwing: CompressVideoError(
+              code: "unsupportedInput",
+              message: "No frame could be decoded at the requested position",
+              details: error?.localizedDescription
+            )
+          )
+        }
+      }
+    }
+  }
+
+  /// Encodes `cgImage` to JPEG at `quality` (1-100, converted to the 0-1 compression factor
+  /// both platform encoders expect). iOS wraps it in a `UIImage`; macOS wraps it in an
+  /// `NSBitmapImageRep` -- the one platform branch this file needs beyond the shared
+  /// import block.
+  private func encodeJpeg(_ cgImage: CGImage, quality: Int64) throws -> Data {
+    let compressionFactor = CGFloat(quality) / 100.0
+    #if os(iOS)
+      let image = UIImage(cgImage: cgImage)
+      guard let jpegData = image.jpegData(compressionQuality: compressionFactor) else {
+        throw CompressVideoError(code: "io", message: "Could not encode JPEG", details: nil)
+      }
+      return jpegData
+    #elseif os(macOS)
+      let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+      guard
+        let jpegData = bitmapRep.representation(
+          using: .jpeg,
+          properties: [.compressionFactor: compressionFactor]
+        )
+      else {
+        throw CompressVideoError(code: "io", message: "Could not encode JPEG", details: nil)
+      }
+      return jpegData
+    #endif
+  }
+
+  /// Writes `jpegData` to a unique name inside the app's `compress_video` caches
+  /// subdirectory, or to `outputPath` when given, and returns the destination's standardised
+  /// absolute path.
+  ///
+  /// `Data.write(to:options:.atomic)` writes to a temporary file first and renames it into
+  /// place, so a failure mid-write never leaves a truncated JPEG at the destination -- this
+  /// never touches `path` (the caller's input video); only the destination file is ever
+  /// written here.
+  private func writeJpegAtomically(_ jpegData: Data, outputPath: String?) throws -> String {
+    let destinationPath: String
+    if let outputPath {
+      destinationPath = try Arguments.requireWritableOutputParent(outputPath)
+    } else {
+      let cacheDirectory = try cacheSubdirectory()
+      destinationPath = (cacheDirectory as NSString).appendingPathComponent(uniqueThumbnailFileName())
+    }
+
+    do {
+      try jpegData.write(to: URL(fileURLWithPath: destinationPath), options: .atomic)
+    } catch {
+      throw CompressVideoError(
+        code: "io",
+        message: "Failed to write thumbnail file",
+        details: error.localizedDescription
+      )
+    }
+
+    return destinationPath
+  }
+
+  /// Returns the path to (creating if necessary) a `compress_video` subdirectory of the
+  /// user's caches directory, which resolves inside the app container for a sandboxed macOS
+  /// app -- the default destination never writes outside it.
+  private func cacheSubdirectory() throws -> String {
+    let fileManager = FileManager.default
+    guard let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+    else {
+      throw CompressVideoError(code: "io", message: "Could not locate the caches directory", details: nil)
+    }
+    let subDirectory = cachesDirectory.appendingPathComponent("compress_video", isDirectory: true)
+    do {
+      try fileManager.createDirectory(at: subDirectory, withIntermediateDirectories: true)
+    } catch {
+      throw CompressVideoError(
+        code: "io",
+        message: "Could not create the thumbnail cache directory",
+        details: error.localizedDescription
+      )
+    }
+    return subDirectory.path
+  }
+
+  /// A `.jpg` filename unique per call -- epoch milliseconds plus an 8-character random hex
+  /// suffix, so a millisecond collision is additionally broken by the random component and
+  /// two calls for the same input and position never overwrite each other.
+  private func uniqueThumbnailFileName() -> String {
+    let epochMillis = Int64((Date().timeIntervalSince1970 * 1000).rounded())
+    return "compress_video_thumb_\(epochMillis)_\(randomHex(8)).jpg"
+  }
+
+  private func randomHex(_ length: Int) -> String {
+    let byteCount = (length + 1) / 2
+    var bytes = [UInt8](repeating: 0, count: byteCount)
+    let status = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
+    if status != errSecSuccess {
+      // Fall back to a non-cryptographic source rather than failing the whole thumbnail
+      // write over a naming collision that only needs to be astronomically unlikely, not
+      // cryptographically hardened.
+      bytes = (0..<byteCount).map { _ in UInt8.random(in: 0...255) }
+    }
+    let hex = bytes.map { String(format: "%02x", $0) }.joined()
+    return String(hex.prefix(length))
+  }
+
+  /// Awaits legacy (`loadValuesAsynchronously`) loading of `keys` on `keyValueLoadable`
+  /// (the iOS-13/macOS-11-compatible path), throwing if any key fails to load.
+  private func awaitLegacyLoad(
+    _ keyValueLoadable: AVAsynchronousKeyValueLoading,
+    keys: [String]
+  ) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      keyValueLoadable.loadValuesAsynchronously(forKeys: keys) {
+        for key in keys {
+          var error: NSError?
+          let status = keyValueLoadable.statusOfValue(forKey: key, error: &error)
+          if status != .loaded {
+            continuation.resume(
+              throwing: CompressVideoError(
+                code: "unsupportedInput",
+                message: "Could not load '\(key)'",
+                details: error?.localizedDescription
+              )
+            )
+            return
+          }
+        }
+        continuation.resume(returning: ())
+      }
+    }
+  }
+}
