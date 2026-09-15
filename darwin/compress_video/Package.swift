@@ -6,7 +6,8 @@ import PackageDescription
 let package = Package(
     name: "compress_video",
     platforms: [
-        .iOS("13.0")
+        .iOS("13.0"),
+        .macOS("11.0"),
     ],
     products: [
         .library(name: "compress-video", targets: ["compress_video"])
