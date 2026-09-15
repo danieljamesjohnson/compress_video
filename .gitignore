@@ -6,3 +6,6 @@ pubspec.lock
 .idea/
 .DS_Store
 .venv*/
+
+# GSD run-scoped sentinels
+.gsd/
