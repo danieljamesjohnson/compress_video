@@ -189,4 +189,137 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'two getThumbnailFile calls for the same clip and position return two '
+    'different, simultaneously existing, non-empty files',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_uniqueness.mp4',
+      );
+      final Map<String, dynamic> sidecar = await _loadSidecar('portrait_rot90');
+      final int positionMs =
+          (sidecar['thumbnailProbe'] as Map<String, dynamic>)['positionMs']
+              as int;
+
+      final String firstPath = await compressVideo.getThumbnailFile(
+        path,
+        positionMs: positionMs,
+      );
+      final String secondPath = await compressVideo.getThumbnailFile(
+        path,
+        positionMs: positionMs,
+      );
+
+      expect(firstPath, isNot(secondPath));
+      final File firstFile = File(firstPath);
+      final File secondFile = File(secondPath);
+      expect(firstFile.existsSync(), isTrue);
+      expect(secondFile.existsSync(), isTrue);
+      expect(firstFile.lengthSync(), greaterThan(0));
+      expect(secondFile.lengthSync(), greaterThan(0));
+    },
+  );
+
+  testWidgets(
+    'the default getThumbnailFile destination lies inside the app cache '
+    'directory, not the test harness temp directory',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_cache_location.mp4',
+      );
+
+      final String resultPath = await compressVideo.getThumbnailFile(path);
+
+      expect(resultPath, contains('/cache/compress_video/'));
+      expect(
+        resultPath,
+        isNot(startsWith(Directory.systemTemp.path)),
+        reason:
+            'the default destination must be the app cache directory, not the '
+            "test harness's own temp directory",
+      );
+    },
+  );
+
+  testWidgets('an explicit outputPath is honoured exactly', (
+    WidgetTester tester,
+  ) async {
+    final String path = await _copyAssetToTempFile(
+      'assets/corpus/portrait_rot90.mp4',
+      'portrait_rot90_output_path.mp4',
+    );
+    final Directory outputDir = await Directory.systemTemp.createTemp(
+      'compress_video_thumbnail_output_',
+    );
+    final String outputPath = '${outputDir.path}/exact_name.jpg';
+
+    final String resultPath = await compressVideo.getThumbnailFile(
+      path,
+      outputPath: outputPath,
+    );
+
+    expect(File(outputPath).existsSync(), isTrue);
+    expect(
+      File(resultPath).resolveSymbolicLinksSync(),
+      File(outputPath).resolveSymbolicLinksSync(),
+      reason:
+          'the returned path must resolve to exactly the requested outputPath',
+    );
+    expect(File(outputPath).lengthSync(), greaterThan(0));
+  });
+
+  testWidgets(
+    'an outputPath whose parent directory does not exist yields io and '
+    'leaves no file behind',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_missing_parent.mp4',
+      );
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'compress_video_thumbnail_missing_parent_',
+      );
+      final String outputPath = '${tempDir.path}/does_not_exist_dir/thumb.jpg';
+
+      await expectLater(
+        () => compressVideo.getThumbnailFile(path, outputPath: outputPath),
+        throwsA(
+          isA<CompressVideoException>().having(
+            (CompressVideoException e) => e.reason,
+            'reason',
+            CompressVideoErrorReason.io,
+          ),
+        ),
+      );
+      expect(File(outputPath).existsSync(), isFalse);
+    },
+  );
+
+  testWidgets('the input file is never touched: size and modification time are '
+      'unchanged after every thumbnail call', (WidgetTester tester) async {
+    final String path = await _copyAssetToTempFile(
+      'assets/corpus/portrait_rot90.mp4',
+      'portrait_rot90_input_untouched.mp4',
+    );
+    final File inputFile = File(path);
+    final int originalLength = inputFile.lengthSync();
+    final DateTime originalModified = inputFile.lastModifiedSync();
+
+    await compressVideo.getThumbnail(path, positionMs: 1500);
+    await compressVideo.getThumbnailFile(path, positionMs: 1500);
+    final Directory outputDir = await Directory.systemTemp.createTemp(
+      'compress_video_thumbnail_input_untouched_',
+    );
+    await compressVideo.getThumbnailFile(
+      path,
+      positionMs: 1500,
+      outputPath: '${outputDir.path}/thumb.jpg',
+    );
+
+    expect(inputFile.lengthSync(), originalLength);
+    expect(inputFile.lastModifiedSync(), originalModified);
+  });
 }

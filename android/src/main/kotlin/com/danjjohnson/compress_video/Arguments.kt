@@ -47,4 +47,31 @@ object Arguments {
 
         return canonical
     }
+
+    /**
+     * Resolves [outputPath] to its canonical form and requires its parent directory to already
+     * exist and be writable, throwing a [CompressVideoError] with reason `"io"` if either
+     * requirement fails -- before any bytes are written. This is the [T-01-11] traversal
+     * mitigation: a canonicalised path cannot resolve outside what the caller's own process
+     * could already write, and turning a bad destination into a typed error here means the
+     * caller never sees a partial file or an unexpected native failure.
+     */
+    fun requireWritableOutputParent(outputPath: String): File {
+        val canonical =
+            try {
+                File(outputPath).canonicalFile
+            } catch (e: Exception) {
+                throw CompressVideoError("io", "Could not resolve outputPath", e.message)
+            }
+
+        val parent = canonical.parentFile
+        if (parent == null || !parent.exists() || !parent.isDirectory) {
+            throw CompressVideoError("io", "outputPath's parent directory does not exist")
+        }
+        if (!parent.canWrite()) {
+            throw CompressVideoError("io", "outputPath's parent directory is not writable")
+        }
+
+        return canonical
+    }
 }

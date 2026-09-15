@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.security.SecureRandom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -37,16 +40,8 @@ class Thumbnails(
         outputPath: String?,
     ): String =
         withContext(Dispatchers.IO) {
-            // Minimal placeholder to satisfy the ThumbnailHostApi interface for this task;
-            // uniqueness, atomic placement and outputPath support are added in the next task.
             val jpegBytes = extractThumbnailJpeg(path, positionMs, quality, maxDimensionPx)
-            val cacheSubDir = java.io.File(context.cacheDir, "compress_video")
-            if (!cacheSubDir.exists()) {
-                cacheSubDir.mkdirs()
-            }
-            val file = java.io.File(cacheSubDir, uniqueThumbnailFileName())
-            file.writeBytes(jpegBytes)
-            file.canonicalPath
+            writeJpegAtomically(jpegBytes, outputPath)
         }
 
     /**
@@ -151,9 +146,57 @@ class Thumbnails(
         }
     }
 
-    companion object {
-        private val random = java.security.SecureRandom()
+    /**
+     * Writes [jpegBytes] to a unique name inside the app's `compress_video` cache
+     * subdirectory, or to [outputPath] when given, and returns the destination's canonical
+     * absolute path.
+     *
+     * Writes to a temporary file in the destination's own directory first and renames it into
+     * place, so a failure mid-write never leaves a truncated JPEG at the destination path --
+     * the rename ([File.renameTo]) is atomic on the same filesystem, which the temp file
+     * always is because it is created alongside the destination. The temporary file is deleted
+     * on every failure path. This never touches [path] (the caller's input video) -- only this
+     * method's own temporary and destination files are ever written or deleted here.
+     */
+    private fun writeJpegAtomically(
+        jpegBytes: ByteArray,
+        outputPath: String?,
+    ): String {
+        val destinationFile =
+            if (outputPath != null) {
+                Arguments.requireWritableOutputParent(outputPath)
+            } else {
+                val cacheSubDir = File(context.cacheDir, "compress_video")
+                if (!cacheSubDir.exists() && !cacheSubDir.mkdirs() && !cacheSubDir.exists()) {
+                    throw CompressVideoError("io", "Could not create the thumbnail cache directory")
+                }
+                File(cacheSubDir, uniqueThumbnailFileName())
+            }
 
+        val tempFile = File(destinationFile.parentFile, "${destinationFile.name}.tmp-${randomHex(8)}")
+        try {
+            FileOutputStream(tempFile).use { it.write(jpegBytes) }
+            if (!tempFile.renameTo(destinationFile)) {
+                throw CompressVideoError("io", "Could not move the thumbnail into place")
+            }
+        } catch (e: CompressVideoError) {
+            tempFile.delete()
+            throw e
+        } catch (e: Exception) {
+            tempFile.delete()
+            throw CompressVideoError("io", "Failed to write thumbnail file", e.message)
+        }
+        return destinationFile.canonicalPath
+    }
+
+    companion object {
+        private val random = SecureRandom()
+
+        /**
+         * `compress_video_thumb_<epoch millis>_<8 random hex chars>.jpg` -- unique per call
+         * (millisecond collision is additionally broken by the random suffix), so two calls
+         * for the same input and position never overwrite each other.
+         */
         private fun uniqueThumbnailFileName(): String =
             "compress_video_thumb_${System.currentTimeMillis()}_${randomHex(8)}.jpg"
 
