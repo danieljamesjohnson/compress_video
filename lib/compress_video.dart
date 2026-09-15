@@ -7,12 +7,20 @@ library;
 
 import 'package:flutter/services.dart';
 
+import 'src/compress_job.dart';
+import 'src/compress_options.dart';
+import 'src/compress_result.dart';
 import 'src/compress_video_exception.dart';
 import 'src/media_info.dart';
 import 'src/messages.g.dart' as messages;
+import 'src/presets.dart';
 
+export 'src/compress_job.dart' show CompressJob;
+export 'src/compress_options.dart';
+export 'src/compress_result.dart';
 export 'src/compress_video_exception.dart';
 export 'src/media_info.dart';
+export 'src/presets.dart';
 
 /// Entry point for the `compress_video` plugin.
 ///
@@ -108,6 +116,150 @@ class CompressVideo {
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'getThumbnail');
     }
+  }
+
+  /// Compresses the video at [path] per [options], returning a [CompressJob] synchronously,
+  /// with no `Future` wrapping it (D-01), while the platform call proceeds in the background.
+  ///
+  /// [path] and [options] are validated before anything crosses the platform channel: a blank
+  /// [path] and any invalid [options] combination both throw a [CompressVideoException] with
+  /// reason [CompressVideoErrorReason.unsupportedInput] synchronously, from this call itself,
+  /// not from the returned job's [CompressJob.result]. [options]'s preset is resolved to
+  /// concrete `maxLongSidePx`/`videoBitrateBps` values here -- no preset enum crosses the
+  /// channel. The returned job's [CompressJob.progress] stream and
+  /// [CompressJob.result] are both fully independent of any other job; there is no global
+  /// progress stream and no "is compressing" singleton anywhere in this package.
+  CompressJob compress(
+    String path, {
+    CompressOptions options = const CompressOptions(),
+  }) {
+    if (path.trim().isEmpty) {
+      throw const CompressVideoException(
+        reason: CompressVideoErrorReason.unsupportedInput,
+        message: 'path must not be empty or whitespace-only',
+      );
+    }
+    options.validate();
+
+    final messages.CompressHostApi api = messages.CompressHostApi(
+      binaryMessenger: _binaryMessenger,
+    );
+
+    return CompressJob.start(
+      api: api,
+      binaryMessenger: _binaryMessenger,
+      path: path,
+      request: _buildRequestMessage(options),
+      wrapPlatformException: _wrapPlatformException,
+      wrapMissingPlugin: _wrapMissingPlugin,
+    );
+  }
+
+  /// Returns a pre-flight [CompressEstimate] for compressing the video at [path] per
+  /// [options], without running an actual encode.
+  ///
+  /// [path] and [options] are validated exactly as they are for [compress]. Not yet
+  /// implemented natively on Android -- lands in plan 02-07; until then this throws a
+  /// [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput] naming
+  /// that plan, rather than being absent from the Dart API.
+  Future<CompressEstimate> estimate(
+    String path, {
+    CompressOptions options = const CompressOptions(),
+  }) async {
+    if (path.trim().isEmpty) {
+      throw const CompressVideoException(
+        reason: CompressVideoErrorReason.unsupportedInput,
+        message: 'path must not be empty or whitespace-only',
+      );
+    }
+    options.validate();
+
+    final messages.CompressHostApi api = messages.CompressHostApi(
+      binaryMessenger: _binaryMessenger,
+    );
+
+    try {
+      final messages.EstimateMessage message = await api.estimate(
+        path,
+        _buildRequestMessage(options),
+      );
+      return CompressEstimate(
+        outputBytes: message.outputBytes,
+        durationMs: message.durationMs,
+        widthPx: message.widthPx,
+        heightPx: message.heightPx,
+        wouldTransmux: message.wouldTransmux,
+        wouldUseOriginal: message.wouldUseOriginal,
+      );
+    } on PlatformException catch (e) {
+      throw _wrapPlatformException(e, 'estimate');
+    } on MissingPluginException catch (e) {
+      throw _wrapMissingPlugin(e, 'estimate');
+    }
+  }
+
+  /// Deletes every file this plugin has written to its own cache directory.
+  ///
+  /// Not yet implemented natively on Android -- lands in plan 02-07; until then this throws a
+  /// [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput] naming
+  /// that plan, rather than being absent from the Dart API.
+  Future<void> clearCache() async {
+    final messages.CompressHostApi api = messages.CompressHostApi(
+      binaryMessenger: _binaryMessenger,
+    );
+
+    try {
+      await api.clearCache();
+    } on PlatformException catch (e) {
+      throw _wrapPlatformException(e, 'clearCache');
+    } on MissingPluginException catch (e) {
+      throw _wrapMissingPlugin(e, 'clearCache');
+    }
+  }
+
+  /// Resolves [options] into the wire-level [messages.CompressRequestMessage], applying the
+  /// preset (via [kPresetSpecs]) whenever the caller did not give an explicit
+  /// `maxLongSidePx`/`videoBitrateBps` -- shared by [compress] and [estimate] so the two calls
+  /// can never resolve the same options differently.
+  messages.CompressRequestMessage _buildRequestMessage(
+    CompressOptions options,
+  ) {
+    final PresetSpec presetSpec = kPresetSpecs[options.preset]!;
+    final int resolvedMaxLongSidePx =
+        options.maxLongSidePx ?? presetSpec.maxLongSidePx;
+    // A `targetSizeMb` request resolves its own video bitrate natively; leaving this `null`
+    // here (rather than the preset's value) is what lets the native side tell "no explicit
+    // bitrate was requested" apart from "800000 bps was requested".
+    final int? resolvedVideoBitrateBps =
+        options.videoBitrateBps ??
+        (options.targetSizeMb != null ? null : presetSpec.videoBitrateBps);
+
+    final AudioOptions audio = options.audio;
+    int? audioBitrateBps;
+    int? audioChannels;
+    if (audio is AudioReencode) {
+      audioBitrateBps = audio.bitrateBps;
+      audioChannels = audio.channels;
+    }
+
+    return messages.CompressRequestMessage(
+      maxLongSidePx: resolvedMaxLongSidePx,
+      videoBitrateBps: resolvedVideoBitrateBps,
+      targetSizeMb: options.targetSizeMb,
+      maxFps: options.maxFps,
+      audioMode: switch (audio.mode) {
+        AudioMode.passthrough => messages.AudioModeMessage.passthrough,
+        AudioMode.reencode => messages.AudioModeMessage.reencode,
+        AudioMode.strip => messages.AudioModeMessage.strip,
+      },
+      audioBitrateBps: audioBitrateBps,
+      audioChannels: audioChannels,
+      trimStartMs: options.trimStartMs,
+      trimEndMs: options.trimEndMs,
+      outputPath: options.outputPath,
+      videoCodec: options.codec.name,
+      hdrMode: options.hdr.name,
+    );
   }
 
   /// Same as [getThumbnail], but writes the JPEG to a file and returns its absolute path
