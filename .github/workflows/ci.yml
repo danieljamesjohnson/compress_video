@@ -125,6 +125,15 @@ jobs:
             android/src/main/kotlin/com/danjjohnson/compress_video/Messages.g.kt \
             darwin/compress_video/Sources/compress_video/Messages.g.swift
 
+      - name: Generate the example app's Android project files
+        # example/android/gradlew is gitignored (Flutter's own template) - it only exists
+        # locally because a previous `flutter build`/`flutter pub get` materialized it. On
+        # a fresh CI checkout it does not exist yet, so calling ./gradlew directly in the
+        # next step would fail with "No such file or directory". --config-only generates
+        # the project files (including the wrapper) without building any artifacts.
+        working-directory: example
+        run: flutter build apk --config-only --debug
+
       - name: Run Android native unit tests
         working-directory: example/android
         run: ./gradlew :compress_video:testDebugUnitTest
