@@ -98,7 +98,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Pigeon compression contract, the Dart type surface, and the tracer: one call turns the high-bitrate clip into a smaller upright MP4 through Media3 on the emulator
+- [x] 02-02-PLAN.md — Pigeon compression contract, the Dart type surface, and the tracer: one call turns the high-bitrate clip into a smaller upright MP4 through Media3 on the emulator
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -197,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 1/7 | In progress | - |
+| 2. Android Compression on Media3 | 2/7 | In progress | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
