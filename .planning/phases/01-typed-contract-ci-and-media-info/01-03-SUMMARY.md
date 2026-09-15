@@ -260,3 +260,18 @@ None - no external service configuration required.
 ---
 *Phase: 01-typed-contract-ci-and-media-info*
 *Completed: 2026-09-15*
+
+## Self-Check: PASSED
+
+- FOUND: pubspec.yaml, analysis_options.yaml, .pubignore, LICENSE, CHANGELOG.md
+- FOUND: lib/compress_video.dart, lib/src/compress_video_exception.dart
+- FOUND: test/compress_video_exception_test.dart
+- FOUND: darwin/compress_video.podspec, darwin/compress_video/Package.swift, darwin/compress_video/Sources/compress_video/CompressVideoPlugin.swift
+- FOUND: .github/workflows/ci.yml
+- FOUND: example/lib/main.dart, example/pubspec.yaml, example/assets/corpus/portrait_rot90.mp4
+- FOUND: doc/TOOLCHAIN.md
+- FOUND commits: 0ef3b95, ce3510b, 8026da2, 2780c97, 9df1a8d, e30abf3, d69f3a6, 8507ab0, 33afc04, 3987011
+- Re-ran plan-level verification 1-5 after all fixes: `flutter analyze --fatal-infos --fatal-warnings`, `dart format --output=none --set-exit-if-changed .`, `flutter test` (9/9 pass), `dart pub publish --dry-run` (exit 0, 0 warnings), `flutter build apk --debug` — all pass locally on danserver.
+- Latest CI run (34988000574) conclusion: `success`; android and apple jobs both `success`.
+- Path-gating proven: markdown-only commit `8507ab0` absent from `gh run list --json headSha`.
+- `git status --short` clean at every commit boundary.
