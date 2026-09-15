@@ -1,9 +1,21 @@
-import Flutter
-import UIKit
+import Foundation
+
+#if os(iOS)
+  import Flutter
+  import UIKit
+#elseif os(macOS)
+  import Cocoa
+  import FlutterMacOS
+#endif
 
 public class CompressVideoPlugin: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "compress_video", binaryMessenger: registrar.messenger())
+    #if os(iOS)
+      let messenger = registrar.messenger()
+    #else
+      let messenger = registrar.messenger
+    #endif
+    let channel = FlutterMethodChannel(name: "compress_video", binaryMessenger: messenger)
     let instance = CompressVideoPlugin()
     registrar.addMethodCallDelegate(instance, channel: channel)
   }
@@ -11,7 +23,11 @@ public class CompressVideoPlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "getPlatformVersion":
-      result("iOS " + UIDevice.current.systemVersion)
+      #if os(iOS)
+        result("iOS " + UIDevice.current.systemVersion)
+      #elseif os(macOS)
+        result("macOS " + ProcessInfo.processInfo.operatingSystemVersionString)
+      #endif
     default:
       result(FlutterMethodNotImplemented)
     }
