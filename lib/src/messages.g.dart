@@ -34,6 +34,20 @@ Object? _extractReplyValueOrThrow(
   return replyList.firstOrNull;
 }
 
+List<Object?> wrapResponse({
+  Object? result,
+  PlatformException? error,
+  bool empty = false,
+}) {
+  if (empty) {
+    return <Object?>[];
+  }
+  if (error == null) {
+    return <Object?>[result];
+  }
+  return <Object?>[error.code, error.message, error.details];
+}
+
 bool _deepEquals(Object? a, Object? b) {
   if (identical(a, b)) {
     return true;
@@ -95,6 +109,20 @@ int _deepHash(Object? value) {
     return 0.0.hashCode;
   }
   return value.hashCode;
+}
+
+/// How the audio track is handled during compression. Wire-level counterpart of the public
+/// `AudioMode` enum in `lib/src/compress_options.dart`.
+enum AudioModeMessage {
+  /// Keep the source audio track's encoding when it is already MP4-compatible AAC; re-encode
+  /// otherwise. This is the default.
+  passthrough,
+
+  /// Always re-encode the audio track to AAC, honouring the requested bitrate and channels.
+  reencode,
+
+  /// Remove the audio track entirely. The result's `audioCodec` is `null`.
+  strip,
 }
 
 /// The wire-format media info message returned by [ProbeHostApi.getMediaInfo].
@@ -217,6 +245,377 @@ class MediaInfoMessage {
   }
 }
 
+/// A compression request, sent once per job via [CompressHostApi.startCompress] and also used
+/// (identically) by [CompressHostApi.estimate] to predict what that request would produce.
+///
+/// The preset named by the caller's `CompressOptions.preset` (see
+/// `lib/src/compress_options.dart`) is resolved to a concrete [maxLongSidePx] plus
+/// [videoBitrateBps] entirely on the Dart side before this message is built — no preset enum
+/// crosses the channel, so a reader will not find one here.
+class CompressRequestMessage {
+  CompressRequestMessage({
+    this.maxLongSidePx,
+    this.videoBitrateBps,
+    this.targetSizeMb,
+    required this.maxFps,
+    required this.audioMode,
+    this.audioBitrateBps,
+    this.audioChannels,
+    this.trimStartMs,
+    this.trimEndMs,
+    this.outputPath,
+    required this.videoCodec,
+    required this.hdrMode,
+  });
+
+  /// Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
+  /// (the preset's own value is already resolved into this field by the time it crosses the
+  /// channel, so `null` here means "use the input's own long side").
+  int? maxLongSidePx;
+
+  /// Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
+  /// no explicit bitrate.
+  int? videoBitrateBps;
+
+  /// Target output file size, in megabytes, or `null` when no target size was requested.
+  double? targetSizeMb;
+
+  /// Cap on the output's frame rate, in frames per second. Never upscales the input's own
+  /// frame rate — the effective cap is `min(maxFps, input fps)`.
+  int maxFps;
+
+  /// How the audio track is handled. See [AudioModeMessage].
+  AudioModeMessage audioMode;
+
+  /// Target audio bitrate, in bits per second, when [audioMode] is
+  /// [AudioModeMessage.reencode]. `null` otherwise.
+  int? audioBitrateBps;
+
+  /// Target audio channel count, when [audioMode] is [AudioModeMessage.reencode]. `null`
+  /// otherwise.
+  int? audioChannels;
+
+  /// Start of the trim range, in milliseconds from the start of the input, or `null` for no
+  /// trim start.
+  int? trimStartMs;
+
+  /// End of the trim range, in milliseconds from the start of the input, or `null` for no
+  /// trim end.
+  int? trimEndMs;
+
+  /// Destination path for the compressed output, or `null` to use the plugin's own cache
+  /// directory with a name derived from the job id.
+  String? outputPath;
+
+  /// Requested output video codec. Only `"h264"` is accepted in this phase; HEVC opt-in is
+  /// Phase 4.
+  String videoCodec;
+
+  /// Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
+  /// is Phase 4.
+  String hdrMode;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      maxLongSidePx,
+      videoBitrateBps,
+      targetSizeMb,
+      maxFps,
+      audioMode,
+      audioBitrateBps,
+      audioChannels,
+      trimStartMs,
+      trimEndMs,
+      outputPath,
+      videoCodec,
+      hdrMode,
+    ];
+  }
+
+  Object encode() {
+    return _toList();
+  }
+
+  static CompressRequestMessage decode(Object result) {
+    result as List<Object?>;
+    return CompressRequestMessage(
+      maxLongSidePx: result[0] as int?,
+      videoBitrateBps: result[1] as int?,
+      targetSizeMb: result[2] as double?,
+      maxFps: result[3]! as int,
+      audioMode: result[4]! as AudioModeMessage,
+      audioBitrateBps: result[5] as int?,
+      audioChannels: result[6] as int?,
+      trimStartMs: result[7] as int?,
+      trimEndMs: result[8] as int?,
+      outputPath: result[9] as String?,
+      videoCodec: result[10]! as String,
+      hdrMode: result[11]! as String,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! CompressRequestMessage || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(maxLongSidePx, other.maxLongSidePx) &&
+        _deepEquals(videoBitrateBps, other.videoBitrateBps) &&
+        _deepEquals(targetSizeMb, other.targetSizeMb) &&
+        _deepEquals(maxFps, other.maxFps) &&
+        _deepEquals(audioMode, other.audioMode) &&
+        _deepEquals(audioBitrateBps, other.audioBitrateBps) &&
+        _deepEquals(audioChannels, other.audioChannels) &&
+        _deepEquals(trimStartMs, other.trimStartMs) &&
+        _deepEquals(trimEndMs, other.trimEndMs) &&
+        _deepEquals(outputPath, other.outputPath) &&
+        _deepEquals(videoCodec, other.videoCodec) &&
+        _deepEquals(hdrMode, other.hdrMode);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+
+  @override
+  String toString() {
+    return 'CompressRequestMessage(maxLongSidePx: $maxLongSidePx, videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, maxFps: $maxFps, audioMode: $audioMode, audioBitrateBps: $audioBitrateBps, audioChannels: $audioChannels, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, outputPath: $outputPath, videoCodec: $videoCodec, hdrMode: $hdrMode)';
+  }
+}
+
+/// The typed result of a completed compression job. Every field is populated from a re-probe
+/// of the finished output file, never from the export engine's own approximate fields — see
+/// 02-RESEARCH.md Pitfall 4.
+class CompressResultMessage {
+  CompressResultMessage({
+    required this.outputPath,
+    required this.inputBytes,
+    required this.outputBytes,
+    required this.widthPx,
+    required this.heightPx,
+    required this.durationMs,
+    required this.videoCodec,
+    this.audioCodec,
+    required this.transmuxed,
+    required this.usedOriginal,
+    required this.toneMapped,
+    required this.hevcFallback,
+    required this.audioReencoded,
+    required this.elapsedMs,
+  });
+
+  /// Absolute path to the compressed output file.
+  String outputPath;
+
+  /// Size of the input file, in bytes.
+  int inputBytes;
+
+  /// Size of the output file, in bytes.
+  int outputBytes;
+
+  /// Displayed (rotation-corrected) width of the output, in pixels.
+  int widthPx;
+
+  /// Displayed (rotation-corrected) height of the output, in pixels.
+  int heightPx;
+
+  /// Duration of the output, in milliseconds, from a re-probe of the finished file.
+  int durationMs;
+
+  /// Normalised video codec of the output (for example `h264`).
+  String videoCodec;
+
+  /// Normalised audio codec of the output, or `null` when the audio track was stripped or the
+  /// source had none.
+  String? audioCodec;
+
+  /// Whether the job ran as a transmux (container remux with no video re-encode) rather than
+  /// a full encode.
+  bool transmuxed;
+
+  /// Whether the original input bytes were copied to [outputPath] because compressing would
+  /// have produced an equal-or-larger file. `outputPath` always names a file the plugin owns
+  /// (never the caller's original input path) when this is `true`.
+  bool usedOriginal;
+
+  /// Reserved for Phase 4's HDR tone-mapping. Always `false` in this phase.
+  bool toneMapped;
+
+  /// Reserved for Phase 4's HEVC hardware-fallback handling. Always `false` in this phase.
+  bool hevcFallback;
+
+  /// Whether the audio track was re-encoded (as opposed to passed through or stripped).
+  bool audioReencoded;
+
+  /// Wall-clock time the compression took, in milliseconds.
+  int elapsedMs;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      outputPath,
+      inputBytes,
+      outputBytes,
+      widthPx,
+      heightPx,
+      durationMs,
+      videoCodec,
+      audioCodec,
+      transmuxed,
+      usedOriginal,
+      toneMapped,
+      hevcFallback,
+      audioReencoded,
+      elapsedMs,
+    ];
+  }
+
+  Object encode() {
+    return _toList();
+  }
+
+  static CompressResultMessage decode(Object result) {
+    result as List<Object?>;
+    return CompressResultMessage(
+      outputPath: result[0]! as String,
+      inputBytes: result[1]! as int,
+      outputBytes: result[2]! as int,
+      widthPx: result[3]! as int,
+      heightPx: result[4]! as int,
+      durationMs: result[5]! as int,
+      videoCodec: result[6]! as String,
+      audioCodec: result[7] as String?,
+      transmuxed: result[8]! as bool,
+      usedOriginal: result[9]! as bool,
+      toneMapped: result[10]! as bool,
+      hevcFallback: result[11]! as bool,
+      audioReencoded: result[12]! as bool,
+      elapsedMs: result[13]! as int,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! CompressResultMessage || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(outputPath, other.outputPath) &&
+        _deepEquals(inputBytes, other.inputBytes) &&
+        _deepEquals(outputBytes, other.outputBytes) &&
+        _deepEquals(widthPx, other.widthPx) &&
+        _deepEquals(heightPx, other.heightPx) &&
+        _deepEquals(durationMs, other.durationMs) &&
+        _deepEquals(videoCodec, other.videoCodec) &&
+        _deepEquals(audioCodec, other.audioCodec) &&
+        _deepEquals(transmuxed, other.transmuxed) &&
+        _deepEquals(usedOriginal, other.usedOriginal) &&
+        _deepEquals(toneMapped, other.toneMapped) &&
+        _deepEquals(hevcFallback, other.hevcFallback) &&
+        _deepEquals(audioReencoded, other.audioReencoded) &&
+        _deepEquals(elapsedMs, other.elapsedMs);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+
+  @override
+  String toString() {
+    return 'CompressResultMessage(outputPath: $outputPath, inputBytes: $inputBytes, outputBytes: $outputBytes, widthPx: $widthPx, heightPx: $heightPx, durationMs: $durationMs, videoCodec: $videoCodec, audioCodec: $audioCodec, transmuxed: $transmuxed, usedOriginal: $usedOriginal, toneMapped: $toneMapped, hevcFallback: $hevcFallback, audioReencoded: $audioReencoded, elapsedMs: $elapsedMs)';
+  }
+}
+
+/// The typed, pre-flight prediction of what a [CompressRequestMessage] would produce, without
+/// running an actual encode.
+class EstimateMessage {
+  EstimateMessage({
+    required this.outputBytes,
+    required this.durationMs,
+    required this.widthPx,
+    required this.heightPx,
+    required this.wouldTransmux,
+    required this.wouldUseOriginal,
+  });
+
+  /// Predicted size of the output, in bytes.
+  int outputBytes;
+
+  /// Predicted duration of the output, in milliseconds.
+  int durationMs;
+
+  /// Predicted displayed width of the output, in pixels.
+  int widthPx;
+
+  /// Predicted displayed height of the output, in pixels.
+  int heightPx;
+
+  /// Whether the request would run as a transmux rather than a full encode.
+  bool wouldTransmux;
+
+  /// Whether the request would fall back to copying the original input rather than encoding.
+  bool wouldUseOriginal;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      outputBytes,
+      durationMs,
+      widthPx,
+      heightPx,
+      wouldTransmux,
+      wouldUseOriginal,
+    ];
+  }
+
+  Object encode() {
+    return _toList();
+  }
+
+  static EstimateMessage decode(Object result) {
+    result as List<Object?>;
+    return EstimateMessage(
+      outputBytes: result[0]! as int,
+      durationMs: result[1]! as int,
+      widthPx: result[2]! as int,
+      heightPx: result[3]! as int,
+      wouldTransmux: result[4]! as bool,
+      wouldUseOriginal: result[5]! as bool,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! EstimateMessage || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(outputBytes, other.outputBytes) &&
+        _deepEquals(durationMs, other.durationMs) &&
+        _deepEquals(widthPx, other.widthPx) &&
+        _deepEquals(heightPx, other.heightPx) &&
+        _deepEquals(wouldTransmux, other.wouldTransmux) &&
+        _deepEquals(wouldUseOriginal, other.wouldUseOriginal);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+
+  @override
+  String toString() {
+    return 'EstimateMessage(outputBytes: $outputBytes, durationMs: $durationMs, widthPx: $widthPx, heightPx: $heightPx, wouldTransmux: $wouldTransmux, wouldUseOriginal: $wouldUseOriginal)';
+  }
+}
+
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
   @override
@@ -224,8 +623,20 @@ class _PigeonCodec extends StandardMessageCodec {
     if (value is int) {
       buffer.putUint8(4);
       buffer.putInt64(value);
-    } else if (value is MediaInfoMessage) {
+    } else if (value is AudioModeMessage) {
       buffer.putUint8(129);
+      writeValue(buffer, value.index);
+    } else if (value is MediaInfoMessage) {
+      buffer.putUint8(130);
+      writeValue(buffer, value.encode());
+    } else if (value is CompressRequestMessage) {
+      buffer.putUint8(131);
+      writeValue(buffer, value.encode());
+    } else if (value is CompressResultMessage) {
+      buffer.putUint8(132);
+      writeValue(buffer, value.encode());
+    } else if (value is EstimateMessage) {
+      buffer.putUint8(133);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -236,7 +647,16 @@ class _PigeonCodec extends StandardMessageCodec {
   Object? readValueOfType(int type, ReadBuffer buffer) {
     switch (type) {
       case 129:
+        final value = readValue(buffer) as int?;
+        return value == null ? null : AudioModeMessage.values[value];
+      case 130:
         return MediaInfoMessage.decode(readValue(buffer)!);
+      case 131:
+        return CompressRequestMessage.decode(readValue(buffer)!);
+      case 132:
+        return CompressResultMessage.decode(readValue(buffer)!);
+      case 133:
+        return EstimateMessage.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -363,5 +783,164 @@ class ThumbnailHostApi {
       isNullValid: false,
     );
     return pigeonVar_replyValue! as String;
+  }
+}
+
+/// Runs and manages compression jobs. Implemented per-platform; this phase implements Android
+/// only.
+class CompressHostApi {
+  /// Constructor for [CompressHostApi]. The [binaryMessenger] named argument is
+  /// available for dependency injection. If it is left null, the default
+  /// BinaryMessenger will be used which routes to the host platform.
+  CompressHostApi({
+    BinaryMessenger? binaryMessenger,
+    String messageChannelSuffix = '',
+  }) : pigeonVar_binaryMessenger = binaryMessenger,
+       pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+           ? '.$messageChannelSuffix'
+           : '';
+
+  final BinaryMessenger? pigeonVar_binaryMessenger;
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  final String pigeonVar_messageChannelSuffix;
+
+  /// Starts a compression job for the media at [path], identified by the caller-generated
+  /// [jobId], with the given [request]. [jobId] is generated by the caller (Dart) so two jobs
+  /// started back to back never race on native-side id generation.
+  Future<CompressResultMessage> startCompress(
+    String path,
+    String jobId,
+    CompressRequestMessage request,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.CompressHostApi.startCompress$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[path, jobId, request],
+    );
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as CompressResultMessage;
+  }
+
+  /// Cancels the job identified by [jobId]. A no-op if the job has already finished.
+  Future<void> cancel(String jobId) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.CompressHostApi.cancel$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[jobId],
+    );
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
+  }
+
+  /// Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
+  /// [request], without running an actual encode.
+  Future<EstimateMessage> estimate(
+    String path,
+    CompressRequestMessage request,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.CompressHostApi.estimate$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[path, request],
+    );
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as EstimateMessage;
+  }
+
+  /// Deletes every file the plugin has written to its own cache directory.
+  Future<void> clearCache() async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.CompressHostApi.clearCache$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
+  }
+}
+
+/// Progress notifications from native code back to Dart, keyed by job id. Fire-and-forget:
+/// Dart does not reply to this call.
+abstract class CompressVideoFlutterApi {
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  /// Reports that the job identified by [jobId] has reached [percent] (0 to 100) complete.
+  void onProgress(String jobId, double percent);
+
+  static void setUp(
+    CompressVideoFlutterApi? api, {
+    BinaryMessenger? binaryMessenger,
+    String messageChannelSuffix = '',
+  }) {
+    messageChannelSuffix = messageChannelSuffix.isNotEmpty
+        ? '.$messageChannelSuffix'
+        : '';
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+        'dev.flutter.pigeon.compress_video.CompressVideoFlutterApi.onProgress$messageChannelSuffix',
+        pigeonChannelCodec,
+        binaryMessenger: binaryMessenger,
+      );
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final String arg_jobId = args[0]! as String;
+          final double arg_percent = args[1]! as double;
+          try {
+            api.onProgress(arg_jobId, arg_percent);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          } catch (e) {
+            return wrapResponse(
+              error: PlatformException(code: 'error', message: e.toString()),
+            );
+          }
+        });
+      }
+    }
   }
 }

@@ -55,6 +55,10 @@ private func wrapError(_ error: Any) -> [Any?] {
   ]
 }
 
+private func createConnectionError(withChannelName channelName: String) -> CompressVideoError {
+  return CompressVideoError(code: "channel-error", message: "Unable to establish connection on channel: '\(channelName)'.", details: "")
+}
+
 enum MessagesPigeonInternal {
   static func isNullish(_ value: Any?) -> Bool {
     guard let innerValue = value else {
@@ -184,6 +188,18 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 }
 
 
+/// How the audio track is handled during compression. Wire-level counterpart of the public
+/// `AudioMode` enum in `lib/src/compress_options.dart`.
+enum AudioModeMessage: Int, CaseIterable {
+  /// Keep the source audio track's encoding when it is already MP4-compatible AAC; re-encode
+  /// otherwise. This is the default.
+  case passthrough = 0
+  /// Always re-encode the audio track to AAC, honouring the requested bitrate and channels.
+  case reencode = 1
+  /// Remove the audio track entirely. The result's `audioCodec` is `null`.
+  case strip = 2
+}
+
 /// The wire-format media info message returned by [ProbeHostApi.getMediaInfo].
 ///
 /// This is the generated, private counterpart of the public, hand-written `MediaInfo`
@@ -285,11 +301,335 @@ struct MediaInfoMessage: Hashable, CustomStringConvertible {
   }
 }
 
+/// A compression request, sent once per job via [CompressHostApi.startCompress] and also used
+/// (identically) by [CompressHostApi.estimate] to predict what that request would produce.
+///
+/// The preset named by the caller's `CompressOptions.preset` (see
+/// `lib/src/compress_options.dart`) is resolved to a concrete [maxLongSidePx] plus
+/// [videoBitrateBps] entirely on the Dart side before this message is built — no preset enum
+/// crosses the channel, so a reader will not find one here.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct CompressRequestMessage: Hashable, CustomStringConvertible {
+  /// Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
+  /// (the preset's own value is already resolved into this field by the time it crosses the
+  /// channel, so `null` here means "use the input's own long side").
+  var maxLongSidePx: Int64? = nil
+  /// Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
+  /// no explicit bitrate.
+  var videoBitrateBps: Int64? = nil
+  /// Target output file size, in megabytes, or `null` when no target size was requested.
+  var targetSizeMb: Double? = nil
+  /// Cap on the output's frame rate, in frames per second. Never upscales the input's own
+  /// frame rate — the effective cap is `min(maxFps, input fps)`.
+  var maxFps: Int64
+  /// How the audio track is handled. See [AudioModeMessage].
+  var audioMode: AudioModeMessage
+  /// Target audio bitrate, in bits per second, when [audioMode] is
+  /// [AudioModeMessage.reencode]. `null` otherwise.
+  var audioBitrateBps: Int64? = nil
+  /// Target audio channel count, when [audioMode] is [AudioModeMessage.reencode]. `null`
+  /// otherwise.
+  var audioChannels: Int64? = nil
+  /// Start of the trim range, in milliseconds from the start of the input, or `null` for no
+  /// trim start.
+  var trimStartMs: Int64? = nil
+  /// End of the trim range, in milliseconds from the start of the input, or `null` for no
+  /// trim end.
+  var trimEndMs: Int64? = nil
+  /// Destination path for the compressed output, or `null` to use the plugin's own cache
+  /// directory with a name derived from the job id.
+  var outputPath: String? = nil
+  /// Requested output video codec. Only `"h264"` is accepted in this phase; HEVC opt-in is
+  /// Phase 4.
+  var videoCodec: String
+  /// Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
+  /// is Phase 4.
+  var hdrMode: String
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CompressRequestMessage? {
+    let maxLongSidePx: Int64? = nilOrValue(pigeonVar_list[0])
+    let videoBitrateBps: Int64? = nilOrValue(pigeonVar_list[1])
+    let targetSizeMb: Double? = nilOrValue(pigeonVar_list[2])
+    let maxFps = pigeonVar_list[3] as! Int64
+    let audioMode = pigeonVar_list[4] as! AudioModeMessage
+    let audioBitrateBps: Int64? = nilOrValue(pigeonVar_list[5])
+    let audioChannels: Int64? = nilOrValue(pigeonVar_list[6])
+    let trimStartMs: Int64? = nilOrValue(pigeonVar_list[7])
+    let trimEndMs: Int64? = nilOrValue(pigeonVar_list[8])
+    let outputPath: String? = nilOrValue(pigeonVar_list[9])
+    let videoCodec = pigeonVar_list[10] as! String
+    let hdrMode = pigeonVar_list[11] as! String
+
+    return CompressRequestMessage(
+      maxLongSidePx: maxLongSidePx,
+      videoBitrateBps: videoBitrateBps,
+      targetSizeMb: targetSizeMb,
+      maxFps: maxFps,
+      audioMode: audioMode,
+      audioBitrateBps: audioBitrateBps,
+      audioChannels: audioChannels,
+      trimStartMs: trimStartMs,
+      trimEndMs: trimEndMs,
+      outputPath: outputPath,
+      videoCodec: videoCodec,
+      hdrMode: hdrMode
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      maxLongSidePx,
+      videoBitrateBps,
+      targetSizeMb,
+      maxFps,
+      audioMode,
+      audioBitrateBps,
+      audioChannels,
+      trimStartMs,
+      trimEndMs,
+      outputPath,
+      videoCodec,
+      hdrMode,
+    ]
+  }
+  static func == (lhs: CompressRequestMessage, rhs: CompressRequestMessage) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return MessagesPigeonInternal.deepEquals(lhs.maxLongSidePx, rhs.maxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.videoBitrateBps, rhs.videoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.targetSizeMb, rhs.targetSizeMb) && MessagesPigeonInternal.deepEquals(lhs.maxFps, rhs.maxFps) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.audioBitrateBps, rhs.audioBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.audioChannels, rhs.audioChannels) && MessagesPigeonInternal.deepEquals(lhs.trimStartMs, rhs.trimStartMs) && MessagesPigeonInternal.deepEquals(lhs.trimEndMs, rhs.trimEndMs) && MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.hdrMode, rhs.hdrMode)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("CompressRequestMessage")
+    MessagesPigeonInternal.deepHash(value: maxLongSidePx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: videoBitrateBps, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: targetSizeMb, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: maxFps, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioMode, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioBitrateBps, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioChannels, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: trimStartMs, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: trimEndMs, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: outputPath, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: videoCodec, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: hdrMode, hasher: &hasher)
+  }
+
+  public var description: String {
+    return "CompressRequestMessage(maxLongSidePx: \(String(describing: maxLongSidePx)), videoBitrateBps: \(String(describing: videoBitrateBps)), targetSizeMb: \(String(describing: targetSizeMb)), maxFps: \(String(describing: maxFps)), audioMode: \(String(describing: audioMode)), audioBitrateBps: \(String(describing: audioBitrateBps)), audioChannels: \(String(describing: audioChannels)), trimStartMs: \(String(describing: trimStartMs)), trimEndMs: \(String(describing: trimEndMs)), outputPath: \(String(describing: outputPath)), videoCodec: \(String(describing: videoCodec)), hdrMode: \(String(describing: hdrMode)))"
+  }
+}
+
+/// The typed result of a completed compression job. Every field is populated from a re-probe
+/// of the finished output file, never from the export engine's own approximate fields — see
+/// 02-RESEARCH.md Pitfall 4.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct CompressResultMessage: Hashable, CustomStringConvertible {
+  /// Absolute path to the compressed output file.
+  var outputPath: String
+  /// Size of the input file, in bytes.
+  var inputBytes: Int64
+  /// Size of the output file, in bytes.
+  var outputBytes: Int64
+  /// Displayed (rotation-corrected) width of the output, in pixels.
+  var widthPx: Int64
+  /// Displayed (rotation-corrected) height of the output, in pixels.
+  var heightPx: Int64
+  /// Duration of the output, in milliseconds, from a re-probe of the finished file.
+  var durationMs: Int64
+  /// Normalised video codec of the output (for example `h264`).
+  var videoCodec: String
+  /// Normalised audio codec of the output, or `null` when the audio track was stripped or the
+  /// source had none.
+  var audioCodec: String? = nil
+  /// Whether the job ran as a transmux (container remux with no video re-encode) rather than
+  /// a full encode.
+  var transmuxed: Bool
+  /// Whether the original input bytes were copied to [outputPath] because compressing would
+  /// have produced an equal-or-larger file. `outputPath` always names a file the plugin owns
+  /// (never the caller's original input path) when this is `true`.
+  var usedOriginal: Bool
+  /// Reserved for Phase 4's HDR tone-mapping. Always `false` in this phase.
+  var toneMapped: Bool
+  /// Reserved for Phase 4's HEVC hardware-fallback handling. Always `false` in this phase.
+  var hevcFallback: Bool
+  /// Whether the audio track was re-encoded (as opposed to passed through or stripped).
+  var audioReencoded: Bool
+  /// Wall-clock time the compression took, in milliseconds.
+  var elapsedMs: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CompressResultMessage? {
+    let outputPath = pigeonVar_list[0] as! String
+    let inputBytes = pigeonVar_list[1] as! Int64
+    let outputBytes = pigeonVar_list[2] as! Int64
+    let widthPx = pigeonVar_list[3] as! Int64
+    let heightPx = pigeonVar_list[4] as! Int64
+    let durationMs = pigeonVar_list[5] as! Int64
+    let videoCodec = pigeonVar_list[6] as! String
+    let audioCodec: String? = nilOrValue(pigeonVar_list[7])
+    let transmuxed = pigeonVar_list[8] as! Bool
+    let usedOriginal = pigeonVar_list[9] as! Bool
+    let toneMapped = pigeonVar_list[10] as! Bool
+    let hevcFallback = pigeonVar_list[11] as! Bool
+    let audioReencoded = pigeonVar_list[12] as! Bool
+    let elapsedMs = pigeonVar_list[13] as! Int64
+
+    return CompressResultMessage(
+      outputPath: outputPath,
+      inputBytes: inputBytes,
+      outputBytes: outputBytes,
+      widthPx: widthPx,
+      heightPx: heightPx,
+      durationMs: durationMs,
+      videoCodec: videoCodec,
+      audioCodec: audioCodec,
+      transmuxed: transmuxed,
+      usedOriginal: usedOriginal,
+      toneMapped: toneMapped,
+      hevcFallback: hevcFallback,
+      audioReencoded: audioReencoded,
+      elapsedMs: elapsedMs
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      outputPath,
+      inputBytes,
+      outputBytes,
+      widthPx,
+      heightPx,
+      durationMs,
+      videoCodec,
+      audioCodec,
+      transmuxed,
+      usedOriginal,
+      toneMapped,
+      hevcFallback,
+      audioReencoded,
+      elapsedMs,
+    ]
+  }
+  static func == (lhs: CompressResultMessage, rhs: CompressResultMessage) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.inputBytes, rhs.inputBytes) && MessagesPigeonInternal.deepEquals(lhs.outputBytes, rhs.outputBytes) && MessagesPigeonInternal.deepEquals(lhs.widthPx, rhs.widthPx) && MessagesPigeonInternal.deepEquals(lhs.heightPx, rhs.heightPx) && MessagesPigeonInternal.deepEquals(lhs.durationMs, rhs.durationMs) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.audioCodec, rhs.audioCodec) && MessagesPigeonInternal.deepEquals(lhs.transmuxed, rhs.transmuxed) && MessagesPigeonInternal.deepEquals(lhs.usedOriginal, rhs.usedOriginal) && MessagesPigeonInternal.deepEquals(lhs.toneMapped, rhs.toneMapped) && MessagesPigeonInternal.deepEquals(lhs.hevcFallback, rhs.hevcFallback) && MessagesPigeonInternal.deepEquals(lhs.audioReencoded, rhs.audioReencoded) && MessagesPigeonInternal.deepEquals(lhs.elapsedMs, rhs.elapsedMs)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("CompressResultMessage")
+    MessagesPigeonInternal.deepHash(value: outputPath, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: inputBytes, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: outputBytes, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: widthPx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: heightPx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: durationMs, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: videoCodec, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioCodec, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: transmuxed, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: usedOriginal, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: toneMapped, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: hevcFallback, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioReencoded, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: elapsedMs, hasher: &hasher)
+  }
+
+  public var description: String {
+    return "CompressResultMessage(outputPath: \(String(describing: outputPath)), inputBytes: \(String(describing: inputBytes)), outputBytes: \(String(describing: outputBytes)), widthPx: \(String(describing: widthPx)), heightPx: \(String(describing: heightPx)), durationMs: \(String(describing: durationMs)), videoCodec: \(String(describing: videoCodec)), audioCodec: \(String(describing: audioCodec)), transmuxed: \(String(describing: transmuxed)), usedOriginal: \(String(describing: usedOriginal)), toneMapped: \(String(describing: toneMapped)), hevcFallback: \(String(describing: hevcFallback)), audioReencoded: \(String(describing: audioReencoded)), elapsedMs: \(String(describing: elapsedMs)))"
+  }
+}
+
+/// The typed, pre-flight prediction of what a [CompressRequestMessage] would produce, without
+/// running an actual encode.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct EstimateMessage: Hashable, CustomStringConvertible {
+  /// Predicted size of the output, in bytes.
+  var outputBytes: Int64
+  /// Predicted duration of the output, in milliseconds.
+  var durationMs: Int64
+  /// Predicted displayed width of the output, in pixels.
+  var widthPx: Int64
+  /// Predicted displayed height of the output, in pixels.
+  var heightPx: Int64
+  /// Whether the request would run as a transmux rather than a full encode.
+  var wouldTransmux: Bool
+  /// Whether the request would fall back to copying the original input rather than encoding.
+  var wouldUseOriginal: Bool
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> EstimateMessage? {
+    let outputBytes = pigeonVar_list[0] as! Int64
+    let durationMs = pigeonVar_list[1] as! Int64
+    let widthPx = pigeonVar_list[2] as! Int64
+    let heightPx = pigeonVar_list[3] as! Int64
+    let wouldTransmux = pigeonVar_list[4] as! Bool
+    let wouldUseOriginal = pigeonVar_list[5] as! Bool
+
+    return EstimateMessage(
+      outputBytes: outputBytes,
+      durationMs: durationMs,
+      widthPx: widthPx,
+      heightPx: heightPx,
+      wouldTransmux: wouldTransmux,
+      wouldUseOriginal: wouldUseOriginal
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      outputBytes,
+      durationMs,
+      widthPx,
+      heightPx,
+      wouldTransmux,
+      wouldUseOriginal,
+    ]
+  }
+  static func == (lhs: EstimateMessage, rhs: EstimateMessage) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return MessagesPigeonInternal.deepEquals(lhs.outputBytes, rhs.outputBytes) && MessagesPigeonInternal.deepEquals(lhs.durationMs, rhs.durationMs) && MessagesPigeonInternal.deepEquals(lhs.widthPx, rhs.widthPx) && MessagesPigeonInternal.deepEquals(lhs.heightPx, rhs.heightPx) && MessagesPigeonInternal.deepEquals(lhs.wouldTransmux, rhs.wouldTransmux) && MessagesPigeonInternal.deepEquals(lhs.wouldUseOriginal, rhs.wouldUseOriginal)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("EstimateMessage")
+    MessagesPigeonInternal.deepHash(value: outputBytes, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: durationMs, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: widthPx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: heightPx, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: wouldTransmux, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: wouldUseOriginal, hasher: &hasher)
+  }
+
+  public var description: String {
+    return "EstimateMessage(outputBytes: \(String(describing: outputBytes)), durationMs: \(String(describing: durationMs)), widthPx: \(String(describing: widthPx)), heightPx: \(String(describing: heightPx)), wouldTransmux: \(String(describing: wouldTransmux)), wouldUseOriginal: \(String(describing: wouldUseOriginal)))"
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
     case 129:
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return AudioModeMessage(rawValue: enumResultAsInt)
+      }
+      return nil
+    case 130:
       return MediaInfoMessage.fromList(self.readValue() as! [Any?])
+    case 131:
+      return CompressRequestMessage.fromList(self.readValue() as! [Any?])
+    case 132:
+      return CompressResultMessage.fromList(self.readValue() as! [Any?])
+    case 133:
+      return EstimateMessage.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -298,8 +638,20 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
 
 private class MessagesPigeonCodecWriter: FlutterStandardWriter {
   override func writeValue(_ value: Any) {
-    if let value = value as? MediaInfoMessage {
+    if let value = value as? AudioModeMessage {
       super.writeByte(129)
+      super.writeValue(value.rawValue)
+    } else if let value = value as? MediaInfoMessage {
+      super.writeByte(130)
+      super.writeValue(value.toList())
+    } else if let value = value as? CompressRequestMessage {
+      super.writeByte(131)
+      super.writeValue(value.toList())
+    } else if let value = value as? CompressResultMessage {
+      super.writeByte(132)
+      super.writeValue(value.toList())
+    } else if let value = value as? EstimateMessage {
+      super.writeByte(133)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -429,6 +781,149 @@ class ThumbnailHostApiSetup {
       }
     } else {
       getThumbnailFileChannel.setMessageHandler(nil)
+    }
+  }
+}
+/// Runs and manages compression jobs. Implemented per-platform; this phase implements Android
+/// only.
+///
+/// Generated protocol from Pigeon that represents a handler of messages from Flutter.
+protocol CompressHostApi {
+  /// Starts a compression job for the media at [path], identified by the caller-generated
+  /// [jobId], with the given [request]. [jobId] is generated by the caller (Dart) so two jobs
+  /// started back to back never race on native-side id generation.
+  func startCompress(path: String, jobId: String, request: CompressRequestMessage) async throws -> CompressResultMessage
+  /// Cancels the job identified by [jobId]. A no-op if the job has already finished.
+  func cancel(jobId: String) async throws
+  /// Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
+  /// [request], without running an actual encode.
+  func estimate(path: String, request: CompressRequestMessage) async throws -> EstimateMessage
+  /// Deletes every file the plugin has written to its own cache directory.
+  func clearCache() async throws
+}
+
+/// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
+class CompressHostApiSetup {
+  static var codec: FlutterStandardMessageCodec { MessagesPigeonCodec.shared }
+  /// Sets up an instance of `CompressHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: CompressHostApi?, messageChannelSuffix: String = "") {
+    let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+    /// Starts a compression job for the media at [path], identified by the caller-generated
+    /// [jobId], with the given [request]. [jobId] is generated by the caller (Dart) so two jobs
+    /// started back to back never race on native-side id generation.
+    let startCompressChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.compress_video.CompressHostApi.startCompress\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      startCompressChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        let jobIdArg = args[1] as! String
+        let requestArg = args[2] as! CompressRequestMessage
+        Task { @MainActor in
+          do {
+            let result = try await api.startCompress(path: pathArg, jobId: jobIdArg, request: requestArg)
+            reply(wrapResult(result))
+          } catch {
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      startCompressChannel.setMessageHandler(nil)
+    }
+    /// Cancels the job identified by [jobId]. A no-op if the job has already finished.
+    let cancelChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.compress_video.CompressHostApi.cancel\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      cancelChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let jobIdArg = args[0] as! String
+        Task { @MainActor in
+          do {
+            try await api.cancel(jobId: jobIdArg)
+            reply(wrapResult(nil))
+          } catch {
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      cancelChannel.setMessageHandler(nil)
+    }
+    /// Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
+    /// [request], without running an actual encode.
+    let estimateChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.compress_video.CompressHostApi.estimate\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      estimateChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        let requestArg = args[1] as! CompressRequestMessage
+        Task { @MainActor in
+          do {
+            let result = try await api.estimate(path: pathArg, request: requestArg)
+            reply(wrapResult(result))
+          } catch {
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      estimateChannel.setMessageHandler(nil)
+    }
+    /// Deletes every file the plugin has written to its own cache directory.
+    let clearCacheChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.compress_video.CompressHostApi.clearCache\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      clearCacheChannel.setMessageHandler { _, reply in
+        Task { @MainActor in
+          do {
+            try await api.clearCache()
+            reply(wrapResult(nil))
+          } catch {
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      clearCacheChannel.setMessageHandler(nil)
+    }
+  }
+}
+
+/// Progress notifications from native code back to Dart, keyed by job id. Fire-and-forget:
+/// Dart does not reply to this call.
+///
+/// Generated protocol from Pigeon that represents Flutter messages that can be called from Swift.
+protocol CompressVideoFlutterApiProtocol {
+  /// Reports that the job identified by [jobId] has reached [percent] (0 to 100) complete.
+  @MainActor func onProgress(jobId jobIdArg: String, percent percentArg: Double) async throws
+}
+class CompressVideoFlutterApi: CompressVideoFlutterApiProtocol {
+  private let binaryMessenger: FlutterBinaryMessenger
+  private let messageChannelSuffix: String
+  init(binaryMessenger: FlutterBinaryMessenger, messageChannelSuffix: String = "") {
+    self.binaryMessenger = binaryMessenger
+    self.messageChannelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+  }
+  var codec: MessagesPigeonCodec {
+    return MessagesPigeonCodec.shared
+  }
+  /// Reports that the job identified by [jobId] has reached [percent] (0 to 100) complete.
+  @MainActor func onProgress(jobId jobIdArg: String, percent percentArg: Double) async throws {
+    return try await withCheckedThrowingContinuation { continuation in
+      let channelName: String = "dev.flutter.pigeon.compress_video.CompressVideoFlutterApi.onProgress\(messageChannelSuffix)"
+      let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+      channel.sendMessage([jobIdArg, percentArg] as [Any?]) { response in
+        guard let listResponse = response as? [Any?] else {
+          continuation.resume(throwing: createConnectionError(withChannelName: channelName))
+          return
+        }
+        if listResponse.count > 1 {
+          let code: String = listResponse[0] as! String
+          let message: String? = nilOrValue(listResponse[1])
+          let details: String? = nilOrValue(listResponse[2])
+          continuation.resume(throwing: CompressVideoError(code: code, message: message, details: details))
+        } else {
+          continuation.resume()
+        }
+      }
     }
   }
 }

@@ -1,8 +1,8 @@
 /// The reason a [CompressVideoException] was thrown.
 ///
-/// Later phases append `encoderUnavailable`, `outOfSpace` and `interrupted` as compression jobs
-/// are implemented; this phase's media-info and thumbnail calls only ever throw the reasons
-/// below.
+/// The first six values were established in Phase 1 for media-info and thumbnail calls; the
+/// last three were appended in Phase 2 for compression jobs. All nine are stable — no value's
+/// meaning changes once added, and this order is preserved.
 enum CompressVideoErrorReason {
   /// The path given did not resolve to a readable file.
   fileNotFound,
@@ -26,6 +26,17 @@ enum CompressVideoErrorReason {
   /// The original platform error code is preserved in [CompressVideoException.platformDetail]
   /// so it is never silently discarded.
   unknown,
+
+  /// The device could not obtain or configure an encoder for the requested output.
+  encoderUnavailable,
+
+  /// The destination filesystem does not have room for the output.
+  outOfSpace,
+
+  /// The operation was interrupted by the system before it completed and can be retried.
+  /// Thrown only by the Apple engine (Phase 5), but present in the taxonomy now so this enum's
+  /// shape does not change later.
+  interrupted,
 }
 
 /// Maps a native platform error code to a [CompressVideoErrorReason].

@@ -21,6 +21,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 private object MessagesPigeonUtils {
 
+  fun createConnectionError(channelName: String): CompressVideoError {
+    return CompressVideoError("channel-error",  "Unable to establish connection on channel: '$channelName'.", "")  }
+
   fun wrapResult(result: Any?): List<Any?> {
     return listOf(result)
   }
@@ -199,6 +202,28 @@ class CompressVideoError (
 ) : RuntimeException()
 
 /**
+ * How the audio track is handled during compression. Wire-level counterpart of the public
+ * `AudioMode` enum in `lib/src/compress_options.dart`.
+ */
+enum class AudioModeMessage(val raw: Int) {
+  /**
+   * Keep the source audio track's encoding when it is already MP4-compatible AAC; re-encode
+   * otherwise. This is the default.
+   */
+  PASSTHROUGH(0),
+  /** Always re-encode the audio track to AAC, honouring the requested bitrate and channels. */
+  REENCODE(1),
+  /** Remove the audio track entirely. The result's `audioCodec` is `null`. */
+  STRIP(2);
+
+  companion object {
+    fun ofRaw(raw: Int): AudioModeMessage? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
+/**
  * The wire-format media info message returned by [ProbeHostApi.getMediaInfo].
  *
  * This is the generated, private counterpart of the public, hand-written `MediaInfo`
@@ -303,12 +328,353 @@ data class MediaInfoMessage (
     return "MediaInfoMessage(durationMs=$durationMs, widthPx=$widthPx, heightPx=$heightPx, rotationDegrees=$rotationDegrees, sizeBytes=$sizeBytes, videoCodec=$videoCodec, videoBitrateBps=$videoBitrateBps, frameRateFps=$frameRateFps, hasAudio=$hasAudio, isHdr=$isHdr)"
   }
 }
+
+/**
+ * A compression request, sent once per job via [CompressHostApi.startCompress] and also used
+ * (identically) by [CompressHostApi.estimate] to predict what that request would produce.
+ *
+ * The preset named by the caller's `CompressOptions.preset` (see
+ * `lib/src/compress_options.dart`) is resolved to a concrete [maxLongSidePx] plus
+ * [videoBitrateBps] entirely on the Dart side before this message is built — no preset enum
+ * crosses the channel, so a reader will not find one here.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class CompressRequestMessage (
+  /**
+   * Cap on the output's longer displayed side, in pixels, or `null` for no explicit cap
+   * (the preset's own value is already resolved into this field by the time it crosses the
+   * channel, so `null` here means "use the input's own long side").
+   */
+  val maxLongSidePx: Long? = null,
+  /**
+   * Target video bitrate, in bits per second, or `null` when a preset/target-size resolved
+   * no explicit bitrate.
+   */
+  val videoBitrateBps: Long? = null,
+  /** Target output file size, in megabytes, or `null` when no target size was requested. */
+  val targetSizeMb: Double? = null,
+  /**
+   * Cap on the output's frame rate, in frames per second. Never upscales the input's own
+   * frame rate — the effective cap is `min(maxFps, input fps)`.
+   */
+  val maxFps: Long,
+  /** How the audio track is handled. See [AudioModeMessage]. */
+  val audioMode: AudioModeMessage,
+  /**
+   * Target audio bitrate, in bits per second, when [audioMode] is
+   * [AudioModeMessage.reencode]. `null` otherwise.
+   */
+  val audioBitrateBps: Long? = null,
+  /**
+   * Target audio channel count, when [audioMode] is [AudioModeMessage.reencode]. `null`
+   * otherwise.
+   */
+  val audioChannels: Long? = null,
+  /**
+   * Start of the trim range, in milliseconds from the start of the input, or `null` for no
+   * trim start.
+   */
+  val trimStartMs: Long? = null,
+  /**
+   * End of the trim range, in milliseconds from the start of the input, or `null` for no
+   * trim end.
+   */
+  val trimEndMs: Long? = null,
+  /**
+   * Destination path for the compressed output, or `null` to use the plugin's own cache
+   * directory with a name derived from the job id.
+   */
+  val outputPath: String? = null,
+  /**
+   * Requested output video codec. Only `"h264"` is accepted in this phase; HEVC opt-in is
+   * Phase 4.
+   */
+  val videoCodec: String,
+  /**
+   * Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
+   * is Phase 4.
+   */
+  val hdrMode: String
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CompressRequestMessage {
+      val maxLongSidePx = pigeonVar_list[0] as Long?
+      val videoBitrateBps = pigeonVar_list[1] as Long?
+      val targetSizeMb = pigeonVar_list[2] as Double?
+      val maxFps = pigeonVar_list[3] as Long
+      val audioMode = pigeonVar_list[4] as AudioModeMessage
+      val audioBitrateBps = pigeonVar_list[5] as Long?
+      val audioChannels = pigeonVar_list[6] as Long?
+      val trimStartMs = pigeonVar_list[7] as Long?
+      val trimEndMs = pigeonVar_list[8] as Long?
+      val outputPath = pigeonVar_list[9] as String?
+      val videoCodec = pigeonVar_list[10] as String
+      val hdrMode = pigeonVar_list[11] as String
+      return CompressRequestMessage(maxLongSidePx, videoBitrateBps, targetSizeMb, maxFps, audioMode, audioBitrateBps, audioChannels, trimStartMs, trimEndMs, outputPath, videoCodec, hdrMode)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      maxLongSidePx,
+      videoBitrateBps,
+      targetSizeMb,
+      maxFps,
+      audioMode,
+      audioBitrateBps,
+      audioChannels,
+      trimStartMs,
+      trimEndMs,
+      outputPath,
+      videoCodec,
+      hdrMode,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as CompressRequestMessage
+    return MessagesPigeonUtils.deepEquals(this.maxLongSidePx, other.maxLongSidePx) && MessagesPigeonUtils.deepEquals(this.videoBitrateBps, other.videoBitrateBps) && MessagesPigeonUtils.deepEquals(this.targetSizeMb, other.targetSizeMb) && MessagesPigeonUtils.deepEquals(this.maxFps, other.maxFps) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.audioBitrateBps, other.audioBitrateBps) && MessagesPigeonUtils.deepEquals(this.audioChannels, other.audioChannels) && MessagesPigeonUtils.deepEquals(this.trimStartMs, other.trimStartMs) && MessagesPigeonUtils.deepEquals(this.trimEndMs, other.trimEndMs) && MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.hdrMode, other.hdrMode)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.maxLongSidePx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.videoBitrateBps)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.targetSizeMb)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.maxFps)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioMode)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioBitrateBps)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioChannels)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.trimStartMs)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.trimEndMs)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.outputPath)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.videoCodec)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.hdrMode)
+    return result
+  }
+  override fun toString(): String {
+    return "CompressRequestMessage(maxLongSidePx=$maxLongSidePx, videoBitrateBps=$videoBitrateBps, targetSizeMb=$targetSizeMb, maxFps=$maxFps, audioMode=$audioMode, audioBitrateBps=$audioBitrateBps, audioChannels=$audioChannels, trimStartMs=$trimStartMs, trimEndMs=$trimEndMs, outputPath=$outputPath, videoCodec=$videoCodec, hdrMode=$hdrMode)"
+  }
+}
+
+/**
+ * The typed result of a completed compression job. Every field is populated from a re-probe
+ * of the finished output file, never from the export engine's own approximate fields — see
+ * 02-RESEARCH.md Pitfall 4.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class CompressResultMessage (
+  /** Absolute path to the compressed output file. */
+  val outputPath: String,
+  /** Size of the input file, in bytes. */
+  val inputBytes: Long,
+  /** Size of the output file, in bytes. */
+  val outputBytes: Long,
+  /** Displayed (rotation-corrected) width of the output, in pixels. */
+  val widthPx: Long,
+  /** Displayed (rotation-corrected) height of the output, in pixels. */
+  val heightPx: Long,
+  /** Duration of the output, in milliseconds, from a re-probe of the finished file. */
+  val durationMs: Long,
+  /** Normalised video codec of the output (for example `h264`). */
+  val videoCodec: String,
+  /**
+   * Normalised audio codec of the output, or `null` when the audio track was stripped or the
+   * source had none.
+   */
+  val audioCodec: String? = null,
+  /**
+   * Whether the job ran as a transmux (container remux with no video re-encode) rather than
+   * a full encode.
+   */
+  val transmuxed: Boolean,
+  /**
+   * Whether the original input bytes were copied to [outputPath] because compressing would
+   * have produced an equal-or-larger file. `outputPath` always names a file the plugin owns
+   * (never the caller's original input path) when this is `true`.
+   */
+  val usedOriginal: Boolean,
+  /** Reserved for Phase 4's HDR tone-mapping. Always `false` in this phase. */
+  val toneMapped: Boolean,
+  /** Reserved for Phase 4's HEVC hardware-fallback handling. Always `false` in this phase. */
+  val hevcFallback: Boolean,
+  /** Whether the audio track was re-encoded (as opposed to passed through or stripped). */
+  val audioReencoded: Boolean,
+  /** Wall-clock time the compression took, in milliseconds. */
+  val elapsedMs: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CompressResultMessage {
+      val outputPath = pigeonVar_list[0] as String
+      val inputBytes = pigeonVar_list[1] as Long
+      val outputBytes = pigeonVar_list[2] as Long
+      val widthPx = pigeonVar_list[3] as Long
+      val heightPx = pigeonVar_list[4] as Long
+      val durationMs = pigeonVar_list[5] as Long
+      val videoCodec = pigeonVar_list[6] as String
+      val audioCodec = pigeonVar_list[7] as String?
+      val transmuxed = pigeonVar_list[8] as Boolean
+      val usedOriginal = pigeonVar_list[9] as Boolean
+      val toneMapped = pigeonVar_list[10] as Boolean
+      val hevcFallback = pigeonVar_list[11] as Boolean
+      val audioReencoded = pigeonVar_list[12] as Boolean
+      val elapsedMs = pigeonVar_list[13] as Long
+      return CompressResultMessage(outputPath, inputBytes, outputBytes, widthPx, heightPx, durationMs, videoCodec, audioCodec, transmuxed, usedOriginal, toneMapped, hevcFallback, audioReencoded, elapsedMs)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      outputPath,
+      inputBytes,
+      outputBytes,
+      widthPx,
+      heightPx,
+      durationMs,
+      videoCodec,
+      audioCodec,
+      transmuxed,
+      usedOriginal,
+      toneMapped,
+      hevcFallback,
+      audioReencoded,
+      elapsedMs,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as CompressResultMessage
+    return MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.inputBytes, other.inputBytes) && MessagesPigeonUtils.deepEquals(this.outputBytes, other.outputBytes) && MessagesPigeonUtils.deepEquals(this.widthPx, other.widthPx) && MessagesPigeonUtils.deepEquals(this.heightPx, other.heightPx) && MessagesPigeonUtils.deepEquals(this.durationMs, other.durationMs) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.audioCodec, other.audioCodec) && MessagesPigeonUtils.deepEquals(this.transmuxed, other.transmuxed) && MessagesPigeonUtils.deepEquals(this.usedOriginal, other.usedOriginal) && MessagesPigeonUtils.deepEquals(this.toneMapped, other.toneMapped) && MessagesPigeonUtils.deepEquals(this.hevcFallback, other.hevcFallback) && MessagesPigeonUtils.deepEquals(this.audioReencoded, other.audioReencoded) && MessagesPigeonUtils.deepEquals(this.elapsedMs, other.elapsedMs)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.outputPath)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.inputBytes)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.outputBytes)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.widthPx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.heightPx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.durationMs)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.videoCodec)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioCodec)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.transmuxed)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.usedOriginal)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.toneMapped)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.hevcFallback)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioReencoded)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.elapsedMs)
+    return result
+  }
+  override fun toString(): String {
+    return "CompressResultMessage(outputPath=$outputPath, inputBytes=$inputBytes, outputBytes=$outputBytes, widthPx=$widthPx, heightPx=$heightPx, durationMs=$durationMs, videoCodec=$videoCodec, audioCodec=$audioCodec, transmuxed=$transmuxed, usedOriginal=$usedOriginal, toneMapped=$toneMapped, hevcFallback=$hevcFallback, audioReencoded=$audioReencoded, elapsedMs=$elapsedMs)"
+  }
+}
+
+/**
+ * The typed, pre-flight prediction of what a [CompressRequestMessage] would produce, without
+ * running an actual encode.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class EstimateMessage (
+  /** Predicted size of the output, in bytes. */
+  val outputBytes: Long,
+  /** Predicted duration of the output, in milliseconds. */
+  val durationMs: Long,
+  /** Predicted displayed width of the output, in pixels. */
+  val widthPx: Long,
+  /** Predicted displayed height of the output, in pixels. */
+  val heightPx: Long,
+  /** Whether the request would run as a transmux rather than a full encode. */
+  val wouldTransmux: Boolean,
+  /** Whether the request would fall back to copying the original input rather than encoding. */
+  val wouldUseOriginal: Boolean
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): EstimateMessage {
+      val outputBytes = pigeonVar_list[0] as Long
+      val durationMs = pigeonVar_list[1] as Long
+      val widthPx = pigeonVar_list[2] as Long
+      val heightPx = pigeonVar_list[3] as Long
+      val wouldTransmux = pigeonVar_list[4] as Boolean
+      val wouldUseOriginal = pigeonVar_list[5] as Boolean
+      return EstimateMessage(outputBytes, durationMs, widthPx, heightPx, wouldTransmux, wouldUseOriginal)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      outputBytes,
+      durationMs,
+      widthPx,
+      heightPx,
+      wouldTransmux,
+      wouldUseOriginal,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as EstimateMessage
+    return MessagesPigeonUtils.deepEquals(this.outputBytes, other.outputBytes) && MessagesPigeonUtils.deepEquals(this.durationMs, other.durationMs) && MessagesPigeonUtils.deepEquals(this.widthPx, other.widthPx) && MessagesPigeonUtils.deepEquals(this.heightPx, other.heightPx) && MessagesPigeonUtils.deepEquals(this.wouldTransmux, other.wouldTransmux) && MessagesPigeonUtils.deepEquals(this.wouldUseOriginal, other.wouldUseOriginal)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.outputBytes)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.durationMs)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.widthPx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.heightPx)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.wouldTransmux)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.wouldUseOriginal)
+    return result
+  }
+  override fun toString(): String {
+    return "EstimateMessage(outputBytes=$outputBytes, durationMs=$durationMs, widthPx=$widthPx, heightPx=$heightPx, wouldTransmux=$wouldTransmux, wouldUseOriginal=$wouldUseOriginal)"
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
       129.toByte() -> {
+        return (readValue(buffer) as Long?)?.let {
+          AudioModeMessage.ofRaw(it.toInt())
+        }
+      }
+      130.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           MediaInfoMessage.fromList(it)
+        }
+      }
+      131.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CompressRequestMessage.fromList(it)
+        }
+      }
+      132.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CompressResultMessage.fromList(it)
+        }
+      }
+      133.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          EstimateMessage.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -316,8 +682,24 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
   }
   override fun writeValue(stream: ByteArrayOutputStream, value: Any?)   {
     when (value) {
-      is MediaInfoMessage -> {
+      is AudioModeMessage -> {
         stream.write(129)
+        writeValue(stream, value.raw.toLong())
+      }
+      is MediaInfoMessage -> {
+        stream.write(130)
+        writeValue(stream, value.toList())
+      }
+      is CompressRequestMessage -> {
+        stream.write(131)
+        writeValue(stream, value.toList())
+      }
+      is CompressResultMessage -> {
+        stream.write(132)
+        writeValue(stream, value.toList())
+      }
+      is EstimateMessage -> {
+        stream.write(133)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -444,6 +826,154 @@ interface ThumbnailHostApi {
         } else {
           channel.setMessageHandler(null)
         }
+      }
+    }
+  }
+}
+/**
+ * Runs and manages compression jobs. Implemented per-platform; this phase implements Android
+ * only.
+ *
+ * Generated interface from Pigeon that represents a handler of messages from Flutter.
+ */
+interface CompressHostApi {
+  /**
+   * Starts a compression job for the media at [path], identified by the caller-generated
+   * [jobId], with the given [request]. [jobId] is generated by the caller (Dart) so two jobs
+   * started back to back never race on native-side id generation.
+   */
+  suspend fun startCompress(path: String, jobId: String, request: CompressRequestMessage): CompressResultMessage
+  /** Cancels the job identified by [jobId]. A no-op if the job has already finished. */
+  suspend fun cancel(jobId: String)
+  /**
+   * Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
+   * [request], without running an actual encode.
+   */
+  suspend fun estimate(path: String, request: CompressRequestMessage): EstimateMessage
+  /** Deletes every file the plugin has written to its own cache directory. */
+  suspend fun clearCache()
+
+  companion object {
+    /** The codec used by CompressHostApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+    /** Sets up an instance of `CompressHostApi` to handle messages through the `binaryMessenger`. */
+    @JvmOverloads
+    fun setUp(binaryMessenger: BinaryMessenger, api: CompressHostApi?, messageChannelSuffix: String = "") {
+      val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.compress_video.CompressHostApi.startCompress$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val jobIdArg = args[1] as String
+            val requestArg = args[2] as CompressRequestMessage
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.startCompress(pathArg, jobIdArg, requestArg))
+              } catch (exception: Throwable) {
+                MessagesPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.compress_video.CompressHostApi.cancel$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val jobIdArg = args[0] as String
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                api.cancel(jobIdArg)
+                listOf(null)
+              } catch (exception: Throwable) {
+                MessagesPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.compress_video.CompressHostApi.estimate$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val requestArg = args[1] as CompressRequestMessage
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.estimate(pathArg, requestArg))
+              } catch (exception: Throwable) {
+                MessagesPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.compress_video.CompressHostApi.clearCache$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                api.clearCache()
+                listOf(null)
+              } catch (exception: Throwable) {
+                MessagesPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+    }
+  }
+}
+/**
+ * Progress notifications from native code back to Dart, keyed by job id. Fire-and-forget:
+ * Dart does not reply to this call.
+ *
+ * Generated class from Pigeon that represents Flutter messages that can be called from Kotlin.
+ */
+class CompressVideoFlutterApi(private val binaryMessenger: BinaryMessenger, private val messageChannelSuffix: String = "") {
+  companion object {
+    /** The codec used by CompressVideoFlutterApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+  }
+  /** Reports that the job identified by [jobId] has reached [percent] (0 to 100) complete. */
+  suspend fun onProgress(jobIdArg: String, percentArg: Double)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    return suspendCancellableCoroutine { continuation ->
+      val channelName = "dev.flutter.pigeon.compress_video.CompressVideoFlutterApi.onProgress$separatedMessageChannelSuffix"
+      val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+      channel.send(listOf(jobIdArg, percentArg)) {
+        if (it is List<*>) {
+          if (it.size > 1) {
+            continuation.resumeWithException(CompressVideoError(it[0] as String, it[1] as String, it[2] as String?))
+          } else {
+            continuation.resume(Unit)
+          }
+        } else {
+          continuation.resumeWithException(MessagesPigeonUtils.createConnectionError(channelName))
+        } 
       }
     }
   }
