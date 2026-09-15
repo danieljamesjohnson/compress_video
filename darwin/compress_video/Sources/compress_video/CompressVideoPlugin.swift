@@ -2,34 +2,27 @@ import Foundation
 
 #if os(iOS)
   import Flutter
-  import UIKit
 #elseif os(macOS)
-  import Cocoa
   import FlutterMacOS
+#else
+  #error("Unsupported platform.")
 #endif
 
+/// The `compress_video` Flutter plugin: registers the generated `ProbeHostApi` and
+/// `ThumbnailHostApi` implementations against the platform's binary messenger.
+///
+/// No hand-written channel code exists here or anywhere else in this package -- every
+/// quantity crossing the platform channel is a Pigeon-generated type, wired through the
+/// generated `*Setup.setUp(binaryMessenger:api:)` entry points below.
 public class CompressVideoPlugin: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
     #if os(iOS)
       let messenger = registrar.messenger()
-    #else
+    #elseif os(macOS)
       let messenger = registrar.messenger
     #endif
-    let channel = FlutterMethodChannel(name: "compress_video", binaryMessenger: messenger)
-    let instance = CompressVideoPlugin()
-    registrar.addMethodCallDelegate(instance, channel: channel)
-  }
 
-  public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "getPlatformVersion":
-      #if os(iOS)
-        result("iOS " + UIDevice.current.systemVersion)
-      #elseif os(macOS)
-        result("macOS " + ProcessInfo.processInfo.operatingSystemVersionString)
-      #endif
-    default:
-      result(FlutterMethodNotImplemented)
-    }
+    ProbeHostApiSetup.setUp(binaryMessenger: messenger, api: Probe())
+    ThumbnailHostApiSetup.setUp(binaryMessenger: messenger, api: Thumbnails())
   }
 }

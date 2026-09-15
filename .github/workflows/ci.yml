@@ -218,6 +218,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Verify RunnerTests.swift is identical on iOS and macOS
+        # example/ios/RunnerTests/RunnerTests.swift and example/macos/RunnerTests/RunnerTests.swift
+        # are the only files their respective XCTest targets compile (see 01-06-PLAN.md) and must
+        # be kept byte-identical, so a rule proven on one Apple platform cannot silently diverge
+        # on the other.
+        run: diff example/ios/RunnerTests/RunnerTests.swift example/macos/RunnerTests/RunnerTests.swift
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
