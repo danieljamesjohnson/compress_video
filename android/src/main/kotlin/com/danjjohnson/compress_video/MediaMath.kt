@@ -1,6 +1,7 @@
 package com.danjjohnson.compress_video
 
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * Pure, unit-testable rotation/dimension/codec/duration logic shared by every Android call.
@@ -51,4 +52,31 @@ object MediaMath {
      * a unit that requires conversion to whole milliseconds.
      */
     fun roundHalfUpMs(valueMs: Double): Long = floor(valueMs + 0.5).toLong()
+
+    /**
+     * Returns the `(width, height)` a displayed `displayedWidthPx x displayedHeightPx` frame
+     * should be scaled to so its longer side is at most `maxDimensionPx`, preserving aspect
+     * ratio and rounding to the nearest integer.
+     *
+     * Returns the input unchanged -- never a larger dimension than the input -- when
+     * `maxDimensionPx` is `null` or already at least the longer of the two input sides. This
+     * is what guarantees a thumbnail is never upscaled.
+     */
+    fun scaledSize(
+        displayedWidthPx: Int,
+        displayedHeightPx: Int,
+        maxDimensionPx: Int?,
+    ): Pair<Int, Int> {
+        if (maxDimensionPx == null) {
+            return Pair(displayedWidthPx, displayedHeightPx)
+        }
+        val longerSidePx = maxOf(displayedWidthPx, displayedHeightPx)
+        if (maxDimensionPx >= longerSidePx) {
+            return Pair(displayedWidthPx, displayedHeightPx)
+        }
+        val scale = maxDimensionPx.toDouble() / longerSidePx.toDouble()
+        val scaledWidthPx = (displayedWidthPx * scale).roundToInt().coerceAtLeast(1)
+        val scaledHeightPx = (displayedHeightPx * scale).roundToInt().coerceAtLeast(1)
+        return Pair(scaledWidthPx, scaledHeightPx)
+    }
 }

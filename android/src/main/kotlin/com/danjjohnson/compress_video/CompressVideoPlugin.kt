@@ -9,9 +9,14 @@ class CompressVideoPlugin : FlutterPlugin {
             flutterPluginBinding.binaryMessenger,
             Probe(flutterPluginBinding.applicationContext),
         )
+        ThumbnailHostApi.setUp(
+            flutterPluginBinding.binaryMessenger,
+            Thumbnails(flutterPluginBinding.applicationContext),
+        )
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         ProbeHostApi.setUp(binding.binaryMessenger, null)
+        ThumbnailHostApi.setUp(binding.binaryMessenger, null)
     }
 }
