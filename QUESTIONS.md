@@ -36,3 +36,27 @@ Not blocking until Phase 4 (Codecs, HDR and Hard Inputs).
 ## 5. GitHub repository visibility
 
 Phase 1 creates `github.com/danieljamesjohnson/compress_video` as **private** and wires GitHub Actions to it (Linux + macOS runners). Your account is on the free plan: private repos get 2,000 Actions minutes/month and macOS is billed at 10×, so the macOS job is path-filtered to Apple-relevant changes. Making the repo public (Settings → General → Change visibility) lifts the cap entirely and is the intended MIT end state. Your call on when.
+
+## 6. GitHub Actions billing block (blocks all further Apple/macOS CI verification) — 2026-09-15
+
+While driving 01-06 (Apple Probe/Thumbnails) to a green CI run, the `apple` job stopped starting
+entirely. `gh run view <id> --attempt 3` shows:
+
+> The job was not started because recent account payments have failed or your spending limit
+> needs to be increased. Please check the 'Billing & plans' section in your settings.
+
+This happened after several real Apple CI runs in one session (each macOS run is billed at 10x
+Actions minutes per QUESTIONS.md #5) — likely either a lapsed payment method or the account's
+Actions spending limit was reached mid-session.
+
+**To unblock:** GitHub → Settings → Billing and plans → check for a failed payment / update the
+payment method, and/or raise the Actions spending limit (Settings → Billing and plans → Plans
+and usage → Spending limits — the default on a fresh account is often $0, which blocks any
+overage past the included free minutes).
+
+Until this is fixed, no `apple` job on this workflow can run at all (not "red", literally never
+started — `Detect Apple-relevant changes` and `Android` still ran fine on the free Linux
+minutes). 01-06's Apple Swift changes are code-complete and were validated as far as CI would run
+(see 01-06-SUMMARY.md), but the final fully-green confirmation of the last fix is blocked here.
+Re-run the `CI` workflow's latest `main` push (`gh run rerun <id> --failed` or a new push) once
+billing is resolved.
