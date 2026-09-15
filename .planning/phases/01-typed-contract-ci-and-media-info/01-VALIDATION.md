@@ -42,7 +42,7 @@ created: 2026-09-15
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 1-01-01 | 01 | 1 | BULD-05 | T-01-01 / T-01-02 | SDK archive checksum verified before unzip; sudo limited to apt + usermod | cli | `flutter doctor -v` + `adb devices` | ✅ | ⬜ pending |
 | 1-01-02 | 01 | 1 | BULD-05 | T-01-03 | Repo created private; default workflow token read-only | cli | `gh repo view --json visibility` | ✅ | ⬜ pending |
-| 1-01-03 | 01 | 1 | BULD-05 | — | N/A | cli | `grep -q 'Verified on' docs/TOOLCHAIN.md` | ✅ | ⬜ pending |
+| 1-01-03 | 01 | 1 | BULD-05 | — | N/A | cli | `grep -q 'Verified on' doc/TOOLCHAIN.md` | ✅ | ⬜ pending |
 | 1-02-01 | 02 | 1 | INFO-01 | T-01-04 | ffmpeg runs only on locally generated input | cli | `bash corpus/generate_corpus.sh && ffprobe ...` | ✅ | ⬜ pending |
 | 1-02-02 | 02 | 1 | INFO-01, INFO-02 | T-01-05 | Sidecars regenerated from the committed clips, never hand-edited | cli | `bash corpus/verify_corpus.sh` | ✅ | ⬜ pending |
 | 1-03-01 | 03 | 2 | BULD-03 | T-01-06 | Dependency pins from the verified legitimacy audit | unit | `flutter test test/compress_video_exception_test.dart` | ✅ | ⬜ pending |

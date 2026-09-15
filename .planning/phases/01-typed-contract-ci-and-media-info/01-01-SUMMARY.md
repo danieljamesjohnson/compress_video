@@ -9,7 +9,7 @@ requires: []
 provides:
   - A working Android SDK + headless KVM-accelerated emulator on danserver (`~/Android/Sdk`, AVD `compress_video_api35`)
   - A private GitHub repository (`danieljamesjohnson/compress_video`) wired as the `github` remote, with a read-only default Actions workflow token, alongside the existing danserver `origin`
-  - `docs/TOOLCHAIN.md` — quarterly toolchain-rot baseline with a verification date per pin
+  - `doc/TOOLCHAIN.md` — quarterly toolchain-rot baseline with a verification date per pin
   - `.planning/phases/01-typed-contract-ci-and-media-info/COVERAGE.md` — API-coverage declaration (no external API)
   - A fully filled `01-VALIDATION.md` (Test Infrastructure, Sampling Rate, 20-row Per-Task Verification Map, Wave 0 Requirements, Manual-Only Verifications)
 affects: [01-02, 01-03, 01-04, 01-05, 01-06, 01-07]
@@ -27,7 +27,7 @@ tech-stack:
 
 key-files:
   created:
-    - docs/TOOLCHAIN.md
+    - doc/TOOLCHAIN.md
     - .planning/phases/01-typed-contract-ci-and-media-info/COVERAGE.md
   modified:
     - .claude/CLAUDE.md
@@ -74,10 +74,10 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: "Toolchain pin baseline (docs/TOOLCHAIN.md), API-coverage declaration (COVERAGE.md) and a fully filled 01-VALIDATION.md are committed with no template placeholders"
+    description: "Toolchain pin baseline (doc/TOOLCHAIN.md), API-coverage declaration (COVERAGE.md) and a fully filled 01-VALIDATION.md are committed with no template placeholders"
     verification:
       - kind: other
-        ref: "grep -c 'Verified on' docs/TOOLCHAIN.md; grep -q '9.0.1'/'29.0.1'/'3.44.1' docs/TOOLCHAIN.md"
+        ref: "grep -c 'Verified on' doc/TOOLCHAIN.md; grep -q '9.0.1'/'29.0.1'/'3.44.1' doc/TOOLCHAIN.md"
         status: pass
       - kind: other
         ref: "wc -l COVERAGE.md == 1; grep -c 'No external API integration' == 1"
@@ -110,7 +110,7 @@ status: complete
 - Installed JDK 17, the Android command-line tools (fetched live from developer.android.com, sha256 recorded in the commit), platform-tools, platforms;android-36, build-tools;36.1.0 and the android-35 google_apis x86_64 system image under `~/Android/Sdk`
 - Created and booted a headless AVD (`compress_video_api35`, pixel_6 profile) that reaches `sys.boot_completed=1` in ~10 s under KVM acceleration
 - Created the private GitHub repository `danieljamesjohnson/compress_video`, added it as the `github` remote alongside the existing danserver `origin`, and locked its default Actions workflow token to read-only
-- Wrote `docs/TOOLCHAIN.md`, the quarterly toolchain-rot baseline, with every pin's version, source of truth and verification date — several values (AGP, Kotlin, Gradle wrapper, compileSdk) confirmed live by generating a throwaway Flutter plugin and reading its generated build files directly, not from memory
+- Wrote `doc/TOOLCHAIN.md`, the quarterly toolchain-rot baseline, with every pin's version, source of truth and verification date — several values (AGP, Kotlin, Gradle wrapper, compileSdk) confirmed live by generating a throwaway Flutter plugin and reading its generated build files directly, not from memory
 - Wrote the one-line `COVERAGE.md` API-coverage declaration and fully replaced every placeholder in `01-VALIDATION.md`
 
 ## Task Commits
@@ -122,7 +122,7 @@ status: complete
 **Plan metadata:** (this commit, docs)
 
 ## Files Created/Modified
-- `docs/TOOLCHAIN.md` - Quarterly toolchain-rot baseline, one row per pin with verification date
+- `doc/TOOLCHAIN.md` - Quarterly toolchain-rot baseline, one row per pin with verification date
 - `.planning/phases/01-typed-contract-ci-and-media-info/COVERAGE.md` - One-line API-coverage declaration
 - `.planning/phases/01-typed-contract-ci-and-media-info/01-VALIDATION.md` - Filled Test Infrastructure, Sampling Rate, Per-Task Verification Map (20 rows), Wave 0 Requirements, Manual-Only Verifications
 - `.claude/CLAUDE.md` - Lane notes updated with the full Android SDK install recipe (paths, package ids, AVD name, boot command, `sg kvm -c` requirement)
@@ -169,7 +169,7 @@ None - no external service configuration required. (The GitHub repo, remote, and
 ## Next Phase Readiness
 - Android code can now be compiled, tested and run on danserver without any further setup — `flutter doctor -v` is clean on the Android toolchain, and the emulator boots headless in ~10 s.
 - The repository is on GitHub with both remotes (`origin`, `github`) in sync at the same commit, and a read-only default Actions workflow token, so plan 01-03's CI workflow can be added next without granting write access by accident.
-- `docs/TOOLCHAIN.md`, `COVERAGE.md` and `01-VALIDATION.md` are in place for the rest of the phase to build against.
+- `doc/TOOLCHAIN.md`, `COVERAGE.md` and `01-VALIDATION.md` are in place for the rest of the phase to build against.
 - Ready for 01-02-PLAN.md (generated corpus clips and sidecars), the other Wave 1 plan.
 - Outstanding: `01-01-PLAN.md`'s Task 3 acceptance criteria should be corrected from 21 to 20 rows the next time this plan is touched (see Deviations above) — not blocking, informational only.
 
@@ -179,7 +179,7 @@ None - no external service configuration required. (The GitHub repo, remote, and
 
 ## Self-Check: PASSED
 
-- FOUND: docs/TOOLCHAIN.md
+- FOUND: doc/TOOLCHAIN.md
 - FOUND: .planning/phases/01-typed-contract-ci-and-media-info/COVERAGE.md
 - FOUND: .planning/phases/01-typed-contract-ci-and-media-info/01-VALIDATION.md
 - FOUND: .claude/CLAUDE.md
