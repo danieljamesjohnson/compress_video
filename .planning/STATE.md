@@ -85,6 +85,12 @@ Recent decisions affecting current work:
 - [Phase 4]: HEVC/HDR hardware checks need a physical Android phone (QUESTIONS.md #3).
 - [Phase 6]: No verified pub.dev publisher yet (QUESTIONS.md #2).
 
+## Needs Human
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 1 | needs_human | GitHub Actions billing/spending limit (QUESTIONS.md #6) or make repo public (#5); then `gh run rerun <latest main run> --failed` and `/gsd-autonomous --from 1` |
+
 ## Deferred Items
 
 Items acknowledged and deferred at milestone close, most recent first:
