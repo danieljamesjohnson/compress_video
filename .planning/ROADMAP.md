@@ -53,7 +53,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Android toolchain and emulator on danserver, private GitHub repo, toolchain pins, API-coverage declaration, validation contract
+- [x] 01-01-PLAN.md — Android toolchain and emulator on danserver, private GitHub repo, toolchain pins, API-coverage declaration, validation contract
 - [ ] 01-02-PLAN.md — Generated corpus: three phone-shaped clips with a real display matrix, ground-truth sidecars and a drift verifier
 
 **Wave 2** *(blocked on Wave 1 completion)*
