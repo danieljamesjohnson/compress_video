@@ -77,6 +77,7 @@ ffmpeg -y -loglevel error \
   -filter_complex "[0:v]drawtext=fontfile=${FONT}:text='%{eif\:t*1000\:d}ms':fontcolor=white:fontsize=48:x=10:y=10:box=1:boxcolor=black${DRAWBOXES}[v]" \
   -map "[v]" -map 1:a \
   -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 30 -g 30 \
+  -threads 1 -x264-params threads=1:sliced_threads=0 \
   -c:a aac -b:a 96k -ac 2 -ar 48000 \
   -movflags +faststart \
   -shortest \
@@ -111,6 +112,7 @@ ffmpeg -y -loglevel error \
   -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=3" \
   -map 0:v -map 1:a \
   -c:v libx264 -pix_fmt yuv420p -preset veryfast -b:v 300k -maxrate 350k -bufsize 600k \
+  -threads 1 -x264-params threads=1:sliced_threads=0 \
   -c:a aac -b:a 64k -ac 2 \
   -shortest \
   "$SMALL_TMP"
@@ -146,6 +148,7 @@ ffmpeg -y -loglevel error \
   -f lavfi -i "testsrc=size=1280x720:rate=30:duration=3" \
   -an \
   -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 30 \
+  -threads 1 -x264-params threads=1:sliced_threads=0 \
   "$NOAUDIO_TMP"
 
 mv "$NOAUDIO_TMP" "$NOAUDIO"
