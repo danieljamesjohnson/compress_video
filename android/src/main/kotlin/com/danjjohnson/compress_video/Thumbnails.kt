@@ -29,6 +29,7 @@ class Thumbnails(
         maxDimensionPx: Long?,
     ): ByteArray =
         withContext(Dispatchers.IO) {
+            Arguments.requireValidThumbnailArgs(positionMs, quality, maxDimensionPx, outputPath = null)
             extractThumbnailJpeg(path, positionMs, quality, maxDimensionPx)
         }
 
@@ -40,6 +41,7 @@ class Thumbnails(
         outputPath: String?,
     ): String =
         withContext(Dispatchers.IO) {
+            Arguments.requireValidThumbnailArgs(positionMs, quality, maxDimensionPx, outputPath)
             val jpegBytes = extractThumbnailJpeg(path, positionMs, quality, maxDimensionPx)
             writeJpegAtomically(jpegBytes, outputPath)
         }
@@ -48,8 +50,11 @@ class Thumbnails(
      * Reads the requested frame from [path] at [positionMs] and returns it JPEG-encoded at
      * [quality], with the longer displayed side capped at [maxDimensionPx] (never upscaled).
      *
-     * [positionMs] is converted to microseconds at this single point -- the only place in this
-     * class a unit conversion happens -- and the frame is requested with
+     * [positionMs] is clamped to the media's duration (a value past the end returns the last
+     * frame rather than erroring; both platforms' own frame APIs already do this, but
+     * [MediaMath.clampPositionMs] makes the policy explicit and pinnable by a pure unit test)
+     * and then converted to microseconds at this single point -- the only place in this class a
+     * unit conversion happens -- and the frame is requested with
      * [MediaMetadataRetriever.OPTION_CLOSEST] (the exact requested frame) rather than
      * [MediaMetadataRetriever.OPTION_CLOSEST_SYNC] (the nearest keyframe), so the returned
      * frame is the one at the requested moment, not a preceding sync frame. The retriever
@@ -63,7 +68,6 @@ class Thumbnails(
         maxDimensionPx: Long?,
     ): ByteArray {
         val file = Arguments.requireReadableMediaFile(path)
-        val positionUs = positionMs * 1000
 
         val retriever = MediaMetadataRetriever()
         var bitmap: Bitmap? = null
@@ -76,6 +80,13 @@ class Thumbnails(
                     "The platform could not read this file as media",
                 )
             }
+
+            val durationMs =
+                retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toDoubleOrNull()
+                    ?.let { MediaMath.roundHalfUpMs(it) } ?: 0L
+            val positionUs = MediaMath.clampPositionMs(positionMs, durationMs) * 1000
 
             val codedWidthPx =
                 retriever
@@ -94,10 +105,17 @@ class Thumbnails(
             val (targetWidthPx, targetHeightPx) =
                 MediaMath.scaledSize(displayedWidthPx, displayedHeightPx, maxDimensionPx?.toInt())
 
-            bitmap =
+            val decodedFrame =
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                    // getScaledFrameAtTime (API 27+) decodes directly at the target size and
-                    // still applies the display rotation to the returned bitmap.
+                    // getScaledFrameAtTime (API 27+) decodes near the target size and still
+                    // applies the display rotation to the returned bitmap. Its dstWidth/
+                    // dstHeight are a *fit-within* box (scaled by whichever dimension is more
+                    // constraining), not independent exact targets, so the box computed by
+                    // MediaMath.scaledSize -- which rounds width and height separately -- can
+                    // come back a pixel off in the non-constraining dimension. The explicit
+                    // snap-to-target-size step below (shared with the pre-27 path, which has
+                    // no scaled-decode API at all) is what guarantees the exact, pinnable
+                    // dimensions MediaMathTest.scaledSize asserts.
                     retriever.getScaledFrameAtTime(
                         positionUs,
                         MediaMetadataRetriever.OPTION_CLOSEST,
@@ -105,36 +123,28 @@ class Thumbnails(
                         targetHeightPx,
                     )
                 } else {
-                    val fullSizeFrame =
-                        retriever.getFrameAtTime(positionUs, MediaMetadataRetriever.OPTION_CLOSEST)
-                    if (fullSizeFrame != null &&
-                        (fullSizeFrame.width != targetWidthPx || fullSizeFrame.height != targetHeightPx)
-                    ) {
-                        val scaled =
-                            Bitmap.createScaledBitmap(
-                                fullSizeFrame,
-                                targetWidthPx,
-                                targetHeightPx,
-                                true,
-                            )
-                        if (scaled !== fullSizeFrame) {
-                            fullSizeFrame.recycle()
-                        }
-                        scaled
-                    } else {
-                        fullSizeFrame
+                    retriever.getFrameAtTime(positionUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                } ?: throw CompressVideoError(
+                    "unsupportedInput",
+                    "No frame could be decoded at the requested position",
+                )
+            bitmap = decodedFrame
+
+            val exactlySizedFrame =
+                if (decodedFrame.width != targetWidthPx || decodedFrame.height != targetHeightPx) {
+                    val snapped =
+                        Bitmap.createScaledBitmap(decodedFrame, targetWidthPx, targetHeightPx, true)
+                    if (snapped !== decodedFrame) {
+                        decodedFrame.recycle()
+                        bitmap = snapped
                     }
+                    snapped
+                } else {
+                    decodedFrame
                 }
 
-            val decodedFrame =
-                bitmap
-                    ?: throw CompressVideoError(
-                        "unsupportedInput",
-                        "No frame could be decoded at the requested position",
-                    )
-
             val stream = ByteArrayOutputStream()
-            decodedFrame.compress(Bitmap.CompressFormat.JPEG, quality.toInt(), stream)
+            exactlySizedFrame.compress(Bitmap.CompressFormat.JPEG, quality.toInt(), stream)
             return stream.toByteArray()
         } catch (e: CompressVideoError) {
             throw e

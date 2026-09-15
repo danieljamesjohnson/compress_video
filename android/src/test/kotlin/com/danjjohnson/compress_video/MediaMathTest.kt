@@ -71,4 +71,47 @@ internal class MediaMathTest {
     fun roundHalfUpMs_roundsUpAtTheHalfBoundary() {
         assertEquals(4001L, MediaMath.roundHalfUpMs(4000.5))
     }
+
+    @Test
+    fun scaledSize_maxDimensionEqualToTheLongerSide_returnsInputUnchanged() {
+        // 1080x1920 is portrait_rot90.mp4's displayed size (corpus/portrait_rot90.expected.json).
+        assertEquals(Pair(1080, 1920), MediaMath.scaledSize(1080, 1920, 1920))
+    }
+
+    @Test
+    fun scaledSize_maxDimensionOnePixelBelowTheLongerSide_downscalesPreservingAspectRatio() {
+        val (widthPx, heightPx) = MediaMath.scaledSize(1080, 1920, 1919)
+        assertEquals(1919, heightPx)
+        assertEquals(1079, widthPx)
+    }
+
+    @Test
+    fun scaledSize_maxDimensionFarAboveTheLongerSide_neverUpscales() {
+        assertEquals(Pair(1080, 1920), MediaMath.scaledSize(1080, 1920, 4000))
+    }
+
+    @Test
+    fun scaledSize_nullMaxDimension_returnsInputUnchanged() {
+        assertEquals(Pair(1080, 1920), MediaMath.scaledSize(1080, 1920, null))
+    }
+
+    @Test
+    fun scaledSize_squareInput_capsBothSidesEqually() {
+        assertEquals(Pair(500, 500), MediaMath.scaledSize(1000, 1000, 500))
+    }
+
+    @Test
+    fun clampPositionMs_belowDuration_passesThroughUnchanged() {
+        assertEquals(3999L, MediaMath.clampPositionMs(3999L, 4000L))
+    }
+
+    @Test
+    fun clampPositionMs_exactlyAtDuration_passesThroughUnchanged() {
+        assertEquals(4000L, MediaMath.clampPositionMs(4000L, 4000L))
+    }
+
+    @Test
+    fun clampPositionMs_aboveDuration_clampsDownToDuration() {
+        assertEquals(4000L, MediaMath.clampPositionMs(4001L, 4000L))
+    }
 }

@@ -79,4 +79,15 @@ object MediaMath {
         val scaledHeightPx = (displayedHeightPx * scale).roundToInt().coerceAtLeast(1)
         return Pair(scaledWidthPx, scaledHeightPx)
     }
+
+    /**
+     * Clamps a requested `positionMs` to `durationMs`: a value above `durationMs` clamps down
+     * to it, and `positionMs == durationMs` passes through unchanged so the last frame is still
+     * returned, not an error. A negative `positionMs` is never seen here -- [Arguments] rejects
+     * it before this is ever called -- so this function does not special-case it.
+     */
+    fun clampPositionMs(
+        positionMs: Long,
+        durationMs: Long,
+    ): Long = if (positionMs > durationMs) durationMs else positionMs
 }

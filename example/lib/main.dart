@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:typed_data' show ByteData;
+import 'dart:typed_data' show ByteData, Uint8List;
 
 import 'package:compress_video/compress_video.dart';
 import 'package:flutter/material.dart';
@@ -13,8 +13,9 @@ void main() {
 ///
 /// Lists the corpus clips bundled as assets (mirrored from `corpus/` by
 /// `corpus/sync_to_example.sh`) along with their byte sizes, read through `rootBundle`, and
-/// shows the decoded [MediaInfo] for the bundled portrait clip beneath the list -- a live,
-/// on-device demonstration of the same `getMediaInfo` call the integration test exercises.
+/// shows the decoded [MediaInfo] and a `getThumbnail` poster frame for the bundled portrait
+/// clip beneath the list -- a live, on-device demonstration of the same `getMediaInfo` and
+/// `getThumbnail` calls the integration tests exercise.
 class CompressVideoExampleApp extends StatelessWidget {
   /// Creates the example app.
   const CompressVideoExampleApp({super.key});
@@ -92,7 +93,17 @@ class _CorpusAssetListState extends State<_CorpusAssetList> {
   }
 }
 
-/// Decodes and displays [MediaInfo] for the bundled `portrait_rot90.mp4` corpus clip.
+/// The combined result of decoding [MediaInfo] and generating a poster-frame thumbnail for
+/// the bundled `portrait_rot90.mp4` corpus clip, from the same temp-file copy of the asset.
+class _PortraitMediaData {
+  const _PortraitMediaData({required this.info, required this.thumbnailBytes});
+
+  final MediaInfo info;
+  final Uint8List thumbnailBytes;
+}
+
+/// Decodes and displays [MediaInfo] and a `getThumbnail` poster frame for the bundled
+/// `portrait_rot90.mp4` corpus clip.
 class _PortraitMediaInfo extends StatefulWidget {
   const _PortraitMediaInfo();
 
@@ -104,9 +115,9 @@ class _PortraitMediaInfoState extends State<_PortraitMediaInfo> {
   static const String _assetPath = 'assets/corpus/portrait_rot90.mp4';
   static const CompressVideo _compressVideo = CompressVideo();
 
-  late final Future<MediaInfo> _mediaInfo = _loadMediaInfo();
+  late final Future<_PortraitMediaData> _mediaData = _loadMediaData();
 
-  Future<MediaInfo> _loadMediaInfo() async {
+  Future<_PortraitMediaData> _loadMediaData() async {
     final ByteData data = await rootBundle.load(_assetPath);
     final Directory tempDir = await Directory.systemTemp.createTemp(
       'compress_video_example_',
@@ -116,43 +127,61 @@ class _PortraitMediaInfoState extends State<_PortraitMediaInfo> {
       data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       flush: true,
     );
-    return _compressVideo.getMediaInfo(file.path);
+    final MediaInfo info = await _compressVideo.getMediaInfo(file.path);
+    final Uint8List thumbnailBytes = await _compressVideo.getThumbnail(
+      file.path,
+      positionMs: 1500,
+    );
+    return _PortraitMediaData(info: info, thumbnailBytes: thumbnailBytes);
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<MediaInfo>(
-      future: _mediaInfo,
-      builder: (BuildContext context, AsyncSnapshot<MediaInfo> snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Text('Failed to read media info: ${snapshot.error}'),
-          );
-        }
-        final MediaInfo? info = snapshot.data;
-        if (info == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: <Widget>[
-            const Text(
-              'Media info: portrait_rot90.mp4',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('${info.widthPx} x ${info.heightPx} px (displayed)'),
-            Text('Rotation: ${info.rotationDegrees}°'),
-            Text('Duration: ${info.durationMs} ms'),
-            Text('Size: ${info.sizeBytes} bytes'),
-            Text('Codec: ${info.videoCodec ?? 'unknown'}'),
-            Text('Bitrate: ${info.videoBitrateBps ?? 'unknown'} bps'),
-            Text('Frame rate: ${info.frameRateFps ?? 'unknown'} fps'),
-            Text('Has audio: ${info.hasAudio}'),
-            Text('HDR: ${info.isHdr}'),
-          ],
-        );
-      },
+    return FutureBuilder<_PortraitMediaData>(
+      future: _mediaData,
+      builder:
+          (BuildContext context, AsyncSnapshot<_PortraitMediaData> snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text('Failed to read media info: ${snapshot.error}'),
+              );
+            }
+            final _PortraitMediaData? data = snapshot.data;
+            if (data == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final MediaInfo info = data.info;
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: <Widget>[
+                const Text(
+                  'Media info: portrait_rot90.mp4',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text('${info.widthPx} x ${info.heightPx} px (displayed)'),
+                Text('Rotation: ${info.rotationDegrees}°'),
+                Text('Duration: ${info.durationMs} ms'),
+                Text('Size: ${info.sizeBytes} bytes'),
+                Text('Codec: ${info.videoCodec ?? 'unknown'}'),
+                Text('Bitrate: ${info.videoBitrateBps ?? 'unknown'} bps'),
+                Text('Frame rate: ${info.frameRateFps ?? 'unknown'} fps'),
+                Text('Has audio: ${info.hasAudio}'),
+                Text('HDR: ${info.isHdr}'),
+                const SizedBox(height: 16),
+                const Text(
+                  'Thumbnail at 1500 ms:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: 108,
+                  height: 192,
+                  child: Image.memory(data.thumbnailBytes, fit: BoxFit.contain),
+                ),
+              ],
+            );
+          },
     );
   }
 }

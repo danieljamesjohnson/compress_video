@@ -322,4 +322,226 @@ void main() {
     expect(inputFile.lengthSync(), originalLength);
     expect(inputFile.lastModifiedSync(), originalModified);
   });
+
+  testWidgets(
+    'positionMs exactly at the clip duration returns a valid frame, and well '
+    'beyond it clamps to that same frame',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_duration_boundary.mp4',
+      );
+      final Map<String, dynamic> sidecar = await _loadSidecar('portrait_rot90');
+      final int durationMs =
+          (sidecar['crossPlatform'] as Map<String, dynamic>)['durationMs']
+              as int;
+      final Map<String, dynamic> thumbnailProbe =
+          sidecar['thumbnailProbe'] as Map<String, dynamic>;
+      final int patchXPx = thumbnailProbe['patchXPx'] as int;
+      final int patchYPx = thumbnailProbe['patchYPx'] as int;
+      final int rgbTolerance = thumbnailProbe['rgbTolerance'] as int;
+
+      final Uint8List atDuration = await compressVideo.getThumbnail(
+        path,
+        positionMs: durationMs,
+      );
+      expect(atDuration, isNotEmpty);
+
+      final Uint8List wellBeyondDuration = await compressVideo.getThumbnail(
+        path,
+        positionMs: durationMs + 60000,
+      );
+
+      final List<int> atDurationRgb = await _samplePixelRgb(
+        await _decodeImage(atDuration),
+        patchXPx,
+        patchYPx,
+      );
+      final List<int> wellBeyondRgb = await _samplePixelRgb(
+        await _decodeImage(wellBeyondDuration),
+        patchXPx,
+        patchYPx,
+      );
+
+      expect(
+        _rgbDiffersBy(atDurationRgb, wellBeyondRgb, rgbTolerance),
+        isFalse,
+        reason:
+            'a positionMs far beyond duration must clamp to the same last '
+            'frame as positionMs == durationMs',
+      );
+    },
+  );
+
+  testWidgets(
+    'maxDimensionPx equal to the longer displayed side returns the native size',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_scale_native.mp4',
+      );
+
+      final Uint8List bytes = await compressVideo.getThumbnail(
+        path,
+        positionMs: 1500,
+        maxDimensionPx: 1920,
+      );
+      final ui.Image image = await _decodeImage(bytes);
+
+      expect(image.width, 1080);
+      expect(image.height, 1920);
+    },
+  );
+
+  testWidgets(
+    'maxDimensionPx one pixel below the longer side downscales proportionally',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_scale_down.mp4',
+      );
+
+      final Uint8List bytes = await compressVideo.getThumbnail(
+        path,
+        positionMs: 1500,
+        maxDimensionPx: 1919,
+      );
+      final ui.Image image = await _decodeImage(bytes);
+
+      expect(image.height, 1919);
+      expect(image.width, lessThan(1080));
+    },
+  );
+
+  testWidgets('maxDimensionPx above the native size never upscales', (
+    WidgetTester tester,
+  ) async {
+    final String path = await _copyAssetToTempFile(
+      'assets/corpus/portrait_rot90.mp4',
+      'portrait_rot90_scale_no_upscale.mp4',
+    );
+
+    final Uint8List bytes = await compressVideo.getThumbnail(
+      path,
+      positionMs: 1500,
+      maxDimensionPx: 4000,
+    );
+    final ui.Image image = await _decodeImage(bytes);
+
+    expect(image.width, 1080);
+    expect(image.height, 1920);
+  });
+
+  testWidgets(
+    'a lower quality produces a strictly smaller JPEG than a higher quality '
+    'for the same frame',
+    (WidgetTester tester) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'portrait_rot90_quality.mp4',
+      );
+
+      final Uint8List lowQuality = await compressVideo.getThumbnail(
+        path,
+        positionMs: 1500,
+        quality: 20,
+      );
+      final Uint8List highQuality = await compressVideo.getThumbnail(
+        path,
+        positionMs: 1500,
+        quality: 90,
+      );
+
+      expect(lowQuality.length, lessThan(highQuality.length));
+    },
+  );
+
+  testWidgets('a freshly written zero-byte file yields unsupportedInput', (
+    WidgetTester tester,
+  ) async {
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'compress_video_thumbnail_zero_byte_',
+    );
+    final File zeroByteFile = File('${tempDir.path}/empty.mp4');
+    await zeroByteFile.writeAsBytes(const <int>[], flush: true);
+
+    await expectLater(
+      () => compressVideo.getThumbnail(zeroByteFile.path),
+      throwsA(
+        isA<CompressVideoException>().having(
+          (CompressVideoException e) => e.reason,
+          'reason',
+          CompressVideoErrorReason.unsupportedInput,
+        ),
+      ),
+    );
+  });
+
+  testWidgets('a freshly written text file yields unsupportedInput', (
+    WidgetTester tester,
+  ) async {
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'compress_video_thumbnail_text_file_',
+    );
+    final File textFile = File('${tempDir.path}/not_a_video.txt');
+    await textFile.writeAsString(
+      'this is definitely not a video file',
+      flush: true,
+    );
+
+    await expectLater(
+      () => compressVideo.getThumbnail(textFile.path),
+      throwsA(
+        isA<CompressVideoException>().having(
+          (CompressVideoException e) => e.reason,
+          'reason',
+          CompressVideoErrorReason.unsupportedInput,
+        ),
+      ),
+    );
+  });
+
+  testWidgets('a missing path yields fileNotFound', (
+    WidgetTester tester,
+  ) async {
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'compress_video_thumbnail_missing_',
+    );
+    final String missingPath = '${tempDir.path}/does_not_exist.mp4';
+
+    await expectLater(
+      () => compressVideo.getThumbnail(missingPath),
+      throwsA(
+        isA<CompressVideoException>().having(
+          (CompressVideoException e) => e.reason,
+          'reason',
+          CompressVideoErrorReason.fileNotFound,
+        ),
+      ),
+    );
+  });
+
+  testWidgets(
+    'two getThumbnailFile calls on two different clips started together with '
+    'Future.wait both complete and produce two different existing files',
+    (WidgetTester tester) async {
+      final String portraitPath = await _copyAssetToTempFile(
+        'assets/corpus/portrait_rot90.mp4',
+        'concurrent_thumb_portrait_rot90.mp4',
+      );
+      final String noAudioPath = await _copyAssetToTempFile(
+        'assets/corpus/noaudio_720p.mp4',
+        'concurrent_thumb_noaudio_720p.mp4',
+      );
+
+      final List<String> results = await Future.wait(<Future<String>>[
+        compressVideo.getThumbnailFile(portraitPath, positionMs: 1500),
+        compressVideo.getThumbnailFile(noAudioPath, positionMs: 0),
+      ]);
+
+      expect(results[0], isNot(results[1]));
+      expect(File(results[0]).existsSync(), isTrue);
+      expect(File(results[1]).existsSync(), isTrue);
+    },
+  );
 }

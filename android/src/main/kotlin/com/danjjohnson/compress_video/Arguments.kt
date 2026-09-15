@@ -74,4 +74,58 @@ object Arguments {
 
         return canonical
     }
+
+    /**
+     * Returns `"unsupportedInput"` if `positionMs` is negative, or `null` if it is valid.
+     *
+     * There is no frame before the start of a clip, so a negative position is a caller bug --
+     * this is deliberately an error rather than a silent clamp to `0`, which would hide it.
+     */
+    fun validatePositionMs(positionMs: Long): String? = if (positionMs < 0) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `quality` is outside 1 to 100 inclusive (the JPEG
+     * quality range the option name promises), or `null` if it is valid.
+     */
+    fun validateQuality(quality: Long): String? =
+        if (quality < 1 || quality > 100) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `maxDimensionPx` is given and not positive, or `null` if
+     * it is valid (including when it is `null`, meaning "no cap").
+     */
+    fun validateMaxDimensionPx(maxDimensionPx: Long?): String? =
+        if (maxDimensionPx != null && maxDimensionPx <= 0) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `outputPath` is given and blank, or `null` if it is
+     * valid (including when it is `null`, meaning "use the default cache location").
+     */
+    fun validateOutputPath(outputPath: String?): String? =
+        if (outputPath != null && outputPath.isBlank()) "unsupportedInput" else null
+
+    /**
+     * Runs every thumbnail argument check and throws a [CompressVideoError] naming the first
+     * violated reason, or returns normally if all four are valid.
+     *
+     * These mirror the Dart-side checks in `CompressVideo` deliberately: the Dart side gives a
+     * fast local failure without crossing the channel, while this is the authority for any
+     * caller that reaches the channel another way (for example, a different language binding
+     * calling the generated host API directly).
+     */
+    fun requireValidThumbnailArgs(
+        positionMs: Long,
+        quality: Long,
+        maxDimensionPx: Long?,
+        outputPath: String?,
+    ) {
+        val violatedReason =
+            validatePositionMs(positionMs)
+                ?: validateQuality(quality)
+                ?: validateMaxDimensionPx(maxDimensionPx)
+                ?: validateOutputPath(outputPath)
+        if (violatedReason != null) {
+            throw CompressVideoError(violatedReason, "Invalid thumbnail argument")
+        }
+    }
 }
