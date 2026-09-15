@@ -1,0 +1,54 @@
+package com.danjjohnson.compress_video
+
+import kotlin.math.floor
+
+/**
+ * Pure, unit-testable rotation/dimension/codec/duration logic shared by every Android call.
+ *
+ * No Android framework imports beyond constants -- every function here must be exercisable as
+ * plain JVM code with no emulator, which is what [MediaMathTest] does.
+ */
+object MediaMath {
+    /**
+     * Returns the displayed (rotation-corrected) `(width, height)` pair for a video whose
+     * coded dimensions are `codedWidthPx x codedHeightPx` and whose unsigned clockwise
+     * rotation is `rotationDegrees`.
+     *
+     * Swaps width/height for 90 and 270; passes both through unchanged for 0 and 180. The two
+     * cases are decided by separate branches over the rotation value, so a clip whose coded
+     * width and height happen to be equal is still reported with the correct rotation instead
+     * of the swap silently becoming a no-op.
+     */
+    fun displayedSize(
+        codedWidthPx: Int,
+        codedHeightPx: Int,
+        rotationDegrees: Int,
+    ): Pair<Int, Int> =
+        when (rotationDegrees) {
+            90, 270 -> Pair(codedHeightPx, codedWidthPx)
+            else -> Pair(codedWidthPx, codedHeightPx)
+        }
+
+    /**
+     * Normalises a platform-reported MIME type or FourCC into one of the wire-contract codec
+     * tokens: `h264`, `hevc`, `av1`, `vp9`, `unknown`. `null` input, and any value this
+     * function does not recognise, both map to `unknown` -- never an exception.
+     */
+    fun normalizeCodec(mimeOrFourCc: String?): String {
+        if (mimeOrFourCc == null) return "unknown"
+        return when (mimeOrFourCc.lowercase()) {
+            "video/avc", "avc1", "h264" -> "h264"
+            "video/hevc", "hvc1", "hev1", "h265", "hevc" -> "hevc"
+            "video/av01", "av01", "av1" -> "av1"
+            "video/x-vnd.on2.vp9", "vp09", "vp9" -> "vp9"
+            else -> "unknown"
+        }
+    }
+
+    /**
+     * Rounds a millisecond duration value half-up: `.5` rounds away from zero (`4000.5` ->
+     * `4001`), `.4` rounds down (`4000.4` -> `4000`). Used when a platform reports duration in
+     * a unit that requires conversion to whole milliseconds.
+     */
+    fun roundHalfUpMs(valueMs: Double): Long = floor(valueMs + 0.5).toLong()
+}

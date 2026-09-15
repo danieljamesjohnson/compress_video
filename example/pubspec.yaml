@@ -60,6 +60,9 @@ flutter:
     - assets/corpus/portrait_rot90.mp4
     - assets/corpus/small_480p.mp4
     - assets/corpus/noaudio_720p.mp4
+    - assets/corpus/portrait_rot90.expected.json
+    - assets/corpus/small_480p.expected.json
+    - assets/corpus/noaudio_720p.expected.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:
