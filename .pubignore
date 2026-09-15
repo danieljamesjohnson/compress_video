@@ -1,0 +1,23 @@
+# A .pubignore in a directory completely replaces that directory's .gitignore for
+# `dart pub publish` purposes, so the standard build-artifact entries are repeated here
+# alongside the publish-only exclusions. See corpus/README.md and 01-CONTEXT.md.
+
+# Build artifacts (repeated from .gitignore — see note above)
+.dart_tool/
+build/
+.packages
+pubspec.lock
+*.iml
+.idea/
+.DS_Store
+.venv*/
+
+# Publish-only exclusions
+corpus/
+.planning/
+.mission-control/
+.claude/
+QUESTIONS.md
+
+# NOTE: example/assets/corpus/ is deliberately NOT excluded — the example app needs its
+# bundled clips to run, and the example app itself is part of what pub.dev shows.

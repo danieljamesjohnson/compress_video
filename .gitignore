@@ -9,3 +9,12 @@ pubspec.lock
 
 # GSD run-scoped sentinels
 .gsd/
+
+# Flutter plugin build artifacts (added in phase 01-03)
+example/ios/Pods/
+example/macos/Pods/
+example/ios/.symlinks/
+example/macos/.symlinks/
+**/Flutter/ephemeral/
+.flutter-plugins
+.flutter-plugins-dependencies
