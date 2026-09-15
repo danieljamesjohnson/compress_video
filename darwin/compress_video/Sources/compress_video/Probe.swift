@@ -66,17 +66,22 @@ final class Probe: ProbeHostApi {
       } else {
         try await awaitLegacyLoad(
           track,
-          keys: ["naturalSize", "preferredTransform", "estimatedDataRate", "nominalFrameRate", "formatDescriptions"]
+          keys: ["naturalSize", "preferredTransform", "estimatedDataRate", "nominalFrameRate"]
         )
         naturalSize = track.naturalSize
         preferredTransform = track.preferredTransform
         estimatedDataRate = track.estimatedDataRate
         nominalFrameRate = track.nominalFrameRate
-        // `formatDescriptions` bridges [Any] from a CoreFoundation array whose elements are
-        // always CMFormatDescription -- a conditional `as?` here is flagged by the compiler
-        // as "will always succeed" (an error under this project's warnings-as-errors build
-        // setting), so this uses the plain, non-optional coercion instead.
-        formatDescriptions = track.formatDescriptions.map { $0 as CMFormatDescription }
+        // The legacy `track.formatDescriptions` property is declared `[Any]`, and every
+        // element is always a CMFormatDescription -- but downcasting it requires a forced or
+        // conditional cast either way (Swift never allows plain, unconditional `as` for a
+        // genuine downcast), and this project's build treats the resulting "conditional
+        // downcast will always succeed" diagnostic as an error while its threat model
+        // separately bans forced casts. Rather than pick between an error and a banned
+        // pattern, `videoCodec` gracefully degrades to `unknown` (via `normalizeCodec(nil)`)
+        // on this pre-iOS-16/macOS-13 fallback path only -- the same "detector unavailable is
+        // safe, never a crash" policy `isHdr` already uses below.
+        formatDescriptions = []
       }
     } catch let error as CompressVideoError {
       throw error
