@@ -176,3 +176,12 @@ None - no external service configuration required. (The GitHub repo, remote, and
 ---
 *Phase: 01-typed-contract-ci-and-media-info*
 *Completed: 2026-09-15*
+
+## Self-Check: PASSED
+
+- FOUND: docs/TOOLCHAIN.md
+- FOUND: .planning/phases/01-typed-contract-ci-and-media-info/COVERAGE.md
+- FOUND: .planning/phases/01-typed-contract-ci-and-media-info/01-VALIDATION.md
+- FOUND: .claude/CLAUDE.md
+- FOUND commits: 06ae01a, 07cf773, 2db0799
+- Both remotes (`origin`, `github`) confirmed at the same SHA as local `main` (2db0799) after push.
