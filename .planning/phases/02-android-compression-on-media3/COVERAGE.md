@@ -1,0 +1,1 @@
+No external API integration: this phase wraps the on-device Media3 Transformer library (androidx.media3, a first-party Google Maven artifact) behind the plugin's existing Pigeon contract; no third-party service, endpoint or SDK is consumed.
