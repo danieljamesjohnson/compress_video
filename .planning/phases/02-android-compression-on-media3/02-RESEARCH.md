@@ -661,7 +661,10 @@ not rely on `getProgress` continuing to report a final state.
 verified directly against source code, live Maven metadata, downloaded AAR contents, or the
 actual emulator this session.
 
-## Open Questions
+## Open Questions (RESOLVED in planning, 2026-09-15)
+
+> Both questions below are answered by plan tasks: Q1 by 02-02 Task 3 (a `Looper.myLooper() == Looper.getMainLooper()` assertion at the top of `startCompress`, recorded in its SUMMARY) and Q2 by 02-06 Task 3 (compress the truncated `mdat` corpus fixture on the emulator and record the observed `ExportException.errorCode`). The text below is kept as the original statement of each question.
+
 
 1. **Does the Pigeon-generated `CompressHostApi`'s Kotlin `suspend fun` land on the main thread
    by default, or does Pigeon's codegen dispatch it elsewhere?**

@@ -4,7 +4,7 @@ status: executing
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 7
+  total_plans: 14
   completed_plans: 5
   percent: 71
 ---
@@ -16,14 +16,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-15)
 
 **Core value:** One call turns a phone video into a smaller MP4 that plays everywhere, and it never makes the file bigger, never returns null, and builds on today's Flutter toolchain.
-**Current focus:** Phase 1 — Typed Contract, CI and Media Info
+**Current focus:** Phase 2 — Android Compression on Media3 (Phase 1 parked needs_human on CI billing)
 
 ## Current Position
 
-Phase: 1 of 6 (Typed Contract, CI and Media Info)
-Plan: 6 of 7 in current phase (code-complete, halted on external blocker — see below)
-Status: Blocked (wave 4 of 5 — 01-06's Swift/Dart code is written and committed, but its own CI-green verification is halted on a GitHub Actions billing block; 01-07 must not start until this is resolved)
-Last activity: 2026-09-15 — Plan 01-06 (Apple core: Probe, Thumbnails, XCTest on iOS/macOS) is code-complete: all three tasks committed, matching every acceptance criterion locally, with two real platform-quirk bugs found and fixed via live CI evidence (AVAssetImageGenerator.maximumSize fit-within-box mirroring 01-05's Android finding; a shared-test Android-only cache-path assertion). The fix itself is unverified by a fresh CI run: GitHub Actions stopped starting the apple job mid-session ("recent account payments have failed or your spending limit needs to be increased"). Recorded QUESTIONS.md #6, notified Dan. See 01-06-SUMMARY.md (status: halted).
+Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
+Plan: 0 of 7 in current phase (code-complete, halted on external blocker — see below)
+Status: Executing Phase 2 (wave 1 of 7); Phase 2 planned, checker passed
+Last activity: 2026-09-15 — Phase 2 planned (7 plans, 7 waves); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
 Progress: [███████░░░] 71% (unchanged until 01-06 re-verifies green and is re-summarized as complete)
 
