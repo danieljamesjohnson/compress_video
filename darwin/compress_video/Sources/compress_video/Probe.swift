@@ -72,7 +72,11 @@ final class Probe: ProbeHostApi {
         preferredTransform = track.preferredTransform
         estimatedDataRate = track.estimatedDataRate
         nominalFrameRate = track.nominalFrameRate
-        formatDescriptions = track.formatDescriptions.compactMap { $0 as? CMFormatDescription }
+        // `formatDescriptions` bridges [Any] from a CoreFoundation array whose elements are
+        // always CMFormatDescription -- a conditional `as?` here is flagged by the compiler
+        // as "will always succeed" (an error under this project's warnings-as-errors build
+        // setting), so this uses the plain, non-optional coercion instead.
+        formatDescriptions = track.formatDescriptions.map { $0 as CMFormatDescription }
       }
     } catch let error as CompressVideoError {
       throw error
