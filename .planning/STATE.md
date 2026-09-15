@@ -21,7 +21,7 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
-Plan: 0 of 7 in current phase (code-complete, halted on external blocker — see below)
+Plan: 0 of 7 in current phase
 Status: Executing Phase 2 (wave 1 of 7); Phase 2 planned, checker passed
 Last activity: 2026-09-15 — Phase 2 planned (7 plans, 7 waves); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
