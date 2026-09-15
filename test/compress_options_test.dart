@@ -168,6 +168,135 @@ void main() {
       },
     );
 
+    test('maxLongSidePx of 15 is rejected and 16 is accepted', () {
+      expect(
+        () => const CompressOptions(maxLongSidePx: 15).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(maxLongSidePx: 16).validate(),
+        returnsNormally,
+      );
+    });
+
+    test('maxFps of 0 is rejected and 1 is accepted', () {
+      expect(
+        () => const CompressOptions(maxFps: 0).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(maxFps: 1).validate(),
+        returnsNormally,
+      );
+    });
+
+    test('videoBitrateBps of 0 is rejected and 1 is accepted', () {
+      expect(
+        () => const CompressOptions(videoBitrateBps: 0).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(videoBitrateBps: 1).validate(),
+        returnsNormally,
+      );
+    });
+
+    test('targetSizeMb of 0, negative, infinite or NaN is rejected; a small '
+        'positive value is accepted', () {
+      expect(
+        () => const CompressOptions(targetSizeMb: 0).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(targetSizeMb: -1).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => CompressOptions(targetSizeMb: double.infinity).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => CompressOptions(targetSizeMb: double.nan).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(targetSizeMb: 0.001).validate(),
+        returnsNormally,
+      );
+    });
+
+    test(
+      'trimEndMs equal to trimStartMs is rejected; one millisecond greater is accepted',
+      () {
+        expect(
+          () => const CompressOptions(
+            trimStartMs: 1000,
+            trimEndMs: 1000,
+          ).validate(),
+          throwsUnsupportedInput(),
+        );
+        expect(
+          () => const CompressOptions(
+            trimStartMs: 1000,
+            trimEndMs: 1001,
+          ).validate(),
+          returnsNormally,
+        );
+      },
+    );
+
+    test(
+      'an AudioReencode with 0 or 3 channels is rejected; 1 or 2 is accepted',
+      () {
+        expect(
+          () => const CompressOptions(
+            audio: AudioReencode(bitrateBps: 128000, channels: 0),
+          ).validate(),
+          throwsUnsupportedInput(),
+        );
+        expect(
+          () => const CompressOptions(
+            audio: AudioReencode(bitrateBps: 128000, channels: 3),
+          ).validate(),
+          throwsUnsupportedInput(),
+        );
+        expect(
+          () => const CompressOptions(
+            audio: AudioReencode(bitrateBps: 128000, channels: 1),
+          ).validate(),
+          returnsNormally,
+        );
+        expect(
+          () => const CompressOptions(
+            audio: AudioReencode(bitrateBps: 128000, channels: 2),
+          ).validate(),
+          returnsNormally,
+        );
+      },
+    );
+
+    test('the reserved codec field rejects anything but h264', () {
+      expect(
+        () => const CompressOptions(codec: VideoCodec.hevc).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(codec: VideoCodec.h264).validate(),
+        returnsNormally,
+      );
+    });
+
+    test('the reserved hdr field rejects anything but toneMapToSdr', () {
+      expect(
+        () => const CompressOptions(hdr: HdrMode.keepHdr).validate(),
+        throwsUnsupportedInput(),
+      );
+      expect(
+        () => const CompressOptions(hdr: HdrMode.toneMapToSdr).validate(),
+        returnsNormally,
+      );
+    });
+
     test('the default options are valid', () {
       expect(() => const CompressOptions().validate(), returnsNormally);
     });

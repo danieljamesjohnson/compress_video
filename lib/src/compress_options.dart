@@ -158,21 +158,47 @@ class CompressOptions {
   final CompressPreset preset;
 
   /// Explicit cap on the output's longer displayed side, in pixels, overriding [preset] when
-  /// set. `null` means "use the preset's own value". Never upscales: the effective long side is
-  /// `min(this value, the input's own displayed long side)`.
+  /// set. `null` (the default) means "use [preset]'s own long side". A minimum of `16` is
+  /// enforced -- the emulator's own H.264 encoder's advertised minimum frame dimension -- and
+  /// `16` itself is accepted. Never upscales: the effective long side actually used is
+  /// `min(this value, the input's own displayed long side)`, so a value above the input's own
+  /// long side has no visible effect other than "don't shrink below this".
   final int? maxLongSidePx;
 
-  /// Explicit target video bitrate, in bits per second, overriding [preset] when set. `null`
-  /// means "use the preset's own value". Mutually exclusive with [targetSizeMb] -- setting
-  /// both throws in [validate].
+  /// Explicit target video bitrate, in bits per second, overriding [preset]'s own bitrate when
+  /// set. `null` (the default) means "resolve the bitrate from [targetSizeMb] if set, else
+  /// scale [preset]'s own bitrate by the actual output resolution and frame rate" -- an
+  /// unscaled preset bitrate applied to a smaller-than-preset source is exactly the defect
+  /// that made the incumbent's highest preset re-encode 4K at a fixed 3.7 Mbps. Mutually
+  /// exclusive with [targetSizeMb] -- setting both throws in [validate].
   final int? videoBitrateBps;
 
   /// Explicit target output file size, in megabytes, overriding [preset]'s implied size when
-  /// set. `null` means "no target size requested". Mutually exclusive with [videoBitrateBps].
+  /// set. `null` (the default) means "no target size requested". Mutually exclusive with
+  /// [videoBitrateBps] -- setting both throws in [validate].
+  ///
+  /// A megabyte here is exactly `1,000,000` bytes (decimal, matching how every upload limit
+  /// and carrier data allowance is stated) -- never `2^20` (`1,048,576`) bytes.
+  ///
+  /// The real output lands within plus or minus 15 percent of the requested size, for a real
+  /// encode of a genuinely compressible source; a source that is already smaller than the
+  /// requested size, or already incompressible, is governed by the never-larger guarantee
+  /// instead and may not reach anywhere near the target. The video bitrate that produces the
+  /// target size is computed as `(targetSizeMb * 1,000,000 * 8 / outputDurationSeconds) *
+  /// 0.97`, minus the resolved audio bitrate -- the `0.97` reserves 3 percent of the requested
+  /// size for container and muxing overhead before the rest is split between video and audio.
+  ///
+  /// This tolerance is the formula's designed target, verified as exact arithmetic in
+  /// `SizeGuardTest.kt`. A software encoder's *actual* rate control can still diverge from a
+  /// requested bitrate by more than 15 percent on very short, already-downscaled clips --
+  /// measured live on this project's danserver emulator (02-03-SUMMARY.md, QUESTIONS.md);
+  /// re-verification against a physical device's hardware encoder is tracked separately.
   final double? targetSizeMb;
 
-  /// Cap on the output's frame rate, in frames per second. Defaults to 30. Never upscales: the
-  /// effective frame rate is `min(this value, the input's own frame rate)`.
+  /// Cap on the output's frame rate, in frames per second. Defaults to `30`. This is always a
+  /// cap, never a target: the effective frame rate actually used is `min(this value, the
+  /// input's own frame rate)`, so a slower source is never sped up to reach this value, and a
+  /// value above the input's own frame rate has no effect.
   final int maxFps;
 
   /// How the audio track is handled. Defaults to [AudioPassthrough].

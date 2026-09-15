@@ -26,6 +26,7 @@ class Compression(
     ): CompressResultMessage {
         requireMainLooper("startCompress")
         requireValidJobId(jobId)
+        Arguments.requireValidCompressRequest(request)
 
         val inputFile = Arguments.requireReadableMediaFile(path)
         val inputInfo = probe.getMediaInfo(path)

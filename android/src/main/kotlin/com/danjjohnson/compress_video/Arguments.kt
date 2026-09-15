@@ -128,4 +128,131 @@ object Arguments {
             throw CompressVideoError(violatedReason, "Invalid thumbnail argument")
         }
     }
+
+    /**
+     * Returns `"unsupportedInput"` if `maxFps` is not positive, or `null` if it is valid.
+     */
+    fun validateMaxFps(maxFps: Long): String? = if (maxFps <= 0) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `maxLongSidePx` is given and below `16` -- the
+     * emulator's own H.264 encoder's advertised minimum frame dimension (02-RESEARCH.md
+     * Pitfall 3) -- or `null` if it is valid (including `16` itself, and including `null`,
+     * meaning "use the preset's own value").
+     */
+    fun validateMaxLongSidePx(maxLongSidePx: Long?): String? =
+        if (maxLongSidePx != null && maxLongSidePx < 16) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `videoBitrateBps` is given and not positive, or `null`
+     * if it is valid (including `null`, meaning "resolve it from the preset or targetSizeMb").
+     */
+    fun validateVideoBitrateBps(videoBitrateBps: Long?): String? =
+        if (videoBitrateBps != null && videoBitrateBps <= 0) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `targetSizeMb` is given and is not a finite, positive
+     * number, or `null` if it is valid (including `null`, meaning "no target size requested").
+     */
+    fun validateTargetSizeMb(targetSizeMb: Double?): String? =
+        if (targetSizeMb != null && (!targetSizeMb.isFinite() || targetSizeMb <= 0)) {
+            "unsupportedInput"
+        } else {
+            null
+        }
+
+    /**
+     * Returns `"unsupportedInput"` if `targetSizeMb` and `videoBitrateBps` are both given --
+     * contradictory targets for the same output size -- or `null` otherwise.
+     */
+    fun validateSizeTargetsNotContradictory(
+        targetSizeMb: Double?,
+        videoBitrateBps: Long?,
+    ): String? = if (targetSizeMb != null && videoBitrateBps != null) "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `trimStartMs` is negative, or if `trimEndMs` is given
+     * and not strictly greater than `trimStartMs` (defaulting to `0` when `trimStartMs` is
+     * `null`), or `null` if the trim range is valid.
+     */
+    fun validateTrimRange(
+        trimStartMs: Long?,
+        trimEndMs: Long?,
+    ): String? {
+        if (trimStartMs != null && trimStartMs < 0) {
+            return "unsupportedInput"
+        }
+        if (trimEndMs != null && trimEndMs <= (trimStartMs ?: 0L)) {
+            return "unsupportedInput"
+        }
+        return null
+    }
+
+    /**
+     * Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` -- the
+     * only accepted value in this phase; HEVC opt-in is Phase 4 -- or `null` if it is valid.
+     */
+    fun validateVideoCodec(videoCodec: String): String? =
+        if (videoCodec != "h264") "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` --
+     * the only accepted value in this phase; keep-HDR opt-in is Phase 4 -- or `null` if it is
+     * valid.
+     */
+    fun validateHdrMode(hdrMode: String): String? =
+        if (hdrMode != "toneMapToSdr") "unsupportedInput" else null
+
+    /**
+     * Returns `"unsupportedInput"` when `audioMode` is [AudioModeMessage.REENCODE] and either
+     * `audioBitrateBps` is not positive or `audioChannels` is outside `1` to `2` inclusive, or
+     * `null` if the combination is valid (including any other [audioMode], where these two
+     * fields are not required to be set at all).
+     */
+    fun validateAudioReencode(
+        audioMode: AudioModeMessage,
+        audioBitrateBps: Long?,
+        audioChannels: Long?,
+    ): String? {
+        if (audioMode != AudioModeMessage.REENCODE) {
+            return null
+        }
+        if (audioBitrateBps == null || audioBitrateBps <= 0) {
+            return "unsupportedInput"
+        }
+        if (audioChannels == null || audioChannels < 1 || audioChannels > 2) {
+            return "unsupportedInput"
+        }
+        return null
+    }
+
+    /**
+     * Runs every compress-request argument check, in the same order as
+     * `CompressOptions.validate()`, and throws a [CompressVideoError] naming the first
+     * violated reason -- or returns normally if [request] is entirely valid.
+     *
+     * Mirrors the Dart-side checks deliberately: the Dart side gives a fast local failure
+     * without crossing the channel (T-02-11's primary mitigation), while this is the
+     * authority for any caller that reaches the generated host API another way.
+     */
+    fun requireValidCompressRequest(request: CompressRequestMessage) {
+        val violatedReason =
+            validateMaxFps(request.maxFps)
+                ?: validateMaxLongSidePx(request.maxLongSidePx)
+                ?: validateVideoBitrateBps(request.videoBitrateBps)
+                ?: validateTargetSizeMb(request.targetSizeMb)
+                ?: validateSizeTargetsNotContradictory(request.targetSizeMb, request.videoBitrateBps)
+                ?: validateTrimRange(request.trimStartMs, request.trimEndMs)
+                ?: validateOutputPath(request.outputPath)
+                ?: validateVideoCodec(request.videoCodec)
+                ?: validateHdrMode(request.hdrMode)
+                ?: validateAudioReencode(
+                    request.audioMode,
+                    request.audioBitrateBps,
+                    request.audioChannels,
+                )
+        if (violatedReason != null) {
+            throw CompressVideoError(violatedReason, "Invalid compress request argument")
+        }
+    }
 }
