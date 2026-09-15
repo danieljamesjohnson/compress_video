@@ -67,7 +67,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 01-05-PLAN.md — Thumbnails on Android: upright bytes and unique files at an exact millisecond, with boundary and concurrency coverage
-- [ ] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner
+- [ ] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner — **code-complete, halted on a GitHub Actions billing block (QUESTIONS.md #6); needs a fresh green CI run to close out (see 01-06-SUMMARY.md)**
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
