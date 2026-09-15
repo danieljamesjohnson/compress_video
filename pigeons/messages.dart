@@ -24,7 +24,6 @@ import 'package:pigeon/pigeon.dart';
     swiftOptions: SwiftOptions(errorClassName: 'CompressVideoError'),
   ),
 )
-
 /// The wire-format media info message returned by [ProbeHostApi.getMediaInfo].
 ///
 /// This is the generated, private counterpart of the public, hand-written `MediaInfo`

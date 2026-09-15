@@ -1,27 +1,28 @@
 package com.danjjohnson.compress_video
 
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
+import android.content.Context
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.BinaryMessenger
 import org.mockito.Mockito
 import kotlin.test.Test
 
-/*
- * This demonstrates a simple unit test of the Kotlin portion of this plugin's implementation.
- *
- * Once you have built the plugin's example app, you can run these tests from the command
- * line by running `./gradlew testDebugUnitTest` in the `example/android/` directory, or
- * you can run them directly from IDEs that support JUnit such as Android Studio.
+/**
+ * The template's `getPlatformVersion` MethodChannel handler is gone; this plugin now registers
+ * [Probe] as the generated [ProbeHostApi]. This test asserts attach/detach lifecycle wiring
+ * doesn't throw -- the actual [ProbeHostApi] behaviour is covered by [MediaMathTest] and
+ * [ArgumentsTest] (pure logic) and by the emulator integration test (end to end).
  */
-
 internal class CompressVideoPluginTest {
     @Test
-    fun onMethodCall_getPlatformVersion_returnsExpectedValue() {
+    fun onAttachedAndDetachedFromEngine_doesNotThrow() {
         val plugin = CompressVideoPlugin()
+        val binding = Mockito.mock(FlutterPlugin.FlutterPluginBinding::class.java)
+        val messenger = Mockito.mock(BinaryMessenger::class.java)
+        val context = Mockito.mock(Context::class.java)
+        Mockito.`when`(binding.binaryMessenger).thenReturn(messenger)
+        Mockito.`when`(binding.applicationContext).thenReturn(context)
 
-        val call = MethodCall("getPlatformVersion", null)
-        val mockResult: MethodChannel.Result = Mockito.mock(MethodChannel.Result::class.java)
-        plugin.onMethodCall(call, mockResult)
-
-        Mockito.verify(mockResult).success("Android " + android.os.Build.VERSION.RELEASE)
+        plugin.onAttachedToEngine(binding)
+        plugin.onDetachedFromEngine(binding)
     }
 }

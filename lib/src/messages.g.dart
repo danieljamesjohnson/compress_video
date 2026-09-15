@@ -10,9 +10,9 @@ import 'package:flutter/services.dart';
 import 'package:meta/meta.dart' show immutable, protected, visibleForTesting;
 
 Object? _extractReplyValueOrThrow(
-    List<Object?>? replyList,
-    String channelName, {
-    required bool isNullValid,
+  List<Object?>? replyList,
+  String channelName, {
+  required bool isNullValid,
 }) {
   if (replyList == null) {
     throw PlatformException(
@@ -46,8 +46,9 @@ bool _deepEquals(Object? a, Object? b) {
   }
   if (a is List && b is List) {
     return a.length == b.length &&
-        a.indexed
-            .every(((int, dynamic) item) => _deepEquals(item.$2, b[item.$1]));
+        a.indexed.every(
+          ((int, dynamic) item) => _deepEquals(item.$2, b[item.$1]),
+        );
   }
   if (a is Map && b is Map) {
     if (a.length != b.length) {
@@ -95,7 +96,6 @@ int _deepHash(Object? value) {
   }
   return value.hashCode;
 }
-
 
 /// The wire-format media info message returned by [ProbeHostApi.getMediaInfo].
 ///
@@ -167,7 +167,8 @@ class MediaInfoMessage {
   }
 
   Object encode() {
-    return _toList();  }
+    return _toList();
+  }
 
   static MediaInfoMessage decode(Object result) {
     result as List<Object?>;
@@ -194,7 +195,16 @@ class MediaInfoMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(durationMs, other.durationMs) && _deepEquals(widthPx, other.widthPx) && _deepEquals(heightPx, other.heightPx) && _deepEquals(rotationDegrees, other.rotationDegrees) && _deepEquals(sizeBytes, other.sizeBytes) && _deepEquals(videoCodec, other.videoCodec) && _deepEquals(videoBitrateBps, other.videoBitrateBps) && _deepEquals(frameRateFps, other.frameRateFps) && _deepEquals(hasAudio, other.hasAudio) && _deepEquals(isHdr, other.isHdr);
+    return _deepEquals(durationMs, other.durationMs) &&
+        _deepEquals(widthPx, other.widthPx) &&
+        _deepEquals(heightPx, other.heightPx) &&
+        _deepEquals(rotationDegrees, other.rotationDegrees) &&
+        _deepEquals(sizeBytes, other.sizeBytes) &&
+        _deepEquals(videoCodec, other.videoCodec) &&
+        _deepEquals(videoBitrateBps, other.videoBitrateBps) &&
+        _deepEquals(frameRateFps, other.frameRateFps) &&
+        _deepEquals(hasAudio, other.hasAudio) &&
+        _deepEquals(isHdr, other.isHdr);
   }
 
   @override
@@ -207,7 +217,6 @@ class MediaInfoMessage {
   }
 }
 
-
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
   @override
@@ -215,7 +224,7 @@ class _PigeonCodec extends StandardMessageCodec {
     if (value is int) {
       buffer.putUint8(4);
       buffer.putInt64(value);
-    }    else if (value is MediaInfoMessage) {
+    } else if (value is MediaInfoMessage) {
       buffer.putUint8(129);
       writeValue(buffer, value.encode());
     } else {
@@ -240,17 +249,17 @@ class ProbeHostApi {
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
   ProbeHostApi({
-      BinaryMessenger? binaryMessenger, 
-      String messageChannelSuffix = '', 
-      })
-      : pigeonVar_binaryMessenger = binaryMessenger,
-        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    BinaryMessenger? binaryMessenger,
+    String messageChannelSuffix = '',
+  }) : pigeonVar_binaryMessenger = binaryMessenger,
+       pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+           ? '.$messageChannelSuffix'
+           : '';
 
   final BinaryMessenger? pigeonVar_binaryMessenger;
   static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
 
   final String pigeonVar_messageChannelSuffix;
-
 
   /// Returns the [MediaInfoMessage] for the media at [path].
   ///
@@ -258,21 +267,23 @@ class ProbeHostApi {
   /// this plan. Failures throw `CompressVideoError` with the [path] never logged or included
   /// in any diagnostic output outside the returned error detail.
   Future<MediaInfoMessage> getMediaInfo(String path) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.compress_video.ProbeHostApi.getMediaInfo$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.ProbeHostApi.getMediaInfo$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[path],
+    );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as MediaInfoMessage;
   }
 }
@@ -284,58 +295,73 @@ class ThumbnailHostApi {
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
   ThumbnailHostApi({
-      BinaryMessenger? binaryMessenger, 
-      String messageChannelSuffix = '', 
-      })
-      : pigeonVar_binaryMessenger = binaryMessenger,
-        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    BinaryMessenger? binaryMessenger,
+    String messageChannelSuffix = '',
+  }) : pigeonVar_binaryMessenger = binaryMessenger,
+       pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+           ? '.$messageChannelSuffix'
+           : '';
 
   final BinaryMessenger? pigeonVar_binaryMessenger;
   static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
 
   final String pigeonVar_messageChannelSuffix;
 
-
   /// Returns JPEG-encoded thumbnail bytes for the frame at [positionMs] in the media at
   /// [path], encoded at [quality] (1-100), with the longer side capped at [maxDimensionPx]
   /// when non-null (never upscaled).
-  Future<Uint8List> getThumbnail(String path, int positionMs, int quality, int? maxDimensionPx) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.compress_video.ThumbnailHostApi.getThumbnail$pigeonVar_messageChannelSuffix';
+  Future<Uint8List> getThumbnail(
+    String path,
+    int positionMs,
+    int quality,
+    int? maxDimensionPx,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.ThumbnailHostApi.getThumbnail$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, positionMs, quality, maxDimensionPx]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[path, positionMs, quality, maxDimensionPx],
+    );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as Uint8List;
   }
 
   /// Same as [getThumbnail], but writes the JPEG to a file and returns its path. Writes to a
   /// unique name in the app cache directory, or to [outputPath] when given.
-  Future<String> getThumbnailFile(String path, int positionMs, int quality, int? maxDimensionPx, String? outputPath) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.compress_video.ThumbnailHostApi.getThumbnailFile$pigeonVar_messageChannelSuffix';
+  Future<String> getThumbnailFile(
+    String path,
+    int positionMs,
+    int quality,
+    int? maxDimensionPx,
+    String? outputPath,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.compress_video.ThumbnailHostApi.getThumbnailFile$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, positionMs, quality, maxDimensionPx, outputPath]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[path, positionMs, quality, maxDimensionPx, outputPath],
+    );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as String;
   }
 }

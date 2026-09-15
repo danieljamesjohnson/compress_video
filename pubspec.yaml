@@ -14,6 +14,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Pigeon-generated lib/src/messages.g.dart imports package:meta directly. It is only
+  # transitively available via the flutter SDK dependency otherwise, and `dart pub
+  # publish` requires every package a library file imports to be an explicit dependency.
+  meta: ^1.9.0
 
 dev_dependencies:
   flutter_test:

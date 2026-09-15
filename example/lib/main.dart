@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:typed_data' show ByteData;
 
+import 'package:compress_video/compress_video.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -9,11 +11,10 @@ void main() {
 
 /// The `compress_video` example app.
 ///
-/// This phase's plugin surface is limited to the typed error taxonomy, so this screen only
-/// proves the example app is real and buildable: it lists the corpus clips bundled as assets
-/// (mirrored from `corpus/` by `corpus/sync_to_example.sh`) along with their byte sizes, read
-/// through `rootBundle`. Later plans extend this screen with media info and a thumbnail once
-/// the plugin has calls to make.
+/// Lists the corpus clips bundled as assets (mirrored from `corpus/` by
+/// `corpus/sync_to_example.sh`) along with their byte sizes, read through `rootBundle`, and
+/// shows the decoded [MediaInfo] for the bundled portrait clip beneath the list -- a live,
+/// on-device demonstration of the same `getMediaInfo` call the integration test exercises.
 class CompressVideoExampleApp extends StatelessWidget {
   /// Creates the example app.
   const CompressVideoExampleApp({super.key});
@@ -23,7 +24,13 @@ class CompressVideoExampleApp extends StatelessWidget {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(title: const Text('compress_video example')),
-        body: const _CorpusAssetList(),
+        body: const Column(
+          children: <Widget>[
+            Expanded(child: _CorpusAssetList()),
+            Divider(height: 1),
+            Expanded(child: _PortraitMediaInfo()),
+          ],
+        ),
       ),
     );
   }
@@ -81,6 +88,71 @@ class _CorpusAssetListState extends State<_CorpusAssetList> {
               ],
             );
           },
+    );
+  }
+}
+
+/// Decodes and displays [MediaInfo] for the bundled `portrait_rot90.mp4` corpus clip.
+class _PortraitMediaInfo extends StatefulWidget {
+  const _PortraitMediaInfo();
+
+  @override
+  State<_PortraitMediaInfo> createState() => _PortraitMediaInfoState();
+}
+
+class _PortraitMediaInfoState extends State<_PortraitMediaInfo> {
+  static const String _assetPath = 'assets/corpus/portrait_rot90.mp4';
+  static const CompressVideo _compressVideo = CompressVideo();
+
+  late final Future<MediaInfo> _mediaInfo = _loadMediaInfo();
+
+  Future<MediaInfo> _loadMediaInfo() async {
+    final ByteData data = await rootBundle.load(_assetPath);
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'compress_video_example_',
+    );
+    final File file = File('${tempDir.path}/portrait_rot90.mp4');
+    await file.writeAsBytes(
+      data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      flush: true,
+    );
+    return _compressVideo.getMediaInfo(file.path);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<MediaInfo>(
+      future: _mediaInfo,
+      builder: (BuildContext context, AsyncSnapshot<MediaInfo> snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Failed to read media info: ${snapshot.error}'),
+          );
+        }
+        final MediaInfo? info = snapshot.data;
+        if (info == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
+            const Text(
+              'Media info: portrait_rot90.mp4',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text('${info.widthPx} x ${info.heightPx} px (displayed)'),
+            Text('Rotation: ${info.rotationDegrees}°'),
+            Text('Duration: ${info.durationMs} ms'),
+            Text('Size: ${info.sizeBytes} bytes'),
+            Text('Codec: ${info.videoCodec ?? 'unknown'}'),
+            Text('Bitrate: ${info.videoBitrateBps ?? 'unknown'} bps'),
+            Text('Frame rate: ${info.frameRateFps ?? 'unknown'} fps'),
+            Text('Has audio: ${info.hasAudio}'),
+            Text('HDR: ${info.isHdr}'),
+          ],
+        );
+      },
     );
   }
 }

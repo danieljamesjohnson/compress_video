@@ -105,6 +105,38 @@ jobs:
       - name: Analyze
         run: flutter analyze --fatal-infos --fatal-warnings
 
+      - name: Regenerate the Pigeon contract and verify it matches committed output
+        # Guards against the contract being hand-edited without regenerating, or the
+        # generator being upgraded without recommitting its output. `dart format` runs
+        # immediately after `pigeon` because Pigeon's own generator output is not
+        # dart-format-clean (long lines, non-idiomatic wrapping) - the committed
+        # lib/src/messages.g.dart is formatted, so this step must format too or the diff
+        # below would be non-empty on every run, not just on real drift.
+        run: |
+          dart run pigeon --input pigeons/messages.dart
+          dart format lib/src/messages.g.dart
+          git diff --exit-code
+
+      - name: Run Android native unit tests
+        working-directory: example/android
+        run: ./gradlew :compress_video:testDebugUnitTest
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run emulator integration tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          disable-animations: true
+          script: cd example && flutter test integration_test
+
       - name: Install ffmpeg
         run: |
           sudo apt-get update -qq

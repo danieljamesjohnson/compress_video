@@ -1,14 +1,16 @@
 package com.danjjohnson.compress_video
 
 import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
-import java.io.File
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
  * [ProbeHostApi] implementation: reads media info off the platform thread via
- * [MediaMetadataRetriever].
+ * [MediaMetadataRetriever] and [MediaExtractor].
  *
  * Holds no shared mutable request state, no in-flight flag and no singleton, so two calls in
  * flight at once never cross replies -- each call's local variables are its own.
@@ -18,15 +20,14 @@ class Probe(
 ) : ProbeHostApi {
     override suspend fun getMediaInfo(path: String): MediaInfoMessage =
         withContext(Dispatchers.IO) {
-            val file = File(path)
-            if (!file.exists() || !file.isFile || !file.canRead()) {
-                throw CompressVideoError("fileNotFound", "No readable file at the given path")
-            }
+            val file = Arguments.requireReadableMediaFile(path)
 
             val retriever = MediaMetadataRetriever()
+            val extractor = MediaExtractor()
             try {
                 try {
-                    retriever.setDataSource(path)
+                    retriever.setDataSource(file.path)
+                    extractor.setDataSource(file.path)
                 } catch (e: Exception) {
                     throw CompressVideoError(
                         "unsupportedInput",
@@ -50,9 +51,18 @@ class Probe(
                     retriever
                         .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toDoubleOrNull() ?: 0.0
-                val hasAudio =
-                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) ==
-                        "yes"
+
+                var hasAudio = false
+                var videoFormat: MediaFormat? = null
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("audio/")) {
+                        hasAudio = true
+                    } else if (mime.startsWith("video/") && videoFormat == null) {
+                        videoFormat = format
+                    }
+                }
 
                 val (widthPx, heightPx) =
                     MediaMath.displayedSize(codedWidthPx, codedHeightPx, rotationDegrees)
@@ -63,11 +73,11 @@ class Probe(
                     heightPx = heightPx.toLong(),
                     rotationDegrees = rotationDegrees.toLong(),
                     sizeBytes = file.length(),
-                    videoCodec = null,
-                    videoBitrateBps = null,
-                    frameRateFps = null,
+                    videoCodec = MediaMath.normalizeCodec(videoFormat?.getString(MediaFormat.KEY_MIME)),
+                    videoBitrateBps = readVideoBitrateBps(videoFormat),
+                    frameRateFps = readFrameRateFps(videoFormat),
                     hasAudio = hasAudio,
-                    isHdr = false,
+                    isHdr = isHdr(retriever),
                 )
             } catch (e: CompressVideoError) {
                 throw e
@@ -75,6 +85,72 @@ class Probe(
                 throw CompressVideoError("io", "Failed to read media info", e.message)
             } finally {
                 retriever.release()
+                extractor.release()
             }
         }
+
+    /**
+     * Reads the video track's average bitrate, in bits per second, from the extractor track
+     * format. Returns `null` -- never `0` -- when the key is absent, which is the container
+     * bitrate's overall value, not the video track's own bitrate.
+     */
+    private fun readVideoBitrateBps(videoFormat: MediaFormat?): Long? {
+        if (videoFormat == null || !videoFormat.containsKey(MediaFormat.KEY_BIT_RATE)) {
+            return null
+        }
+        return try {
+            videoFormat.getInteger(MediaFormat.KEY_BIT_RATE).toLong()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Reads the video track's frame rate, in frames per second, from the extractor track
+     * format. `KEY_FRAME_RATE` is reported as an `Int` by some extractors and a `Float` by
+     * others depending on the source container, so both accessors are tried before giving up.
+     */
+    private fun readFrameRateFps(videoFormat: MediaFormat?): Double? {
+        if (videoFormat == null || !videoFormat.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+            return null
+        }
+        return try {
+            videoFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+        } catch (e: Exception) {
+            try {
+                videoFormat.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble()
+            } catch (e2: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Detects HDR via the colour-transfer characteristic reported by
+     * [MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER].
+     *
+     * Confirmed 2026-09-15 against the "Added in API level" badge on
+     * developer.android.com/reference/android/media/MediaMetadataRetriever:
+     * `METADATA_KEY_COLOR_TRANSFER`/`_COLOR_STANDARD`/`_COLOR_RANGE` were all added in API
+     * level 30 (Android 11) -- not the API 24/29 secondary-source guesses in
+     * 01-RESEARCH.md's Open Questions. Reading it below API 30 either returns `null` (which
+     * this code already treats as "not HDR") or is simply unavailable; the guard below still
+     * exists so the intent is explicit rather than accidental. An unavailable key, or any
+     * exception while reading it, maps to `false` -- never a crash.
+     */
+    private fun isHdr(retriever: MediaMetadataRetriever): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return false
+        }
+        return try {
+            val colorTransfer =
+                retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)
+                    ?.toIntOrNull()
+            colorTransfer == MediaFormat.COLOR_TRANSFER_HLG ||
+                colorTransfer == MediaFormat.COLOR_TRANSFER_ST2084
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
