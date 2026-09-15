@@ -144,6 +144,17 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Free disk space for the emulator's userdata partition
+        # The first real run failed with "FATAL | Not enough space to create userdata
+        # partition. Available: 4498.95 MB ... need 7372.80 MB" - ubuntu-latest's default
+        # free space is tight once Flutter, Gradle and the Android SDK/system image are
+        # all installed. Remove large preinstalled toolchains this project never uses
+        # (this plugin has no native .so/NDK code) to reclaim space, on top of shrinking
+        # the requested partition size below.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
       - name: Run emulator integration tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -152,6 +163,7 @@ jobs:
           arch: x86_64
           force-avd-creation: false
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -partition-size 2048
           script: cd example && flutter test integration_test
 
       - name: Install ffmpeg
