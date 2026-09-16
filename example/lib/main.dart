@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data' show ByteData, Uint8List;
 
@@ -30,6 +31,8 @@ class CompressVideoExampleApp extends StatelessWidget {
             Expanded(child: _CorpusAssetList()),
             Divider(height: 1),
             Expanded(child: _PortraitMediaInfo()),
+            Divider(height: 1),
+            Expanded(child: _CompressAction()),
           ],
         ),
       ),
@@ -182,6 +185,117 @@ class _PortraitMediaInfoState extends State<_PortraitMediaInfo> {
               ],
             );
           },
+    );
+  }
+}
+
+/// A minimal manual-check screen for `CompressVideo.compress`: compresses the bundled
+/// high-bitrate corpus clip at the default preset, shows live progress from the job's own
+/// stream, offers a cancel button while it runs, and reports the result. The full picker,
+/// preview and playback example app is Phase 3's BULD-04 -- this is only enough to watch a
+/// real compression happen on-device, which 02-CONTEXT.md leaves to this plan's discretion.
+class _CompressAction extends StatefulWidget {
+  const _CompressAction();
+
+  @override
+  State<_CompressAction> createState() => _CompressActionState();
+}
+
+class _CompressActionState extends State<_CompressAction> {
+  static const String _assetPath =
+      'assets/corpus/portrait_hibitrate_1080p60.mp4';
+  static const CompressVideo _compressVideo = CompressVideo();
+
+  CompressJob? _job;
+  double _progress = 0;
+  CompressResult? _result;
+  Object? _error;
+  StreamSubscription<double>? _progressSubscription;
+
+  @override
+  void dispose() {
+    unawaited(_progressSubscription?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _startCompress() async {
+    setState(() {
+      _result = null;
+      _error = null;
+      _progress = 0;
+    });
+
+    final ByteData data = await rootBundle.load(_assetPath);
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'compress_video_example_compress_',
+    );
+    final File file = File('${tempDir.path}/portrait_hibitrate_1080p60.mp4');
+    await file.writeAsBytes(
+      data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      flush: true,
+    );
+
+    final CompressJob job = _compressVideo.compress(file.path);
+    await _progressSubscription?.cancel();
+    _progressSubscription = job.progress.listen((double percent) {
+      if (mounted) setState(() => _progress = percent);
+    });
+    if (mounted) setState(() => _job = job);
+
+    try {
+      final CompressResult result = await job.result;
+      if (mounted) setState(() => _result = result);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _job = null);
+    }
+  }
+
+  Future<void> _cancel() async {
+    await _job?.cancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final CompressResult? result = _result;
+    final bool isRunning = _job != null;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: <Widget>[
+        const Text(
+          'Compress: portrait_hibitrate_1080p60.mp4 (default preset)',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: <Widget>[
+            ElevatedButton(
+              onPressed: isRunning ? null : _startCompress,
+              child: const Text('Compress'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: isRunning ? _cancel : null,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (isRunning) ...<Widget>[
+          LinearProgressIndicator(value: _progress / 100),
+          const SizedBox(height: 4),
+          Text('${_progress.toStringAsFixed(0)}%'),
+        ],
+        if (_error != null)
+          Text('Failed: $_error', style: const TextStyle(color: Colors.red)),
+        if (result != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Text('${result.inputBytes} bytes -> ${result.outputBytes} bytes'),
+          Text('${result.widthPx} x ${result.heightPx} px (displayed)'),
+          Text('Elapsed: ${result.elapsedMs} ms'),
+        ],
+      ],
     );
   }
 }

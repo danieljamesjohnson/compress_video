@@ -22,13 +22,22 @@ recur here. Re-check every pin quarterly; the research this table is drawn from
 | `plugin_platform_interface` | 2.1.8 latest (template pins `^2.0.2`) | pub.dev API | 2026-09-15 |
 | `kotlinx-coroutines-android` | 1.10.2 latest | Maven Central search API; new dependency, not in the template — must be added for off-main-thread host methods | 2026-09-15 |
 | `mockito-core` | 5.18.0 latest (template pins `5.0.0`, which is old — bump recommended) | Maven Central search API | 2026-09-15 |
-| `androidx.media3` | 1.11.0 (2026-08-05) | developer.android.com/jetpack/androidx/releases/media3 — not used until Phase 2 (compression engine), pinned here now for continuity | 2026-09-15 |
+| `androidx.media3` | 1.11.1 (2026-09-11) | `android/build.gradle.kts` (`media3-transformer`/`media3-effect`/`media3-common`/`media3-muxer`, all four on the same release train); verified against `dl.google.com/android/maven2/androidx/media3/media3-transformer/maven-metadata.xml`'s `lastUpdated` timestamp (02-RESEARCH.md) | 2026-09-16 |
 | GitHub Actions runner (Linux) | `ubuntu-latest` | GitHub Actions default runner images | 2026-09-15 |
 | GitHub Actions runner (Apple) | `macos-latest` — macOS 26.6.2, Xcode 26.6 (build 17F113) default, CocoaPods 1.17.0 preinstalled | `actions/runner-images` README, `images/macos/macos-26-arm64-Readme.md`, fetched live | 2026-09-15 |
 | `subosito/flutter-action` | `@v2` (major-version floating tag; latest tagged release `v2.23.0`, 2026-03-25) | `gh api repos/subosito/flutter-action/releases/latest` + raw README | 2026-09-15 |
 | `reactivecircus/android-emulator-runner` | `@v2` (latest tagged release `v2.38.0`, 2026-07-05) | `gh api` + raw README | 2026-09-15 |
 | `actions/checkout` | `@v6` | GitHub Actions marketplace | 2026-09-15 |
 | `actions/setup-java` | `@v4` | GitHub Actions marketplace | 2026-09-15 |
+
+## androidx.media3 bump policy
+
+Per 02-CONTEXT.md's BULD-01 decision: bump `androidx.media3` only within the `1.11.x` patch
+train (e.g. `1.11.1` -> a later `1.11.z`), never to a new minor/major version, without a
+dedicated research pass first — `SizeGuard.kt`'s resolution contract and `TransformerEngine.kt`'s
+Media3 usage (transmux/never-larger decision order, `InAppMp4Muxer` streamable-output handling)
+were verified against `1.11.1`'s exact behaviour (02-04-SUMMARY.md), and a minor/major bump could
+change either without warning.
 
 ## AGP 9 built-in Kotlin — deliberately not used yet
 

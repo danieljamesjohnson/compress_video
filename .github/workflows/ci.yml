@@ -209,6 +209,24 @@ jobs:
         working-directory: example
         run: flutter build apk --debug
 
+      - name: Verify the debug APK's native libraries and 16 KB page alignment (BULD-01, D-20)
+        # The same script a developer runs locally after building. Enumerates every native
+        # library entry in the archive against an explicit allowlist (never a denylist) and
+        # runs zipalign's own 16 KB page-alignment verification. Also asserts, straight out of
+        # the plugin's own build file, the minSdk/compileSdk this project is committed to and
+        # that the media3 pin is still on the 1.11.x train doc/TOOLCHAIN.md's bump policy
+        # requires.
+        #
+        # QUESTIONS.md item 6: if this CI run itself was refused because of the account's
+        # billing/spending limit, that refusal is an external blocker to record in
+        # QUESTIONS.md, NOT a failing check here -- the local emulator and this local script are
+        # this phase's real gate. Do not retry a billing-refused run; record it and move on.
+        run: |
+          bash tool/verify_apk_native_libs.sh
+          grep -c 'minSdk = 23' android/build.gradle.kts
+          grep -c 'compileSdk = 36' android/build.gradle.kts
+          grep -Ec 'media3-(transformer|effect|common|muxer):1\.11\.' android/build.gradle.kts
+
   apple:
     name: Apple
     runs-on: macos-latest
