@@ -75,8 +75,32 @@ class TransformerEngine(
     ): CompressResultMessage {
         val startElapsedMs = SystemClock.elapsedRealtime()
         val inputBytes = inputFile.length()
+        val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
 
-        val target = SizeGuard.resolve(buildSizeGuardInput(inputInfo), buildSizeGuardOptions(request))
+        val target =
+            SizeGuard.resolve(
+                buildSizeGuardInput(inputInfo, inputAudioCodec),
+                buildSizeGuardOptions(request),
+            )
+
+        // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
+        // knows encoding would not help, skip building a Transformer at all rather than running
+        // a real encode only to discard it. The post-check in finishSuccess below is the
+        // fallback for when the prediction is wrong -- this is the fast path for when it is
+        // right, which is the common case for an already-small or already-compressed input.
+        if (target.wouldUseOriginal) {
+            copyFileAtomically(inputFile, destinationFile)
+            onProgress(100.0)
+            return buildResultFromDestination(
+                destinationFile = destinationFile,
+                inputBytes = inputBytes,
+                startElapsedMs = startElapsedMs,
+                transmuxed = false,
+                usedOriginal = true,
+                audioReencoded = false,
+            )
+        }
+
         val videoBitrateBps = target.videoBitrateBps
         val inputDisplayedWidthPx = inputInfo.widthPx.toInt()
         val inputDisplayedHeightPx = inputInfo.heightPx.toInt()
@@ -240,9 +264,6 @@ class TransformerEngine(
             PluginFiles.moveIntoPlace(tempFile, destinationFile)
         }
 
-        val outputInfo = Probe(context).getMediaInfo(destinationFile.path)
-        val audioCodec = if (outputInfo.hasAudio) readAudioCodec(destinationFile) else null
-
         val videoTransmuxed =
             exportResult.videoConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED
         val audioTransmuxedOrAbsent =
@@ -253,6 +274,36 @@ class TransformerEngine(
                 exportResult.audioConversionProcess ==
                 ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
 
+        return buildResultFromDestination(
+            destinationFile = destinationFile,
+            inputBytes = inputBytes,
+            startElapsedMs = startElapsedMs,
+            transmuxed = !usedOriginal && videoTransmuxed && audioTransmuxedOrAbsent,
+            usedOriginal = usedOriginal,
+            audioReencoded = audioReencoded,
+        )
+    }
+
+    /**
+     * Re-probes [destinationFile] with [Probe] for every dimension/duration/codec field and
+     * reads its audio codec separately (mirroring [Probe]'s own [MediaExtractor] pattern rather
+     * than modifying it, since [MediaInfoMessage] has no audio-codec field), then assembles the
+     * [CompressResultMessage] both the real-encode path ([finishSuccess]) and the never-larger
+     * pre-check path (in [compress]) return. Every field but the three passed in is read from
+     * this re-probe, never from [ExportResult]'s own approximate fields (02-RESEARCH.md
+     * Pitfall 4).
+     */
+    private suspend fun buildResultFromDestination(
+        destinationFile: File,
+        inputBytes: Long,
+        startElapsedMs: Long,
+        transmuxed: Boolean,
+        usedOriginal: Boolean,
+        audioReencoded: Boolean,
+    ): CompressResultMessage {
+        val outputInfo = Probe(context).getMediaInfo(destinationFile.path)
+        val audioCodec = if (outputInfo.hasAudio) readAudioCodec(destinationFile) else null
+
         return CompressResultMessage(
             outputPath = destinationFile.canonicalPath,
             inputBytes = inputBytes,
@@ -262,7 +313,7 @@ class TransformerEngine(
             durationMs = outputInfo.durationMs,
             videoCodec = outputInfo.videoCodec ?: "unknown",
             audioCodec = audioCodec,
-            transmuxed = !usedOriginal && videoTransmuxed && audioTransmuxedOrAbsent,
+            transmuxed = transmuxed,
             usedOriginal = usedOriginal,
             toneMapped = false,
             hevcFallback = false,
@@ -336,12 +387,16 @@ class TransformerEngine(
     }
 
     /**
-     * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] has no
-     * audio-codec field (see [readAudioCodec]'s own doc comment), so [SizeGuard.InputInfo]'s
-     * `audioCodec` is always `null` here -- SizeGuard's own rules never read that field, only
-     * [hasAudio] and [SizeGuard.InputInfo.audioBitrateBps].
+     * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] itself has no
+     * audio-codec field (see [readAudioCodec]'s own doc comment), so [audioCodec] is read
+     * separately, once, in [compress] before this is called and threaded through here -- needed
+     * by [SizeGuard.Plan.wouldTransmux]'s audio-codec condition (D-10), which
+     * [SizeGuard.InputInfo.audioBitrateBps] alone cannot answer.
      */
-    private fun buildSizeGuardInput(inputInfo: MediaInfoMessage): SizeGuard.InputInfo =
+    private fun buildSizeGuardInput(
+        inputInfo: MediaInfoMessage,
+        audioCodec: String?,
+    ): SizeGuard.InputInfo =
         SizeGuard.InputInfo(
             displayedWidthPx = inputInfo.widthPx.toInt(),
             displayedHeightPx = inputInfo.heightPx.toInt(),
@@ -352,7 +407,7 @@ class TransformerEngine(
             videoBitrateBps = inputInfo.videoBitrateBps,
             frameRateFps = inputInfo.frameRateFps,
             hasAudio = inputInfo.hasAudio,
-            audioCodec = null,
+            audioCodec = audioCodec,
             audioBitrateBps = null,
         )
 
@@ -374,6 +429,7 @@ class TransformerEngine(
             presetVideoBitrateBps = request.presetVideoBitrateBps,
             maxFps = request.maxFps,
             audioStripped = request.audioMode == AudioModeMessage.STRIP,
+            audioPassthroughRequested = request.audioMode == AudioModeMessage.PASSTHROUGH,
             requestedAudioBitrateBps = request.audioBitrateBps,
             trimStartMs = request.trimStartMs,
             trimEndMs = request.trimEndMs,

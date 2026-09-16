@@ -9,6 +9,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:compress_video/compress_video.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -423,6 +424,74 @@ void main() {
         expect(result720.heightPx, 1280);
       },
       timeout: const Timeout(Duration(seconds: 30)),
+    );
+  });
+
+  // Never-larger: an already-small clip returns the original bytes (D-11, CORE-05, plan
+  // 02-04 task 1). small_480p.mp4's own sidecar bitrate is far below what p360's preset
+  // bitrate would spend re-encoding an 854x480 source, so the predicted output at p360 is
+  // larger than the 77,504-byte input -- exactly the scenario this predicate exists for.
+  group('Never-larger: an already-small clip returns the original bytes', () {
+    testWidgets(
+      'CompressPreset.p360 on small_480p.mp4 copies the original instead of encoding',
+      (WidgetTester tester) async {
+        final Map<String, dynamic> sidecar = await _loadSidecar('small_480p');
+        final Map<String, dynamic> crossPlatform =
+            sidecar['crossPlatform'] as Map<String, dynamic>;
+        final int sidecarSizeBytes = crossPlatform['sizeBytes'] as int;
+
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/small_480p.mp4',
+          'never_larger_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final File inputFile = File(path);
+        final int inputLengthBeforeCompress = await inputFile.length();
+        final DateTime inputModifiedBeforeCompress = await inputFile
+            .lastModified();
+        final Uint8List inputBytes = await inputFile.readAsBytes();
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: const CompressOptions(preset: CompressPreset.p360),
+        );
+        final CompressResult result = await job.result;
+
+        expect(result.usedOriginal, isTrue);
+        expect(result.transmuxed, isFalse);
+        expect(result.outputBytes, sidecarSizeBytes);
+
+        final File outputFile = File(result.outputPath);
+        expect(await outputFile.exists(), isTrue);
+        expect(await outputFile.length(), sidecarSizeBytes);
+
+        expect(
+          result.outputPath,
+          isNot(equals(path)),
+          reason: "the plugin must never return the caller's own input path",
+        );
+        expect(
+          result.outputPath,
+          contains('compress_video'),
+          reason:
+              "the returned path must live in the plugin's own cache "
+              'subdirectory (PluginFiles.cacheSubDir) so clearCache() can '
+              'reclaim it',
+        );
+
+        final Uint8List outputBytes = await outputFile.readAsBytes();
+        expect(
+          sha256.convert(outputBytes),
+          sha256.convert(inputBytes),
+          reason:
+              'the never-larger copy must be byte-identical to the input, '
+              'not merely the same length',
+        );
+
+        // The input itself must never be touched, including on this path.
+        expect(await inputFile.length(), inputLengthBeforeCompress);
+        expect(await inputFile.lastModified(), inputModifiedBeforeCompress);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
     );
   });
 }

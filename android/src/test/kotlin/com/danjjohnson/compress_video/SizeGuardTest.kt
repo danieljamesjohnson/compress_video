@@ -39,6 +39,44 @@ internal class SizeGuardTest {
             presetVideoBitrateBps = 2500000L,
             maxFps = 30L,
             audioStripped = false,
+            audioPassthroughRequested = true,
+            requestedAudioBitrateBps = null,
+            trimStartMs = null,
+            trimEndMs = null,
+        )
+
+    /**
+     * A qualifying baseline for [SizeGuard.Plan.wouldTransmux]: input long side exactly equal
+     * to the preset's own cap, frame rate exactly at the cap, H.264+AAC, and an input video
+     * bitrate comfortably inside the 1.15x headroom of the resolved (== preset, since
+     * longSideRatio/fpsRatio are both 1.0) 800,000bps target. Every transmux test below flips
+     * exactly one field off this baseline.
+     */
+    private fun transmuxInput(): SizeGuard.InputInfo =
+        SizeGuard.InputInfo(
+            displayedWidthPx = 640,
+            displayedHeightPx = 360,
+            rotationDegrees = 0,
+            durationMs = 4000L,
+            sizeBytes = 5_000_000L,
+            videoCodec = "h264",
+            videoBitrateBps = 800000L,
+            frameRateFps = 30.0,
+            hasAudio = true,
+            audioCodec = "aac",
+            audioBitrateBps = 128000L,
+        )
+
+    private fun transmuxOptions(): SizeGuard.Options =
+        SizeGuard.Options(
+            maxLongSidePx = null,
+            videoBitrateBps = null,
+            targetSizeMb = null,
+            presetMaxLongSidePx = 640L,
+            presetVideoBitrateBps = 800000L,
+            maxFps = 30L,
+            audioStripped = false,
+            audioPassthroughRequested = true,
             requestedAudioBitrateBps = null,
             trimStartMs = null,
             trimEndMs = null,
@@ -227,5 +265,54 @@ internal class SizeGuardTest {
         assertEquals(800000L, p360Plan.videoBitrateBps)
         assertEquals(1280, p720Plan.targetHeightPx)
         assertEquals(2500000L, p720Plan.videoBitrateBps)
+    }
+
+    // --- wouldUseOriginal (D-11, CORE-05, plan 02-04 task 1) ---
+    //
+    // defaultInput()/defaultOptions() (1080x1920, preset cap 1280) never qualifies for
+    // transmux -- the preset's own long side is below the input's -- so these cases isolate
+    // the never-larger predicate from the transmux one. targetSizeMb=1.0 against the default
+    // 4-second/128kbps-audio baseline resolves to a known, exact predictedOutputBytes of
+    // 999,100 (same arithmetic as targetSizeMb_producesTheDocumentedFormulaBitrate, halved for
+    // a 1.0MB target instead of 2.0MB), so sizeBytes is placed directly at, above, and below
+    // that boundary rather than re-deriving the bitrate math per case.
+
+    @Test
+    fun wouldUseOriginal_predictedOutputAboveInputSize_setsTheFlag() {
+        val options = defaultOptions().copy(targetSizeMb = 1.0)
+        val input = defaultInput().copy(sizeBytes = 999_099L)
+        val plan = SizeGuard.resolve(input, options)
+        assertEquals(999_100L, plan.predictedOutputBytes)
+        assertTrue(plan.wouldUseOriginal)
+    }
+
+    @Test
+    fun wouldUseOriginal_predictedOutputExactlyEqualToInputSize_setsTheFlag() {
+        val options = defaultOptions().copy(targetSizeMb = 1.0)
+        val input = defaultInput().copy(sizeBytes = 999_100L)
+        val plan = SizeGuard.resolve(input, options)
+        assertTrue(
+            plan.wouldUseOriginal,
+            "equality counts as 'would not help' -- CORE-05's flagged assumption",
+        )
+    }
+
+    @Test
+    fun wouldUseOriginal_predictedOutputOneByteBelowInputSize_doesNotSetTheFlag() {
+        val options = defaultOptions().copy(targetSizeMb = 1.0)
+        val input = defaultInput().copy(sizeBytes = 999_101L)
+        val plan = SizeGuard.resolve(input, options)
+        assertTrue(!plan.wouldUseOriginal)
+    }
+
+    @Test
+    fun wouldUseOriginal_neverSetWhenThePlanIsARemux() {
+        // The qualifying transmux baseline predicts output bytes exactly equal to the input's
+        // own size (a remux copies the same samples) -- which would trip the equality rule
+        // above if wouldTransmux did not take precedence. It must not.
+        val plan = SizeGuard.resolve(transmuxInput(), transmuxOptions())
+        assertTrue(plan.wouldTransmux)
+        assertEquals(plan.predictedOutputBytes, transmuxInput().sizeBytes)
+        assertTrue(!plan.wouldUseOriginal)
     }
 }

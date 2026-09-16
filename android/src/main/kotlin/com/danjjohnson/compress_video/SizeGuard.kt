@@ -11,9 +11,13 @@ import kotlin.math.ceil
  * able to call the same resolution [TransformerEngine] uses without ever touching a decoder.
  * [SizeGuardTest] is the JVM suite that proves every rule below without an emulator.
  *
- * Implements the seven-rule resolution contract in 02-03-PLAN.md exactly, in order. The
- * transmux and never-larger predicates that also conceptually live on this function are added
- * in plan 02-04; this object only resolves target size, frame rate and bitrate.
+ * Implements the seven-rule resolution contract in 02-03-PLAN.md exactly, in order, plus the
+ * transmux (D-10) and never-larger (D-11) predicates added in plan 02-04. Both predicates are
+ * pure derivations of numbers this function already computes, so the compress path and the
+ * future `estimate()` path (plan 02-07) can never disagree about whether a request would remux,
+ * substitute the original, or genuinely encode -- 02-04-PLAN.md's must-have that
+ * `CompressEstimate.wouldTransmux`/`wouldUseOriginal` can never diverge from what the job
+ * actually does.
  */
 object SizeGuard {
     /**
@@ -46,6 +50,12 @@ object SizeGuard {
         val audioBitrateBps: Long?,
     )
 
+    /** The video codec token that satisfies [wouldTransmux]'s codec condition (D-10). */
+    private const val VIDEO_CODEC_H264 = "h264"
+
+    /** The audio codec token that satisfies [wouldTransmux]'s audio-codec condition (D-10). */
+    private const val AUDIO_CODEC_AAC = "aac"
+
     /**
      * The resolved request [SizeGuard] resolves against an [InputInfo].
      *
@@ -71,6 +81,13 @@ object SizeGuard {
         val maxFps: Long,
         /** Whether the audio track is being removed entirely. */
         val audioStripped: Boolean,
+        /**
+         * Whether the request is `AudioModeMessage.PASSTHROUGH` -- distinct from
+         * [audioStripped] (`STRIP`) and a forced re-encode (`REENCODE`). [wouldTransmux]'s
+         * audio-mode condition (D-10) is only satisfied by an explicit passthrough request; a
+         * caller asking to strip or re-encode audio must not be told the job would remux.
+         */
+        val audioPassthroughRequested: Boolean,
         /** Explicit requested audio bitrate (only meaningful for a re-encode), or `null`. */
         val requestedAudioBitrateBps: Long?,
         /** Start of the trim range, in milliseconds, or `null` for the start of the input. */
@@ -96,8 +113,28 @@ object SizeGuard {
         val audioBitrateBps: Long,
         /** Resolved output duration, in milliseconds -- the trimmed duration when trimmed. */
         val outputDurationMs: Long,
-        /** Predicted output file size, in bytes, including estimated container overhead. */
+        /**
+         * Predicted output file size, in bytes, including estimated container overhead. Exactly
+         * [InputInfo.sizeBytes] when [wouldTransmux] is `true`, since a remux copies the same
+         * samples rather than re-encoding them.
+         */
         val predictedOutputBytes: Long,
+        /**
+         * Whether this request would remux (container copy, no video re-encode) rather than
+         * transcode, decided from the exact seven conditions in 02-04-PLAN.md's "The decision
+         * order this plan fixes" / D-10. Decided first, ahead of [wouldUseOriginal] -- a clip
+         * that qualifies for transmux is remuxed, never substituted with the original, because a
+         * remux still normalises the container and still honours a trim-less request.
+         */
+        val wouldTransmux: Boolean,
+        /**
+         * Whether this request would skip encoding and copy the original input to the output
+         * path instead, because [wouldTransmux] is `false` and [predictedOutputBytes] is greater
+         * than or equal to [InputInfo.sizeBytes] -- equality counts as "would not help" (D-11,
+         * CORE-05). Always `false` when [wouldTransmux] is `true`: a remux is never replaced by
+         * an original-copy substitution, even though its predicted bytes equal the input's own.
+         */
+        val wouldUseOriginal: Boolean,
     )
 
     /**
@@ -173,12 +210,37 @@ object SizeGuard {
             videoBitrateBps = minOf(videoBitrateBps, inputVideoBitrateBps)
         }
 
-        // Rule 7.
+        // Transmux predicate (D-10): every condition must hold. Integer cross-multiplication
+        // (`* 100` / `* 115`) for the bitrate headroom check, not floating-point multiplication
+        // by 1.15, so a value placed exactly at the boundary in a test is never at the mercy of
+        // binary-floating-point rounding.
+        val noTrimRequested = options.trimStartMs == null && options.trimEndMs == null
+        val wouldTransmux =
+            input.videoCodec == VIDEO_CODEC_H264 &&
+                (!input.hasAudio || input.audioCodec == AUDIO_CODEC_AAC) &&
+                options.audioPassthroughRequested &&
+                noTrimRequested &&
+                inputLongSidePx <= effectiveLongSidePx &&
+                (inputFpsRounded == null || inputFpsRounded <= options.maxFps.toInt()) &&
+                inputVideoBitrateBps != null &&
+                inputVideoBitrateBps * 100L <= videoBitrateBps * 115L
+
+        // Rule 7. A remux copies the same samples into a new container, so its predicted output
+        // is exactly the input's own byte count rather than a bitrate*duration estimate.
         val predictedOutputBytes =
-            ceil(
-                (videoBitrateBps + audioBitrateBps) * outputDurationSeconds / BITS_PER_BYTE *
-                    CONTAINER_OVERHEAD_FACTOR,
-            ).toLong()
+            if (wouldTransmux) {
+                input.sizeBytes
+            } else {
+                ceil(
+                    (videoBitrateBps + audioBitrateBps) * outputDurationSeconds / BITS_PER_BYTE *
+                        CONTAINER_OVERHEAD_FACTOR,
+                ).toLong()
+            }
+
+        // Never-larger pre-check predicate (D-11, CORE-05): decided second, only when the plan
+        // is not already a remux. Equality counts as "would not help" -- a predicted output
+        // exactly matching the input size gains nothing but a re-encode's generation loss.
+        val wouldUseOriginal = !wouldTransmux && predictedOutputBytes >= input.sizeBytes
 
         return Plan(
             targetWidthPx = targetWidthPx,
@@ -188,6 +250,8 @@ object SizeGuard {
             audioBitrateBps = audioBitrateBps,
             outputDurationMs = outputDurationMs,
             predictedOutputBytes = predictedOutputBytes,
+            wouldTransmux = wouldTransmux,
+            wouldUseOriginal = wouldUseOriginal,
         )
     }
 
