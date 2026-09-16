@@ -106,7 +106,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 02-04-PLAN.md — Never-larger pre-check and post-check, the transmux fast path with a measured speed ratio, and `doc/PRESETS.md` generated from measurement
+- [x] 02-04-PLAN.md — Never-larger pre-check and post-check, the transmux fast path with a measured speed ratio, and `doc/PRESETS.md` generated from measurement
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -197,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 2/7 | In progress | - |
+| 2. Android Compression on Media3 | 4/7 | In progress | - |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |

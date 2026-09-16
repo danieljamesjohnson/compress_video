@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 14
-  completed_plans: 8
-  percent: 57
+  completed_plans: 9
+  percent: 64
 ---
 
 # Project State
@@ -21,29 +21,29 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
-Plan: 3 of 7 in current phase
-Status: Executing Phase 2 (wave 3 of 7 complete; wave 4 next — 02-04)
-Last activity: 2026-09-15 — 02-03 complete (SizeGuard pure resolution function wired into TransformerEngine; all four presets, explicit targets, targetSizeMb and the 30fps cap proven on the emulator; native rejection mirror wired into Compression.kt); Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
+Plan: 4 of 7 in current phase
+Status: Executing Phase 2 (wave 4 of 7 complete; wave 5 next — 02-05)
+Last activity: 2026-09-16 — 02-04 complete (never-larger pre-check/post-check and the SizeGuard wouldTransmux/wouldUseOriginal predicates; fixed a real Media3 bug that made the transmux fast path unreachable — a non-default VideoEncoderSettings always forces videoNeedsEncoding()=true — and a finishSuccess precedence bug that let container-overhead alone discard a genuine transmux; doc/PRESETS.md generated from real emulator measurement, no preset seed needed changing). Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
-Progress: [██████░░░░] 57% (8/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
+Progress: [██████░░░░] 64% (9/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 53 min
-- Total execution time: 7.1 hours
+- Total plans completed: 9
+- Average duration: 58 min
+- Total execution time: 8.7 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5 | 249 min | 50 min |
-| 2 | 3 | 174 min | 58 min |
+| 2 | 4 | 269 min | 67 min |
 
 **Recent Trend:**
-- Last 5 plans: 92 min, 47 min, 20 min, 49 min, 105 min
-- Trend: 02-03 (SizeGuard resolution + engine wiring + native rejection mirror) took 105 min, the longest plan yet in this phase — real emulator/ffprobe cross-checks found three live platform quirks (a wire-contract gap that would have made the plan's own core scaling rule unreachable, a probe bitrate-fallback gap, and a VBR-vs-CBR bitrate-accuracy gap) plus one tolerance that could not be met on the emulator's software encoder and had to be documented rather than forced
+- Last 5 plans: 47 min, 20 min, 49 min, 105 min, ~95 min
+- Trend: 02-04 (never-larger + transmux fast path + measured presets) took ~95 min — most of it spent diagnosing why the transmux fast path never actually fired despite `SizeGuard` correctly predicting it, tracing the cause via `javap` into `DefaultEncoderFactory`'s undocumented `videoNeedsEncoding()` precondition, and finding a second, related precedence bug in the never-larger post-check
 - 01-06 (not yet counted as completed — halted, see Blockers/Concerns): 166 min elapsed, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, final fix unverified due to a GitHub Actions billing block
 
 *Updated after each plan completion*
@@ -78,11 +78,13 @@ Recent decisions affecting current work:
 - [02-01]: `02-VALIDATION.md`'s Per-Task Verification Map has 21 rows (matching the actual total task count across all 7 phase-2 plans — 3 tasks x 7 plans), not the 20 the plan's own `must_haves`/acceptance criteria expected — the same class of off-by-one authoring bug as 01-01's (that one undercounted; this one overcounts), documented rather than dropping a real task's row. See 02-01-SUMMARY.md Deviations.
 - [02-02]: Media3's effect pipeline (`Presentation`, `FrameDropEffect`) operates on the DECODED, display-oriented frame, not the coded pre-rotation frame — measured live on the emulator (a coded-space swap for a 90°-rotated input produced an incorrect 406px-wide output instead of 720; passing the target straight from the input's own displayed dimensions, with no swap, produced the correct 720x1280). `TransformerEngine.kt` documents this so no later plan re-derives it. `MediaMath.normalizeCodec` has no audio-codec case (video-only tokens); a local `normalizeAudioCodec` was added inside `TransformerEngine.kt` rather than extending `MediaMath.kt`, since AUDO-01/AUDO-02 own that properly in a later plan. See 02-02-SUMMARY.md Deviations.
 - [02-03]: `CompressRequestMessage` gained `presetMaxLongSidePx`/`presetVideoBitrateBps` (always the selected preset's own nominal values) and `maxLongSidePx`/`videoBitrateBps` became true explicit-override-or-null — 02-02's pre-resolved-into-a-concrete-value shape would have made `SizeGuard`'s preset-bitrate-scaling rule unreachable from the real Dart-to-native path. `TransformerEngine` now uses `BITRATE_MODE_CBR` (not the default VBR) after measuring VBR overshoot ~28% vs CBR's ~20% on this emulator's software encoder for an explicit bitrate request. `Probe.kt` gained a sample-size-summation bitrate fallback since Media3's `InAppMp4Muxer` output never carries a `MediaFormat.KEY_BIT_RATE` value, unlike the ffmpeg-authored corpus fixtures — confirmed accurate against an independently pulled file's `ffprobe` measurement. `targetSizeMb`'s documented ±15% tolerance could not be proven on the emulator's software encoder for the 4-second corpus clip (measured +19.1%/-29.9%); the formula itself is exact and unit-tested, so the emulator test uses a documented ±35% tolerance pending physical-device re-verification (QUESTIONS.md #3). See 02-03-SUMMARY.md Deviations.
+- [02-04]: `SizeGuard.Plan` gained `wouldTransmux`/`wouldUseOriginal`, decided transmux-first/never-larger-second so the compress path and the future `estimate()` path can never disagree. Found and fixed a real Media3 bug live on the emulator: `DefaultEncoderFactory.videoNeedsEncoding()` returns `true` whenever `requestedVideoEncoderSettings != VideoEncoderSettings.DEFAULT` (confirmed via `javap` on the installed `media3-transformer:1.11.1` AAR — undocumented in 02-RESEARCH.md and the public Javadoc), which made the transmux fast path unreachable regardless of prediction because every encode path always built a non-default `VideoEncoderSettings`; fixed by leaving encoder settings at default whenever `wouldTransmux` is true. Also fixed `finishSuccess`'s precedence: it decided never-larger from the raw byte count before transmux, so a genuine remux whose new container (Media3's muxer is not byte-preserving — measured 77,504 -> 472,825 bytes for `small_480p.mp4`) landed above the input's own size was wrongly discarded; transmux is now decided first from `ExportResult`'s own conversion-process fields. `doc/PRESETS.md` generated from real measurement; no preset seed changed (the discriminating clip's four rows already form a monotonic ladder). CORE-05/CORE-06's flagged assumptions were implemented as written and carried forward unresolved for the verifier, per the plan's own instruction. See 02-04-SUMMARY.md Deviations.
 
 ### Pending Todos
 
 - [01-06]: Once GitHub Actions billing is resolved (QUESTIONS.md #6), re-run CI for `main` HEAD and confirm the `apple` job concludes `success` end-to-end (including the iOS-simulator integration step with the current Thumbnails.swift/thumbnail_test.dart fixes). No further code changes are expected. Re-summarize 01-06 as `status: complete` once confirmed, then proceed to 01-07.
 - [02-03]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the `targetSizeMb` 1.0/2.0 emulator cases against its hardware encoder and tighten `compress_test.dart`'s ±35% tolerance comment (or confirm ±15% only holds on hardware and adjust `CompressOptions.targetSizeMb`'s dartdoc accordingly).
+- [02-04]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the transmux speed-ratio test against its hardware encoder to confirm the <30% elapsed-time claim (CORE-06) holds outside the emulator's software encoder. Also: `doc/TOOLCHAIN.md` still lists `androidx.media3` as 1.11.0; the actual pin in `android/build.gradle.kts` is 1.11.1 — reconcile in a later plan.
 
 ### Blockers/Concerns
 
@@ -107,6 +109,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15
-Stopped at: Completed 02-03-PLAN.md (SizeGuard pure resolution function, wired into TransformerEngine; all four presets, explicit targets, targetSizeMb, and the 30fps cap proven on emulator-5554; native rejection mirror wired into Compression.kt). Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
-Resume file: None — next is 02-04-PLAN.md
+Last session: 2026-09-16
+Stopped at: Completed 02-04-PLAN.md (never-larger pre-check/post-check, SizeGuard wouldTransmux/wouldUseOriginal predicates, a fixed Media3 transmux fast path, and doc/PRESETS.md generated from real emulator measurement). Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
+Resume file: None — next is 02-05-PLAN.md

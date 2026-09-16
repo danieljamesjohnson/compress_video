@@ -10,11 +10,11 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Core compression
 
 - [ ] **CORE-01**: App can compress a local video file to an H.264 + AAC MP4 with a single call, on Android, iOS and macOS, with the same Dart API and the same observable behaviour on each
-- [ ] **CORE-02**: Caller can choose output size by a named preset (documented per platform: what resolution and bitrate it really produces) or by an explicit target: max long side in pixels, video bitrate, or target file size in MB
+- [x] **CORE-02**: Caller can choose output size by a named preset (documented per platform: what resolution and bitrate it really produces) or by an explicit target: max long side in pixels, video bitrate, or target file size in MB
 - [ ] **CORE-03**: Caller receives a typed result: output path, bytes before and after, width, height, duration, codec used, whether the video track was transmuxed, whether HDR was tone-mapped, elapsed time; the call never resolves to `null`
 - [ ] **CORE-04**: Failures surface as typed errors with a reason (unsupported input, encoder unavailable, out of space, interrupted, cancelled); no failure can crash the host app, and no failure is swallowed into a debug print
-- [ ] **CORE-05**: Output is never larger than the input: when the encode would be bigger, the plugin returns the original bytes (copied to the output path) and the result says so
-- [ ] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
+- [x] **CORE-05**: Output is never larger than the input: when the encode would be bigger, the plugin returns the original bytes (copied to the output path) and the result says so
+- [x] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
 - [ ] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
 - [x] **CORE-08**: Caller can cap the output frame rate (default cap 30 fps); resolution and frame rate are never upscaled
 - [ ] **CORE-09**: Caller can choose the output directory and file name; the default is a unique name in the app cache directory, and a `clearCache()` removes only files the plugin created
@@ -101,11 +101,11 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CORE-01 | Phase 3 | Pending |
-| CORE-02 | Phase 2 | Pending |
+| CORE-02 | Phase 2 | Complete |
 | CORE-03 | Phase 2 | Pending |
 | CORE-04 | Phase 2 | Pending |
-| CORE-05 | Phase 2 | Pending |
-| CORE-06 | Phase 2 | Pending |
+| CORE-05 | Phase 2 | Complete |
+| CORE-06 | Phase 2 | Complete |
 | CORE-07 | Phase 3 | Pending |
 | CORE-08 | Phase 2 | Complete |
 | CORE-09 | Phase 2 | Pending |
