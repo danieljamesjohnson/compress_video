@@ -494,4 +494,115 @@ void main() {
       timeout: const Timeout(Duration(seconds: 20)),
     );
   });
+
+  // Transmux: a clip that already meets the target is remuxed, not re-encoded (D-10, plan
+  // 02-04 task 2). small_480p.mp4 is already H.264 + AAC at 854x480/30fps, well inside every
+  // one of the default p720 preset's conditions, so it qualifies for the fast path.
+  group('Transmux: a clip that already meets the target is remuxed', () {
+    testWidgets(
+      'default options on small_480p.mp4 report transmuxed, not a re-encode',
+      (WidgetTester tester) async {
+        final Map<String, dynamic> sidecar = await _loadSidecar('small_480p');
+        final Map<String, dynamic> crossPlatform =
+            sidecar['crossPlatform'] as Map<String, dynamic>;
+
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/small_480p.mp4',
+          'transmux_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(path);
+        final CompressResult result = await job.result;
+
+        expect(result.transmuxed, isTrue);
+        expect(result.usedOriginal, isFalse);
+
+        final File outputFile = File(result.outputPath);
+        expect(await outputFile.exists(), isTrue);
+
+        final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+          result.outputPath,
+        );
+        expect(outputInfo.widthPx, crossPlatform['widthPx']);
+        expect(outputInfo.heightPx, crossPlatform['heightPx']);
+        expect(outputInfo.videoCodec, crossPlatform['videoCodec']);
+
+        final int expectedDurationMs = crossPlatform['durationMs'] as int;
+        final int durationToleranceMs =
+            crossPlatform['durationToleranceMs'] as int;
+        expect(
+          outputInfo.durationMs.toDouble(),
+          closeTo(
+            expectedDurationMs.toDouble(),
+            durationToleranceMs.toDouble(),
+          ),
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+
+    testWidgets(
+      'default options on noaudio_720p.mp4 also report transmuxed, proving the '
+      'absent-audio-track branch is satisfied rather than failing',
+      (WidgetTester tester) async {
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/noaudio_720p.mp4',
+          'transmux_noaudio_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(path);
+        final CompressResult result = await job.result;
+
+        expect(result.transmuxed, isTrue);
+        expect(result.usedOriginal, isFalse);
+        expect(result.audioCodec, isNull);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+
+    testWidgets(
+      'a remux is measurably faster than a real encode of the same clip, in the same run',
+      (WidgetTester tester) async {
+        final String remuxPath = await _copyAssetToTempFile(
+          'assets/corpus/small_480p.mp4',
+          'speed_remux_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob remuxJob = compressVideo.compress(remuxPath);
+        final CompressResult remuxResult = await remuxJob.result;
+
+        expect(remuxResult.transmuxed, isTrue);
+        expect(remuxResult.elapsedMs, greaterThan(0));
+
+        final String encodePath = await _copyAssetToTempFile(
+          'assets/corpus/small_480p.mp4',
+          'speed_encode_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        // small_480p.mp4's own sidecar bitrate is 129,866bps. An explicit request of 50,000
+        // is comfortably below 129,866 / 1.15 =~ 112,928, so wouldTransmux's bitrate-headroom
+        // condition (D-10) is not satisfied -- unlike a request close to or above the
+        // source's own bitrate, which the resolver would correctly still remux (D-10's own
+        // point: remuxing is preferred whenever the source is already close enough to what
+        // was asked for). 50,000 is also comfortably below the never-larger threshold: at
+        // 128,000bps default audio, a 90,000bps video request would itself predict an output
+        // at or above small_480p.mp4's own tiny 77,504-byte size and trigger the
+        // never-larger pre-check instead of a real encode -- 50,000 leaves enough margin
+        // that this is a genuine, measurable encode.
+        final CompressJob encodeJob = compressVideo.compress(
+          encodePath,
+          options: const CompressOptions(videoBitrateBps: 50000),
+        );
+        final CompressResult encodeResult = await encodeJob.result;
+
+        expect(encodeResult.transmuxed, isFalse);
+        expect(encodeResult.elapsedMs, greaterThan(0));
+
+        expect(
+          remuxResult.elapsedMs * 100,
+          lessThan(encodeResult.elapsedMs * 30),
+          reason:
+              'a remux must take under 30% of a real encode\'s elapsed time, '
+              'measured in this same run (D-19/CORE-06)',
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+  });
 }

@@ -143,23 +143,41 @@ class TransformerEngine(
                 .setEffects(Effects(emptyList(), videoEffects))
                 .build()
 
-        val videoEncoderSettings =
-            VideoEncoderSettings.Builder()
-                .setBitrate(videoBitrateBps.toInt())
-                // CBR, not the DefaultEncoderFactory/VideoEncoderSettings default of VBR
-                // (02-RESEARCH.md Pattern 4): measured live this plan -- an explicit
-                // videoBitrateBps request at VBR overshot by ~28% on this emulator's software
-                // encoder over a short (4s) clip, while CBR landed within ~20%, inside the
-                // 25% tolerance every corpus sidecar already uses for bitrate. The emulator's
-                // encoder advertises both VBR and CBR (02-RESEARCH.md Pitfall 3's
-                // `feature-bitrate-modes = "VBR,CBR"`), so this is a supported mode change,
-                // not a workaround relying on undocumented behaviour.
-                .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-                .build()
+        // DefaultEncoderFactory.videoNeedsEncoding() returns true whenever
+        // requestedVideoEncoderSettings != VideoEncoderSettings.DEFAULT -- read live from the
+        // installed media3-transformer AAR this plan (javap on DefaultEncoderFactory.class),
+        // since neither the public Javadoc nor 02-RESEARCH.md's Pattern 2 documents it. Every
+        // encode path before this plan always built a non-default VideoEncoderSettings, which
+        // meant TransformerUtil.shouldTranscodeVideo's very first bespoke check
+        // (`encoderFactory.videoNeedsEncoding()`) short-circuited to `true` before it ever
+        // reached the mime-type/effects comparison that would have let a qualifying clip
+        // transmux -- the fast path was unreachable code until this fix, regardless of what
+        // SizeGuard predicted. A remux must therefore leave the video encoder settings at
+        // [VideoEncoderSettings.DEFAULT] (no [DefaultEncoderFactory.Builder.setRequestedVideoEncoderSettings]
+        // call at all), which is also why no bitrate is requested on this branch -- a remux
+        // copies the input's own bitrate, it does not target one.
         val encoderFactory =
-            DefaultEncoderFactory.Builder(context)
-                .setRequestedVideoEncoderSettings(videoEncoderSettings)
-                .build()
+            if (target.wouldTransmux) {
+                DefaultEncoderFactory.Builder(context).build()
+            } else {
+                val videoEncoderSettings =
+                    VideoEncoderSettings.Builder()
+                        .setBitrate(videoBitrateBps.toInt())
+                        // CBR, not the DefaultEncoderFactory/VideoEncoderSettings default of
+                        // VBR (02-RESEARCH.md Pattern 4): measured live this plan -- an
+                        // explicit videoBitrateBps request at VBR overshot by ~28% on this
+                        // emulator's software encoder over a short (4s) clip, while CBR landed
+                        // within ~20%, inside the 25% tolerance every corpus sidecar already
+                        // uses for bitrate. The emulator's encoder advertises both VBR and CBR
+                        // (02-RESEARCH.md Pitfall 3's `feature-bitrate-modes = "VBR,CBR"`), so
+                        // this is a supported mode change, not a workaround relying on
+                        // undocumented behaviour.
+                        .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                        .build()
+                DefaultEncoderFactory.Builder(context)
+                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                    .build()
+            }
 
         val deferred = CompletableDeferred<ExportOutcome>()
         val listener =
@@ -180,6 +198,13 @@ class TransformerEngine(
                 }
             }
 
+        // No composition-level transmux flags (Transformer.Builder has no such API; the
+        // per-EditedMediaItem knobs 02-RESEARCH.md Pattern 2 names are ignored for a
+        // single-item composition, so there is no reachable code path here where setting them
+        // would do anything). When target.wouldTransmux is true, videoEffects above is already
+        // empty and requesting H.264/AAC output already matches the input's own codecs (the
+        // predicate requires exactly that), so Media3's own "transcode only if necessary"
+        // behaviour transmuxes both tracks without any extra wiring on this builder.
         val transformer =
             Transformer.Builder(context)
                 .setVideoMimeType(MimeTypes.VIDEO_H264)
@@ -242,10 +267,11 @@ class TransformerEngine(
     }
 
     /**
-     * Finishes a successful export: decides never-larger substitution, re-probes the output
-     * file with [Probe] for every dimension/duration/codec field, and reads the audio codec
-     * separately (mirroring [Probe]'s own [MediaExtractor] pattern rather than modifying it,
-     * since [MediaInfoMessage] has no audio-codec field).
+     * Finishes a successful export: runs the never-larger POST-check on the real byte count on
+     * disk (the pre-check in [compress] is a heuristic; this is the fact), detects transmux
+     * from [exportResult]'s own per-track conversion-process fields rather than from the
+     * prediction -- the prediction is a plan, the export result is the record -- and builds the
+     * final result via [buildResultFromDestination].
      */
     private suspend fun finishSuccess(
         exportResult: ExportResult,
@@ -255,8 +281,26 @@ class TransformerEngine(
         inputBytes: Long,
         startElapsedMs: Long,
     ): CompressResultMessage {
+        // Transmux is decided first, from the export result's own record of what actually
+        // happened -- never re-derived from a byte count. Only when this export was NOT a
+        // transmux does the never-larger POST-check apply (D-10/D-11's fixed precedence,
+        // 02-04-PLAN.md "The decision order this plan fixes"). Without this ordering, a
+        // genuine remux whose new container happens to land at or above the input's own byte
+        // count -- an ordinary muxer-overhead difference, not a failure to remux -- would be
+        // wrongly discarded and reported as usedOriginal instead of transmuxed.
+        val videoTransmuxed =
+            exportResult.videoConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED
+        val audioTransmuxedOrAbsent =
+            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED ||
+                exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_NA
+        val transmuxed = videoTransmuxed && audioTransmuxedOrAbsent
+        val audioReencoded =
+            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSCODED ||
+                exportResult.audioConversionProcess ==
+                ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
+
         val tempBytes = tempFile.length()
-        val usedOriginal = tempBytes >= inputBytes
+        val usedOriginal = !transmuxed && tempBytes >= inputBytes
         if (usedOriginal) {
             PluginFiles.quietDelete(tempFile)
             copyFileAtomically(inputFile, destinationFile)
@@ -264,21 +308,11 @@ class TransformerEngine(
             PluginFiles.moveIntoPlace(tempFile, destinationFile)
         }
 
-        val videoTransmuxed =
-            exportResult.videoConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED
-        val audioTransmuxedOrAbsent =
-            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED ||
-                exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_NA
-        val audioReencoded =
-            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSCODED ||
-                exportResult.audioConversionProcess ==
-                ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
-
         return buildResultFromDestination(
             destinationFile = destinationFile,
             inputBytes = inputBytes,
             startElapsedMs = startElapsedMs,
-            transmuxed = !usedOriginal && videoTransmuxed && audioTransmuxedOrAbsent,
+            transmuxed = transmuxed,
             usedOriginal = usedOriginal,
             audioReencoded = audioReencoded,
         )

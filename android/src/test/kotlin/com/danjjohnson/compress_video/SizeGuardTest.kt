@@ -315,4 +315,97 @@ internal class SizeGuardTest {
         assertEquals(plan.predictedOutputBytes, transmuxInput().sizeBytes)
         assertTrue(!plan.wouldUseOriginal)
     }
+
+    // --- wouldTransmux (D-10, plan 02-04 task 2) ---
+    //
+    // transmuxInput()/transmuxOptions() is a baseline every one of the seven conditions
+    // satisfies. Each case below flips exactly one field off that baseline.
+
+    @Test
+    fun wouldTransmux_qualifyingBaseline_isTrue() {
+        val plan = SizeGuard.resolve(transmuxInput(), transmuxOptions())
+        assertTrue(plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_nonH264VideoCodec_disqualifies() {
+        val input = transmuxInput().copy(videoCodec = "hevc")
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_nonAacAudioCodec_disqualifies() {
+        val input = transmuxInput().copy(audioCodec = "opus")
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_forcedAudioReencode_disqualifies() {
+        val options = transmuxOptions().copy(audioPassthroughRequested = false)
+        val plan = SizeGuard.resolve(transmuxInput(), options)
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_audioStrip_disqualifies() {
+        val options =
+            transmuxOptions().copy(audioStripped = true, audioPassthroughRequested = false)
+        val plan = SizeGuard.resolve(transmuxInput(), options)
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_trimRequested_disqualifies() {
+        val options = transmuxOptions().copy(trimStartMs = 500L)
+        val plan = SizeGuard.resolve(transmuxInput(), options)
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_longSideOnePixelAboveTheTarget_disqualifies() {
+        val input = transmuxInput().copy(displayedWidthPx = 641)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_frameRateOneAboveTheCap_disqualifies() {
+        val input = transmuxInput().copy(frameRateFps = 31.0)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_bitrateExactlyAt1point15TimesTheTarget_qualifies() {
+        // Resolved video bitrate stays 800,000 (min against a raised input bitrate that is
+        // still above the preset-scaled value), so 920,000 is exactly the 1.15x boundary.
+        val input = transmuxInput().copy(videoBitrateBps = 920_000L)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertEquals(800_000L, plan.videoBitrateBps)
+        assertTrue(plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_bitrateOneBpsAboveTheHeadroom_disqualifies() {
+        val input = transmuxInput().copy(videoBitrateBps = 920_001L)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertEquals(800_000L, plan.videoBitrateBps)
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_unknownInputBitrate_disqualifies() {
+        val input = transmuxInput().copy(videoBitrateBps = null)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_noAudioInputWithEverythingElseQualifying_qualifies() {
+        val input = transmuxInput().copy(hasAudio = false, audioCodec = null)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(plan.wouldTransmux)
+    }
 }
