@@ -21,15 +21,15 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Orientation, codecs and HDR
 
-- [ ] **ORNT-01**: Portrait and rotated inputs play upright in every common player, the result's width/height describe the displayed orientation, and the frame has no black bars or padding
+- [x] **ORNT-01**: Portrait and rotated inputs play upright in every common player, the result's width/height describe the displayed orientation, and the frame has no black bars or padding
 - [ ] **CDEC-01**: H.264 is the default codec; caller can opt into HEVC, which is used only when a hardware encoder exists and otherwise falls back to H.264 with the fallback reported in the result
 - [ ] **CDEC-02**: HDR input (Dolby Vision profile 8, HLG, HDR10) is tone-mapped to SDR by default so the output is not washed out; the result reports that tone-mapping happened
 - [ ] **CDEC-03**: Caller can opt to keep HDR (HEVC 10-bit) on devices that support it; on devices that do not, the plugin falls back to tone-mapped SDR and reports it
 
 ### Audio
 
-- [ ] **AUDO-01**: Audio is passed through without re-encoding when the source track is MP4-compatible AAC, and the result says whether audio was re-encoded
-- [ ] **AUDO-02**: Caller can force AAC re-encode with a chosen bitrate and channel count, or strip audio entirely
+- [x] **AUDO-01**: Audio is passed through without re-encoding when the source track is MP4-compatible AAC, and the result says whether audio was re-encoded
+- [x] **AUDO-02**: Caller can force AAC re-encode with a chosen bitrate and channel count, or strip audio entirely
 - [ ] **AUDO-03**: Sources with unusual audio (5.1 channels, PCM, no audio track) compress successfully by downmixing or re-encoding rather than failing
 
 ### Jobs, progress and cancellation
@@ -109,12 +109,12 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | CORE-07 | Phase 3 | Pending |
 | CORE-08 | Phase 2 | Complete |
 | CORE-09 | Phase 2 | Pending |
-| ORNT-01 | Phase 2 | Pending |
+| ORNT-01 | Phase 2 | Complete |
 | CDEC-01 | Phase 4 | Pending |
 | CDEC-02 | Phase 4 | Pending |
 | CDEC-03 | Phase 4 | Pending |
-| AUDO-01 | Phase 2 | Pending |
-| AUDO-02 | Phase 2 | Pending |
+| AUDO-01 | Phase 2 | Complete |
+| AUDO-02 | Phase 2 | Complete |
 | AUDO-03 | Phase 4 | Pending |
 | JOBS-01 | Phase 2 | Pending |
 | JOBS-02 | Phase 2 | Pending |

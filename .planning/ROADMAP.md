@@ -89,7 +89,7 @@ Plans:
   4. Two jobs started together each have their own 0-100 progress stream and completion future. Cancelling one resolves it as Cancelled and deletes its partial file. Failures (unsupported input, out of space) arrive as typed errors and never crash the app.
   5. A pre-flight estimate for a clip and options returns output size and duration without encoding, within the documented tolerance of the real result. Output lands in the chosen directory/name or a unique cache name, and `clearCache()` deletes only the plugin's files. The Android build uses Media3 Transformer, minSdk 23 and compileSdk 36, contains no `.so` files, and builds on the current stable AGP/Kotlin.
 
-**Plans**: 7 plans
+**Plans**: 5/7 plans executed
 
 Plans:
 **Wave 1**
@@ -110,7 +110,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 02-05-PLAN.md — Audio passthrough, re-encode and strip with channel mixing; trim; upright output and no black bars proven by sampling the compressed file
+- [x] 02-05-PLAN.md — Audio passthrough, re-encode and strip with channel mixing; trim; upright output and no black bars proven by sampling the compressed file
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -197,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 4/7 | In progress | - |
+| 2. Android Compression on Media3 | 5/7 | In Progress|  |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
