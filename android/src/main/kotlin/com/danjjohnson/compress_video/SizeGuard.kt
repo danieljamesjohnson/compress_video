@@ -197,11 +197,23 @@ object SizeGuard {
             when {
                 options.videoBitrateBps != null -> options.videoBitrateBps
                 options.targetSizeMb != null -> {
-                    val targetTotalBitrateBps =
-                        options.targetSizeMb * BYTES_PER_MEGABYTE * BITS_PER_BYTE /
-                            outputDurationSeconds * MUX_OVERHEAD_FACTOR
-                    val targetVideoBitrateBps = targetTotalBitrateBps - audioBitrateBps
-                    maxOf(targetVideoBitrateBps.toLong(), VIDEO_BITRATE_FLOOR_BPS)
+                    // WR-02: a durationless input (missing/zero duration metadata --
+                    // Probe.kt defaults durationRawMs to 0.0 when METADATA_KEY_DURATION is
+                    // absent, and requireReadableMediaFile only checks the file is non-empty,
+                    // not that it has a readable duration) would otherwise divide by zero here,
+                    // producing Double.POSITIVE_INFINITY -> Long.MAX_VALUE -> a wrapped,
+                    // nonsensical Int handed straight to VideoEncoderSettings.setBitrate. There
+                    // is no meaningful per-second target bitrate for zero output duration, so
+                    // fall back to the same floor every other branch is already clamped to.
+                    if (outputDurationSeconds <= 0.0) {
+                        VIDEO_BITRATE_FLOOR_BPS
+                    } else {
+                        val targetTotalBitrateBps =
+                            options.targetSizeMb * BYTES_PER_MEGABYTE * BITS_PER_BYTE /
+                                outputDurationSeconds * MUX_OVERHEAD_FACTOR
+                        val targetVideoBitrateBps = targetTotalBitrateBps - audioBitrateBps
+                        maxOf(targetVideoBitrateBps.toLong(), VIDEO_BITRATE_FLOOR_BPS)
+                    }
                 }
                 else -> {
                     // A preset applied to a source smaller than the preset's own long side

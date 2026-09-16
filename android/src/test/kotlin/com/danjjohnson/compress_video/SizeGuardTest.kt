@@ -157,6 +157,22 @@ internal class SizeGuardTest {
         assertEquals(8764164L, plan.videoBitrateBps)
     }
 
+    /**
+     * WR-02: a zero-duration input (missing/degenerate duration metadata) with targetSizeMb set
+     * used to divide by zero -- Double.POSITIVE_INFINITY, then `.toLong()` == Long.MAX_VALUE --
+     * and, with no input.videoBitrateBps to cap it (equally plausible for the same degenerate
+     * input), that unclamped value flowed straight to the platform encoder. It must instead fall
+     * back to the same 200,000bps floor every other degenerate targetSizeMb case already binds
+     * to.
+     */
+    @Test
+    fun targetSizeMb_withZeroDurationAndNoInputBitrate_fallsBackToFloorInsteadOfOverflowing() {
+        val input = defaultInput().copy(durationMs = 0L, videoBitrateBps = null)
+        val options = defaultOptions().copy(targetSizeMb = 2.0)
+        val plan = SizeGuard.resolve(input, options)
+        assertEquals(200000L, plan.videoBitrateBps)
+    }
+
     @Test
     fun oddScalingCase_neitherOutputDimensionIsEverOdd() {
         val input = defaultInput().copy(displayedWidthPx = 853, displayedHeightPx = 1517)
