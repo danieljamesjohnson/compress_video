@@ -33,6 +33,16 @@ object JobRegistry {
         val onCancelled: () -> Unit,
     ) {
         internal var cancelled: Boolean = false
+
+        /**
+         * Set by [stopPolling] the instant a job's `Transformer.Listener` terminal callback
+         * (`onCompleted`/`onError`) fires -- BEFORE the suspended `compress()` coroutine's own
+         * continuation has resumed and called [remove] (WR-01). A job that is [terminal] has
+         * already resolved its outcome (success or failure) on the native side; [cancel] must
+         * treat it exactly like an already-cancelled job and no-op, rather than deleting a temp
+         * file the still-suspended `compress()` call may be about to move into place.
+         */
+        internal var terminal: Boolean = false
     }
 
     private val jobs = LinkedHashMap<String, LiveJob>()
@@ -59,31 +69,44 @@ object JobRegistry {
     }
 
     /**
-     * Stops [jobId]'s progress polling WITHOUT forgetting it or touching its files -- called
-     * from [TransformerEngine]'s `Transformer.Listener` terminal callbacks (`onCompleted`/
-     * `onError`) the instant they fire, rather than relying on [remove] after the suspended
-     * `compress` call resumes. The `Transformer` class javadoc states that `getProgress` reports
-     * `PROGRESS_STATE_NOT_STARTED` once an export completes, so the polling loop must stop
-     * itself proactively; stopping it here, synchronously inside the same main-Looper callback
-     * that already fired, closes the (normally harmless, but unnecessary) window between the
-     * listener firing and the coroutine's own cleanup running. A no-op if [jobId] is unknown.
+     * Stops [jobId]'s progress polling WITHOUT forgetting it or touching its files, and marks it
+     * [LiveJob.terminal] -- called from [TransformerEngine]'s `Transformer.Listener` terminal
+     * callbacks (`onCompleted`/`onError`) the instant they fire, rather than relying on [remove]
+     * after the suspended `compress` call resumes. The `Transformer` class javadoc states that
+     * `getProgress` reports `PROGRESS_STATE_NOT_STARTED` once an export completes, so the
+     * polling loop must stop itself proactively; stopping it here, synchronously inside the same
+     * main-Looper callback that already fired, closes the (normally harmless, but unnecessary)
+     * window between the listener firing and the coroutine's own cleanup running.
+     *
+     * Marking [LiveJob.terminal] here (WR-01) closes a SECOND, harmful window: the job stays
+     * registered in [jobs] (with [LiveJob.cancelled] still `false`) until the suspended
+     * `compress()` coroutine's own continuation resumes and calls [remove] -- a separately
+     * scheduled main-Looper task. A [cancel] call arriving in that window used to see a
+     * still-registered, not-yet-cancelled job and delete its temp file out from under the
+     * about-to-succeed `compress()` call. [cancel] now checks [LiveJob.terminal] and no-ops
+     * once it is set, so whichever of cancel/completion reaches the job second is the no-op.
+     * A no-op if [jobId] is unknown.
      */
     fun stopPolling(jobId: String) {
         val job = jobs[jobId] ?: return
         job.mainHandler.removeCallbacks(job.progressRunnable)
+        job.terminal = true
     }
 
     /**
      * Cancels the job identified by [jobId]: stops its progress polling, cancels the underlying
      * export via [LiveJob.cancelTransformer], deletes its temp output file, forgets it, and
      * invokes its [LiveJob.onCancelled] callback so the suspended `startCompress` call can fail
-     * with a typed cancelled error. A no-op if [jobId] is unknown or already cancelled -- so
-     * cancelling twice, or cancelling after the job already finished (successfully or not) and
-     * was removed from this registry, deletes nothing a second time and resolves without error.
+     * with a typed cancelled error. A no-op if [jobId] is unknown, already cancelled, or already
+     * [LiveJob.terminal] -- so cancelling twice, cancelling after the job already finished
+     * (successfully or not) and was removed from this registry, or cancelling in the window
+     * between the job's own `Transformer.Listener` terminal callback firing (WR-01: see
+     * [stopPolling]) and its `compress()` coroutine actually removing it, deletes nothing and
+     * resolves without error -- the job's own outcome is authoritative once it is terminal.
      */
     fun cancel(jobId: String) {
         val job = jobs[jobId] ?: return
-        if (job.cancelled) return
+        if (job.cancelled || job.terminal) return
         job.cancelled = true
         job.mainHandler.removeCallbacks(job.progressRunnable)
         job.cancelTransformer()
