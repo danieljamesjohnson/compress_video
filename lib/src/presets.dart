@@ -1,8 +1,9 @@
 // Preset seeds for CompressOptions.preset.
 //
-// These four (maxLongSidePx, videoBitrateBps) pairs are SEEDS, not final constants: they are
-// measured and adjusted against the real corpus in plan 02-04, and doc/PRESETS.md (generated
-// from these values in a later plan) is what the README publishes. Do not edit these numbers
+// These four (maxLongSidePx, videoBitrateBps) pairs are SEEDS, not final constants: they were
+// measured against the real corpus in plan 02-04 (confirmed monotonic on
+// portrait_hibitrate_1080p60.mp4, no adjustment needed) and doc/PRESETS.md, generated from these
+// values via tool/measure_presets.dart, is what the README publishes. Do not edit these numbers
 // from memory or "gut feel" -- change them only after a corpus measurement run, and update
 // doc/PRESETS.md in the same change.
 import 'compress_options.dart' show CompressPreset;

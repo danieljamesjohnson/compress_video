@@ -283,6 +283,51 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
+
+    testWidgets(
+      'the four presets form a monotonic resolution/output-size ladder on the '
+      'high-bitrate clip (doc/PRESETS.md task 3 guard)',
+      (WidgetTester tester) async {
+        Future<CompressResult> compressAt(CompressPreset preset) async {
+          final String path = await copyHiBitrateClip();
+          final CompressJob job = compressVideo.compress(
+            path,
+            options: CompressOptions(preset: preset),
+          );
+          return job.result;
+        }
+
+        final CompressResult r360 = await compressAt(CompressPreset.p360);
+        final CompressResult r480 = await compressAt(CompressPreset.p480);
+        final CompressResult r720 = await compressAt(CompressPreset.p720);
+        final CompressResult r1080 = await compressAt(CompressPreset.p1080);
+
+        expect(r360.heightPx, kPresetSpecs[CompressPreset.p360]!.maxLongSidePx);
+        expect(r480.heightPx, kPresetSpecs[CompressPreset.p480]!.maxLongSidePx);
+        expect(r720.heightPx, kPresetSpecs[CompressPreset.p720]!.maxLongSidePx);
+        expect(
+          r1080.heightPx,
+          kPresetSpecs[CompressPreset.p1080]!.maxLongSidePx,
+        );
+
+        expect(
+          r360.outputBytes,
+          lessThan(r480.outputBytes),
+          reason: 'p360 must produce a smaller file than p480',
+        );
+        expect(
+          r480.outputBytes,
+          lessThan(r720.outputBytes),
+          reason: 'p480 must produce a smaller file than p720',
+        );
+        expect(
+          r720.outputBytes,
+          lessThanOrEqualTo(r1080.outputBytes),
+          reason: 'p720 must not produce a larger file than p1080',
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
   });
 
   // SizeGuard's no-upscale rules, proven against a source already smaller than every
