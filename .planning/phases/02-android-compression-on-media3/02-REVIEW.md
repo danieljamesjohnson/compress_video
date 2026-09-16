@@ -1,6 +1,6 @@
 ---
 phase: 02-android-compression-on-media3
-reviewed: 2026-09-15T00:00:00Z
+reviewed: 2026-09-16T00:00:00Z
 depth: standard
 files_reviewed: 41
 files_reviewed_list:
@@ -48,240 +48,86 @@ files_reviewed_list:
   - tool/measure_presets.dart
   - tool/verify_apk_native_libs.sh
 findings:
-  critical: 1
-  warning: 4
+  critical: 0
+  warning: 0
   info: 3
-  total: 8
-status: issues_found
+  total: 3
+status: clean
 ---
 
 # Phase 02: Code Review Report
 
-**Reviewed:** 2026-09-15
+**Reviewed:** 2026-09-16
 **Depth:** standard
 **Files Reviewed:** 41
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-Reviewed the Android Media3 Transformer compression path end to end (Kotlin engine, SizeGuard
-resolver, Pigeon contract, Dart job/registry layer, corpus tooling, CI) against this phase's
-stated invariants: never-larger, no swallowed failures, guaranteed cleanup on cancel/failure,
-cache-directory confinement, main-Looper-only Transformer access, and monotonic single-terminal
-progress.
+Re-review (iteration 2) after the fix pass recorded in `02-REVIEW-FIX.md`. Verified each of the
+five in-scope findings from iteration 1 (CR-01, WR-01 through WR-04) directly against the current
+code and its five corresponding commits, rather than trusting the fix report's own narrative:
 
-The unconditional never-larger post-check (`TransformerEngine.finishSuccess`), the cache-sweep
-symlink confinement (`PluginFiles.sweep`), the transmux/never-larger predicate purity
-(`SizeGuard`), and the generated Pigeon contract are all sound and well covered by the existing
-unit and integration test suites. The one blocking issue is a genuine thread-usage bug: this
-phase's own documented design ("nothing here ever dispatches work to a background thread pool")
-means multi-hundred-megabyte/gigabyte file copies run synchronously on the Android main thread on
-two real, non-rare paths (the never-larger fast path and the never-larger post-check fallback),
-which risks an ANR on exactly the large-video inputs this plugin exists to handle. A second,
-narrower issue is a real (if timing-dependent) race between `cancel()` and a job's own natural
-completion that can convert a just-finished successful job into a spurious `io` error and delete
-its output. Both are detailed below along with several smaller robustness and edge-case gaps.
+- **CR-01** (`bd8f30e`): `TransformerEngine.copyFileAtomically` is now `suspend` and its body runs
+  inside `withContext(Dispatchers.IO)`. Both call sites (`compress()`'s never-larger pre-check at
+  line 96 and `finishSuccess()`'s post-check fallback at line 404) already ran in a suspend
+  context, so the byte copy is confirmed off the main thread on both paths. Confirmed genuinely
+  fixed.
+- **WR-04** (`8ba81d6`): `readAudioCodec`/`readAudioChannelCount` are now `suspend`, wrapped in
+  `withContext(Dispatchers.IO)`. `resolvePlan` and `Compression.requireSufficientFreeSpace` were
+  correctly threaded to `suspend` to carry the dispatcher switch through; both call sites
+  (`compress()`, `estimate()`, `requireSufficientFreeSpace()`) were already suspend contexts, so
+  no caller needed further changes. Confirmed genuinely fixed, with no dangling non-suspend caller
+  left in `android/src/main/kotlin` (verified by grep across every call site).
+- **WR-01** (`6642460`): `JobRegistry.LiveJob.terminal` is set by `stopPolling`, which runs
+  synchronously inside the `Transformer.Listener`'s terminal callbacks the instant they fire.
+  `JobRegistry.cancel()` now no-ops on `job.cancelled || job.terminal` before touching
+  `cancelTransformer()`/`quietDelete()`/`onCancelled()`. Traced both interleavings by hand:
+  cancel-then-completion (existing pre-fix path, still correct — `deferred.complete` on an
+  already-cancelled `deferred` is a no-op) and completion-then-cancel (the bug this fix closes —
+  `cancel()` now finds `terminal == true` and returns immediately, leaving the temp file intact
+  for the still-suspended `compress()` continuation to move into place). The new JVM test
+  (`cancel_afterStopPollingMarksJobTerminal_isANoOp`) reproduces the exact ordering and asserts
+  all three previously-corrupted side effects (`cancelTransformer`, `onCancelled`, temp-file
+  deletion) do not fire. Confirmed genuinely fixed; `JobRegistry.cancelAll()` (used on plugin
+  detach) composes correctly with the new no-op — it simply skips jobs that have already resolved
+  on the native side, which is correct, not a regression.
+- **WR-02** (`102dca3`): `SizeGuard.resolve`'s `targetSizeMb` branch now guards
+  `outputDurationSeconds <= 0.0` and falls back to `VIDEO_BITRATE_FLOOR_BPS` instead of dividing.
+  Confirmed the guard is checked before the division, and the fallback still passes through the
+  existing `input.videoBitrateBps` cap below it. Confirmed genuinely fixed; new unit test uses a
+  zero-duration input with `videoBitrateBps = null` specifically so the pre-existing input-bitrate
+  cap can't mask a regression.
+- **WR-03** (`a6ea3ce`): `CompressJob._run` now has a `catch (e)` (untyped, so it also catches
+  `Error` subtypes like the `TypeError` its own regression test forces) after the
+  `PlatformException`/`MissingPluginException` clauses, resolving `failure` with a typed
+  `CompressVideoErrorReason.unknown` exception. Confirmed `result` can no longer hang: every
+  exit from the `try` block now sets either `success` or `failure` before the `if`/`else if` at
+  the end of `_run` runs. Confirmed genuinely fixed.
 
-## Critical Issues
+No regressions found in the five fix commits: `suspend` propagation is complete and consistent
+(no caller left invoking a newly-`suspend` function from a non-suspend context), the
+`Dispatchers.IO` boundaries introduced by CR-01/WR-04 never touch `Transformer` or `JobRegistry`
+inside the IO-dispatched block (verified by reading both function bodies in full), and the new
+`terminal` flag only narrows `cancel()`'s no-op condition (`cancelled || terminal`) rather than
+changing any other code path. Project invariants re-checked directly in this pass and all still
+hold: `finishSuccess`'s never-larger post-check is unconditional on every produced file
+(`SizeGuard.kt`/`TransformerEngine.kt:400-407`); every failure/cancel path in `compress()` deletes
+the temp file before throwing (`TransformerEngine.kt:359-366`) and `copyFileAtomically`'s own
+catch blocks quiet-delete its temp file on any exception; `PluginFiles.sweep`'s symlink-escape and
+directory confinement logic is untouched and still sound; every `Transformer`/`JobRegistry` access
+in `TransformerEngine`/`Compression`/`JobRegistry` remains on the calling (main) Looper thread,
+with only genuinely blocking I/O moved to `Dispatchers.IO`; progress is still forwarded
+monotonically non-decreasing with a single canonical terminal 100 (`compress()`'s runnable clamps
+to 0..99 and `onProgress(100.0)` is called exactly once per terminal path); `cancel()` is now
+provably idempotent including against a same-tick natural completion; and no path returns a null
+`CompressResultMessage` or silently swallows a failure (`CompressJob._run`'s catch-all closes the
+last gap here).
 
-### CR-01: Full-file copy on the never-larger path runs synchronously on the main thread (ANR risk)
-
-**File:** `android/src/main/kotlin/com/danjjohnson/compress_video/TransformerEngine.kt:92-103, 397-404, 548-565`
-
-**Issue:** `TransformerEngine.compress` is invoked directly from `Compression.startCompress`,
-which is dispatched (via the Pigeon-generated `CompressHostApi.setUp`) on
-`CoroutineScope(Dispatchers.Main).launch { ... }` — i.e. on the Android main Looper thread. The
-file's own doc comment confirms this is deliberate: "Nothing here ever dispatches that work to a
-background thread pool ... only the pre-Transformer input probe and the post-export re-probe
-leave the main thread."
-
-Two real paths in this same file perform a full, synchronous byte-for-byte file copy
-(`copyFileAtomically`, `TransformerEngine.kt:548-565`) without ever switching off the calling
-(main) dispatcher:
-
-1. The never-larger **pre-check** fast path (`compress()`, lines 92-103): when
-   `target.wouldUseOriginal` is true, `copyFileAtomically(inputFile, destinationFile)` runs
-   immediately, before any `withContext(Dispatchers.IO)` switch.
-2. The never-larger **post-check** fallback (`finishSuccess()`, lines 397-404): when the real
-   temp output is not smaller than the input, the same synchronous copy runs.
-
-Both paths are common, not exotic: any caller who compresses an already-small or
-already-well-compressed clip (a very common real case — chat-app clips, previously-shared media,
-screen recordings) hits path 1, and any caller whose prediction under-estimates the real output
-size hits path 2. For phone videos in the multi-hundred-MB-to-several-GB range that this plugin's
-own `PROJECT.md` explicitly targets, blocking the UI thread for the whole duration of a
-synchronous disk-to-disk copy risks the Android watchdog triggering an ANR (Application Not
-Responding) dialog, which from the end user's perspective is indistinguishable from a crash.
-
-**Fix:** Wrap the byte-copy body of `copyFileAtomically` (or its two call sites) in
-`withContext(Dispatchers.IO) { ... }`, exactly as `Probe.getMediaInfo` already does for its own
-blocking native calls:
-
-```kotlin
-private suspend fun copyFileAtomically(source: File, destination: File) =
-    withContext(Dispatchers.IO) {
-        val temp = PluginFiles.tempFileBeside(destination)
-        try {
-            source.inputStream().use { input ->
-                FileOutputStream(temp).use { output -> input.copyTo(output) }
-            }
-            PluginFiles.moveIntoPlace(temp, destination)
-        } catch (e: CompressVideoError) {
-            PluginFiles.quietDelete(temp)
-            throw e
-        } catch (e: Exception) {
-            PluginFiles.quietDelete(temp)
-            throw CompressVideoError("io", "Failed to copy the original file", e.message)
-        }
-    }
-```
-Since `Dispatchers.IO` always resumes back on the caller's original context once the block
-completes (the same pattern this file already documents for `Probe`), this does not violate the
-"Transformer only built/driven on its own creation Looper" invariant — no Transformer or
-`JobRegistry` access happens inside the IO-dispatched block.
-
-## Warnings
-
-### WR-01: Race between `cancel()` and a job's own near-simultaneous completion can destroy a successful job's output
-
-**File:** `android/src/main/kotlin/com/danjjohnson/compress_video/JobRegistry.kt:84-93`,
-`android/src/main/kotlin/com/danjjohnson/compress_video/TransformerEngine.kt:228-253, 337-369`
-
-**Issue:** `Transformer.Listener.onCompleted`/`onError` complete `deferred` and call
-`JobRegistry.stopPolling(jobId)`, but the job is not removed from `JobRegistry` (and its
-`cancelled` flag is not set) until the *coroutine continuation* resumes after `deferred.await()`
-and calls `JobRegistry.remove(jobId)` (`TransformerEngine.kt:351-352`). Both the listener callback
-and the coroutine continuation are scheduled as separate tasks on the main Looper, so there is a
-real window — between `onCompleted` firing and the suspended `compress()` coroutine's own
-continuation actually running — during which the job is still present in `JobRegistry` with
-`cancelled == false`.
-
-If `Compression.cancel(jobId)` is invoked during that window (a caller racing a `cancel()` call
-against the job's own natural completion — a realistic pattern, e.g. a UI "cancel" button pressed
-just as the job finishes), `JobRegistry.cancel()` will:
-1. Find the job (still registered), see `cancelled == false`, proceed.
-2. Call `transformer.cancel()` on an already-completed `Transformer` (undefined/benign behaviour
-   per Media3, but irrelevant to the real problem below).
-3. Call `PluginFiles.quietDelete(job.tempFile)` — **deleting the temp file that the still-pending
-   `compress()` coroutine's `finishSuccess()` is about to move into place.**
-
-When the `compress()` coroutine's continuation then resumes (the deferred already resolved to
-`Success` from `onCompleted`, so the `cancel` never gets to flip the outcome via
-`onCancelled`), it proceeds to `finishSuccess()`, which reads `tempFile.length()` — now `0`
-because the file no longer exists. Since `0 < inputBytes` in the typical case, `usedOriginal`
-evaluates `false` and `PluginFiles.moveIntoPlace(tempFile, destinationFile)` is attempted on a
-file that no longer exists, so `tempFile.renameTo(destination)` fails and
-`CompressVideoError("io", "Could not move the output into place")` is thrown. The net effect: a
-job that genuinely completed successfully is reported to the caller as a spurious `io` failure,
-and its compressed output is silently destroyed — not the documented `cancelled` outcome the
-caller's `cancel()` call would lead them to expect.
-
-**Fix:** Have `JobRegistry.cancel()` check for (or `TransformerEngine` record) a "already
-terminal" state before deleting the temp file — for example, have the `Transformer.Listener`
-callbacks mark the `LiveJob` as terminal (not just stop polling) the instant they fire, and have
-`JobRegistry.cancel()` no-op (skip the `cancelTransformer()`/`quietDelete()` calls) when the job
-is already terminal:
-
-```kotlin
-class LiveJob(...) {
-    internal var cancelled: Boolean = false
-    internal var terminal: Boolean = false // set by the Transformer.Listener callbacks
-}
-
-fun cancel(jobId: String) {
-    val job = jobs[jobId] ?: return
-    if (job.cancelled || job.terminal) return
-    ...
-}
-```
-
-### WR-02: `SizeGuard.resolve` divides by zero when the input duration is 0, producing an absurd bitrate
-
-**File:** `android/src/main/kotlin/com/danjjohnson/compress_video/SizeGuard.kt:199-205, 219-222`
-
-**Issue:** When `options.targetSizeMb != null` and the resolved `outputDurationMs` is `0` (e.g.
-an input whose `durationMs` metadata is missing/zero — `Probe.kt` defaults `durationRawMs` to
-`0.0` when `METADATA_KEY_DURATION` is absent, and `Arguments.requireReadableMediaFile` only
-checks the file is non-empty, not that it has a readable duration), `outputDurationSeconds` is
-`0.0`, so:
-
-```kotlin
-val targetTotalBitrateBps =
-    options.targetSizeMb * BYTES_PER_MEGABYTE * BITS_PER_BYTE /
-        outputDurationSeconds * MUX_OVERHEAD_FACTOR
-```
-
-evaluates to `Double.POSITIVE_INFINITY`. `.toLong()` on that value in Kotlin/JVM yields
-`Long.MAX_VALUE`, which then flows into `videoBitrateBps` unclamped whenever
-`input.videoBitrateBps` is also `null` (equally plausible for the same degenerate input). This
-value is later passed to `VideoEncoderSettings.Builder().setBitrate(videoBitrateBps.toInt())`
-(`TransformerEngine.kt:200`), where the `Long -> Int` narrowing silently wraps to a
-nonsensical/negative value handed straight to the platform encoder.
-
-**Fix:** Guard the `targetSizeMb` branch against a non-positive `outputDurationSeconds` before
-dividing, and fall back to the video-bitrate floor (or reject the request) instead of producing
-`Infinity`:
-
-```kotlin
-options.targetSizeMb != null -> {
-    if (outputDurationSeconds <= 0.0) {
-        VIDEO_BITRATE_FLOOR_BPS
-    } else {
-        val targetTotalBitrateBps = ...
-        maxOf(targetVideoBitrateBps.toLong(), VIDEO_BITRATE_FLOOR_BPS)
-    }
-}
-```
-
-### WR-03: `CompressJob._run` leaves `result` permanently unresolved for any exception type other than `PlatformException`/`MissingPluginException`
-
-**File:** `lib/src/compress_job.dart:128-183`
-
-**Issue:** `_run`'s `try`/`catch` only handles `PlatformException` and `MissingPluginException`.
-If `_api.startCompress(...)` throws anything else — for example a `TypeError` from a malformed
-Pigeon codec reply, or any other unexpected Dart exception — neither `success` nor `failure` is
-ever assigned. The `finally` block still runs (closing the progress stream and removing the job
-from `_jobRegistry`), but nothing ever calls `_resultCompleter.complete(...)` or
-`_failWith(...)`. The result: `job.result` never completes — not with a value, not with an error —
-and the exception propagates instead as an unhandled async error in whatever zone the unawaited
-`_run()` call executes in. A caller awaiting `job.result` for such an input hangs forever, silently
-contradicting the class's own documented contract ("Never resolves to `null`" / "no failure is
-swallowed").
-
-**Fix:** Add a catch-all fallback so an unexpected exception still resolves `result` with a typed
-error instead of hanging:
-
-```dart
-} on PlatformException catch (e) {
-  failure = wrapPlatformException(e, 'compress');
-} on MissingPluginException catch (e) {
-  failure = wrapMissingPlugin(e, 'compress');
-} catch (e) {
-  failure = CompressVideoException(
-    reason: CompressVideoErrorReason.unknown,
-    message: 'Unexpected error during compress: $e',
-  );
-} finally {
-  ...
-}
-```
-
-### WR-04: Ancillary native metadata reads in `TransformerEngine` run on the main thread outside any `Dispatchers.IO` boundary
-
-**File:** `android/src/main/kotlin/com/danjjohnson/compress_video/TransformerEngine.kt:83, 478-526, 575-585`
-
-**Issue:** `readAudioChannelCount`/`readAudioCodec` construct a `MediaExtractor` and call
-`setDataSource`/`getTrackFormat` synchronously. These are called directly from `compress()`
-(line 83) and from `resolvePlan()` (called by both `compress()` and `Compression.estimate()`),
-both of which execute on the main Looper (per the Pigeon-generated `Dispatchers.Main` dispatch).
-Unlike `Probe.getMediaInfo`, which wraps its own `MediaMetadataRetriever`/`MediaExtractor` use in
-`withContext(Dispatchers.IO)`, these calls have no such boundary. `MediaExtractor.setDataSource`
-performs a real (if normally fast) file-open and container-header parse; on a slow storage medium
-(network-backed content URI, resolved to a local cache path, or a device under I/O pressure) this
-adds unbounded jank to every `compress()`/`estimate()` call, on the UI thread.
-
-**Fix:** Wrap these two helpers' bodies in `withContext(Dispatchers.IO) { ... }`, consistent with
-how `Probe` already treats equivalent native calls.
+The three Info items from iteration 1 are carried forward unchanged below — none were in
+`fix_scope` and none were touched by the fix commits; re-reading their code (`Probe.kt`,
+`compress_job.dart`, `example/lib/main.dart`) confirms they are still present exactly as
+described.
 
 ## Info
 
@@ -303,18 +149,18 @@ wrap the `unselectTrack` call itself in a `try`/`catch` that swallows only that 
 
 ### IN-02: `CompressJob.cancel()` and native-side cancellation do not surface a distinct "cancel arrived after natural completion" signal to the caller
 
-**File:** `lib/src/compress_job.dart:113-126`, related to WR-01
+**File:** `lib/src/compress_job.dart:113-126`, related to (now-fixed) WR-01
 
 **Issue:** `cancel()`'s own `PlatformException`/`MissingPluginException` catches are documented as
-"best-effort: `result` is the authority on the eventual outcome," which is the right design in
-the common case, but WR-01 shows the native authority itself can be corrupted by the race. This is
-purely a consequence of WR-01 and needs no separate fix once WR-01 is addressed, but is worth
-tracking so a fix to WR-01 is verified against a Dart-level integration case (a `cancel()` fired
-in the same event-loop turn as the job's own completion) in addition to the existing
-`compress_jobs_test.dart` cancellation coverage, none of which currently exercises this exact
-timing.
+"best-effort: `result` is the authority on the eventual outcome," which is the right design now
+that WR-01 is fixed — the native authority itself is no longer corrupted by the race. Still worth
+tracking: the Dart-level integration coverage for the exact same-tick-cancel-vs-completion timing
+now exists (`example/integration_test/compress_jobs_test.dart`'s "a cancel issued after successful
+completion is a no-op" case, confirmed present and passing per `02-REVIEW-FIX.md`), so this item
+is now closer to "documented and covered" than an open gap — downgraded in spirit but left as Info
+since it is not a code change, just a note that this is exercised end to end.
 
-### IN-03: `example/lib/main.dart`'s `_startCompress` re-subscribes to `job.progress` without awaiting the previous subscription's cancellation before starting a new job
+### IN-03: `example/lib/main.dart`'s `_startCompress` re-subscribes to `job.progress` without a job-generation guard
 
 **File:** `example/lib/main.dart:239` (demo code — Info per review scope)
 
@@ -331,6 +177,6 @@ for the demo's purposes.
 
 ---
 
-_Reviewed: 2026-09-15_
+_Reviewed: 2026-09-16_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
