@@ -54,6 +54,21 @@ void _installFailingStartCompressHandler(String reasonName) {
       });
 }
 
+/// Installs a mock handler that replies with a well-formed single-element message whose value
+/// is not a [CompressResultMessage] -- neither a `PlatformException` shape (which needs 3+
+/// elements) nor a null-value error, so the generated `startCompress`'s own
+/// `pigeonVar_replyValue! as CompressResultMessage` cast throws a raw `TypeError` instead
+/// (WR-03: a malformed Pigeon codec reply, the class of exception neither `on PlatformException`
+/// nor `on MissingPluginException` catches).
+void _installMalformedStartCompressHandler() {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMessageHandler(_startCompressChannelName, (
+        ByteData? message,
+      ) async {
+        return _codec.encodeMessage(<Object?>['not-a-compress-result-message']);
+      });
+}
+
 CompressResultMessage _fakeResultMessage() => CompressResultMessage(
   outputPath: '/tmp/fake-output.mp4',
   inputBytes: 1000,
@@ -176,6 +191,29 @@ void main() {
         await expectLater(
           () => job.result,
           throwsA(isA<CompressVideoException>()),
+        );
+      },
+    );
+
+    test(
+      // WR-03: an exception type neither `on PlatformException` nor `on MissingPluginException`
+      // catches must still resolve `result` with a typed CompressVideoException, reason
+      // `unknown`, instead of leaving it (and every caller awaiting it) hanging forever.
+      'a startCompress call that throws an unexpected exception type still fails result with '
+      'reason unknown, never hanging',
+      () async {
+        _installMalformedStartCompressHandler();
+        final CompressJob job = compressVideo.compress('/tmp/a.mp4');
+
+        await expectLater(
+          () => job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.unknown,
+            ),
+          ),
         );
       },
     );

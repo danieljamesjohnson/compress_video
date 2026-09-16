@@ -169,6 +169,16 @@ class CompressJob {
       failure = wrapPlatformException(e, 'compress');
     } on MissingPluginException catch (e) {
       failure = wrapMissingPlugin(e, 'compress');
+    } catch (e) {
+      // WR-03: any other exception (for example a TypeError from a malformed Pigeon codec
+      // reply) must still resolve `result` with a typed error rather than leaving it -- and
+      // every caller awaiting it -- hanging forever. This is the last resort, not the normal
+      // path: every documented native failure is one of the two typed exceptions above.
+      failure = CompressVideoException(
+        reason: CompressVideoErrorReason.unknown,
+        message: 'Unexpected error during compress',
+        platformDetail: '${e.runtimeType}: $e',
+      );
     } finally {
       _jobRegistry.remove(id);
       if (!_progressController.isClosed) {
