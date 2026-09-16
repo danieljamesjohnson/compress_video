@@ -156,12 +156,14 @@ class CompressVideo {
   }
 
   /// Returns a pre-flight [CompressEstimate] for compressing the video at [path] per
-  /// [options], without running an actual encode.
+  /// [options], without running an actual encode, decoding a single frame, or building a
+  /// native transcoder.
   ///
-  /// [path] and [options] are validated exactly as they are for [compress]. Not yet
-  /// implemented natively on Android -- lands in plan 02-07; until then this throws a
-  /// [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput] naming
-  /// that plan, rather than being absent from the Dart API.
+  /// [path] and [options] are validated exactly as they are for [compress] -- a blank [path]
+  /// or an invalid [options] combination throws synchronously, before crossing the platform
+  /// channel. The native side resolves [CompressEstimate] through the SAME pure resolution
+  /// function [compress] itself uses, so this call and a subsequent [compress] call with the
+  /// same [path]/[options] can never predict a different outcome (D-19, INFO-03).
   Future<CompressEstimate> estimate(
     String path, {
     CompressOptions options = const CompressOptions(),
@@ -200,9 +202,9 @@ class CompressVideo {
 
   /// Deletes every file this plugin has written to its own cache directory.
   ///
-  /// Not yet implemented natively on Android -- lands in plan 02-07; until then this throws a
-  /// [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput] naming
-  /// that plan, rather than being absent from the Dart API.
+  /// Not yet implemented natively on Android -- lands later in plan 02-07; until then this
+  /// throws a [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput]
+  /// naming that plan, rather than being absent from the Dart API.
   Future<void> clearCache() async {
     final messages.CompressHostApi api = messages.CompressHostApi(
       binaryMessenger: _binaryMessenger,

@@ -428,4 +428,32 @@ internal class SizeGuardTest {
         val plan = SizeGuard.resolve(input, transmuxOptions())
         assertTrue(plan.wouldTransmux)
     }
+
+    // --- estimate()/compress() can never disagree (plan 02-07, D-19, INFO-03) ---
+    //
+    // Compression.estimate() and TransformerEngine.compress() both resolve through
+    // TransformerEngine.resolvePlan, which calls SizeGuard.resolve exactly once per call --
+    // there is no other resolution path either could take. These tests express that guarantee
+    // directly at this level: resolve has no shared mutable state, so calling it twice for the
+    // identical InputInfo/Options a real estimate-then-compress call pair would build can never
+    // produce two different Plans.
+
+    @Test
+    fun resolve_calledTwiceForIdenticalScalingInputsAndOptions_producesEqualPlans() {
+        val input = defaultInput()
+        val options = defaultOptions()
+        val estimatePlan = SizeGuard.resolve(input, options)
+        val compressPlan = SizeGuard.resolve(input, options)
+        assertEquals(estimatePlan, compressPlan)
+    }
+
+    @Test
+    fun resolve_calledTwiceForIdenticalTransmuxQualifyingInputsAndOptions_producesEqualPlans() {
+        val input = transmuxInput()
+        val options = transmuxOptions()
+        val estimatePlan = SizeGuard.resolve(input, options)
+        val compressPlan = SizeGuard.resolve(input, options)
+        assertEquals(estimatePlan, compressPlan)
+        assertTrue(estimatePlan.wouldTransmux)
+    }
 }

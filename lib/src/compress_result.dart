@@ -136,7 +136,14 @@ class CompressResult {
 }
 
 /// The typed, pre-flight prediction of what a `compress` call would produce, without running
-/// an actual encode.
+/// an actual encode, decoding a single frame, or building a native transcoder at all.
+///
+/// Every field is computed by probing the input file and running it through the SAME pure
+/// resolution function (`SizeGuard.kt` on Android) the real `compress` call itself uses -- so
+/// this prediction and the job it predicts can never recommend a different path (D-19,
+/// INFO-03): [wouldTransmux] and [wouldUseOriginal] are read from that resolver, not
+/// re-derived, and an integration test asserts they agree with [CompressResult.transmuxed]/
+/// [CompressResult.usedOriginal] for the same request.
 @immutable
 class CompressEstimate {
   /// Creates a [CompressEstimate]. Application code does not normally construct this directly
@@ -151,21 +158,53 @@ class CompressEstimate {
   });
 
   /// Predicted size of the output, in bytes.
+  ///
+  /// This is a PREDICTION, not a measurement, computed from the same target bitrate/duration
+  /// arithmetic the real encode resolves (`SizeGuardTest.kt` proves that arithmetic is exact).
+  /// The formula's DESIGNED target is plus or minus 15 percent of the byte count a real encode
+  /// produces for a genuinely-compressible source.
+  ///
+  /// Measured live on this project's danserver emulator's software H.264 encoder, at every one
+  /// of the four presets against this project's high-bitrate corpus clip, the real encode's
+  /// actual byte count diverged from this prediction by far more than 15 percent in three of
+  /// the four cases (measured 7.9 to 67.0 percent, not monotonic with resolution) -- consistent
+  /// with the SAME real, already-documented software-encoder CBR rate-control characteristic
+  /// `CompressOptions.targetSizeMb`'s own dartdoc describes, not a new arithmetic bug. This is a
+  /// flagged, deliberately unresolved assumption (see 02-07-PLAN.md's "Flagged assumptions" and
+  /// `QUESTIONS.md` #3): whether a real phone's hardware encoder holds nearer the designed 15
+  /// percent, or diverges differently again, is untested pending physical-device verification.
+  /// The emulator integration test uses a documented, wider 75 percent tolerance for this
+  /// reason -- treat this prediction as a rough, not a precise, budget until that is resolved.
   final int outputBytes;
 
-  /// Predicted duration of the output, in milliseconds.
+  /// Predicted duration of the output, in milliseconds -- the trimmed duration when a trim is
+  /// requested, otherwise the input's own duration.
   final int durationMs;
 
-  /// Predicted displayed width of the output, in pixels.
+  /// Predicted displayed width of the output, in pixels -- the exact dimension the real job
+  /// would produce for the same input and options, since both are resolved by the same
+  /// function.
   final int widthPx;
 
-  /// Predicted displayed height of the output, in pixels.
+  /// Predicted displayed height of the output, in pixels -- the exact dimension the real job
+  /// would produce for the same input and options, since both are resolved by the same
+  /// function.
   final int heightPx;
 
-  /// Whether the request would run as a transmux rather than a full encode.
+  /// Whether the request would run as a transmux (container remux, no video re-encode) rather
+  /// than a full encode.
+  ///
+  /// This is the SAME predicate [CompressResult.transmuxed]'s real job resolves against --
+  /// they cannot disagree about which operation would be attempted. It is still a pre-flight
+  /// recommendation, not a guarantee about the bytes a real job would end up returning: a real
+  /// job re-verifies the actual output against the never-larger rule after it runs, exactly as
+  /// [CompressResult.transmuxed]'s own dartdoc describes.
   final bool wouldTransmux;
 
   /// Whether the request would fall back to copying the original input rather than encoding.
+  ///
+  /// This is the SAME predicate [CompressResult.usedOriginal]'s real job resolves against --
+  /// they cannot disagree about which operation would be attempted.
   final bool wouldUseOriginal;
 
   @override

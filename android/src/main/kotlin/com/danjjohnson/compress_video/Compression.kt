@@ -59,15 +59,41 @@ class Compression(
         JobRegistry.cancel(jobId)
     }
 
-    /** Not yet implemented on Android -- lands in plan 02-07 (`SizeGuard`). */
+    /**
+     * Returns a pre-flight [EstimateMessage] for [request] against [path], without decoding a
+     * single frame and without building a [TransformerEngine]/`Transformer` at all.
+     *
+     * Validates and probes exactly like [startCompress] does, then resolves [SizeGuard.Plan]
+     * via [TransformerEngine.resolvePlan] -- the SAME shared resolver [startCompress] itself
+     * calls (through `TransformerEngine.compress`'s own `resolvePlan` call) -- so this path and
+     * the real job can never disagree about the predicted bytes, dimensions or which of
+     * [SizeGuard.Plan.wouldTransmux]/[SizeGuard.Plan.wouldUseOriginal] would apply (D-19,
+     * INFO-03). Deliberately does not assert the main Looper the way [startCompress]/[cancel]
+     * do: nothing on this path builds a `Transformer` or touches [JobRegistry] (both of which
+     * require it), and the whole point of `estimate()` is that a caller can ask before spending
+     * battery on work that needs one.
+     */
     override suspend fun estimate(
         path: String,
         request: CompressRequestMessage,
     ): EstimateMessage {
-        throw CompressVideoError("unsupportedInput", "estimate() is implemented in plan 02-07")
+        Arguments.requireValidCompressRequest(request)
+        val inputFile = Arguments.requireReadableMediaFile(path)
+        val inputInfo = probe.getMediaInfo(path)
+
+        val plan: SizeGuard.Plan = engine.resolvePlan(inputFile, inputInfo, request)
+
+        return EstimateMessage(
+            outputBytes = plan.predictedOutputBytes,
+            durationMs = plan.outputDurationMs,
+            widthPx = plan.targetWidthPx.toLong(),
+            heightPx = plan.targetHeightPx.toLong(),
+            wouldTransmux = plan.wouldTransmux,
+            wouldUseOriginal = plan.wouldUseOriginal,
+        )
     }
 
-    /** Not yet implemented on Android -- lands in plan 02-07. */
+    /** Not yet implemented on Android -- lands later in plan 02-07. */
     override suspend fun clearCache() {
         throw CompressVideoError("unsupportedInput", "clearCache() is implemented in plan 02-07")
     }
