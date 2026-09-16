@@ -301,6 +301,18 @@ internal class ArgumentsTest {
             "unsupportedInput",
             Arguments.validateAudioReencode(AudioModeMessage.REENCODE, 0L, 2L),
         )
+        assertEquals(
+            "unsupportedInput",
+            Arguments.validateAudioReencode(AudioModeMessage.REENCODE, -1L, 2L),
+        )
+    }
+
+    @Test
+    fun validateAudioReencode_bitrateOf1_isValid_clampedNativelyBySizeGuardNotRejectedHere() {
+        assertEquals(
+            null,
+            Arguments.validateAudioReencode(AudioModeMessage.REENCODE, 1L, 2L),
+        )
     }
 
     @Test

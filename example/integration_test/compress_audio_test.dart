@@ -366,4 +366,48 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+
+  testWidgets(
+    'a 64000bps and a 128000bps reencode of the same clip produce measurably '
+    'different audio bitrates in the expected direction, each within 25 percent of its own '
+    'request -- proving the bitrate knob reaches the encoder rather than being ignored '
+    '(PITFALLS.md row 13, applied to audio)',
+    (WidgetTester tester) async {
+      Future<double> measuredBpsAt(int requestedBitrateBps) async {
+        final String path = await copyHiBitrateClip();
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(
+            audio: AudioReencode(bitrateBps: requestedBitrateBps, channels: 2),
+          ),
+        );
+        final CompressResult result = await job.result;
+        final _Mp4AudioTrackInfo? info = await _readMp4AudioTrackInfo(
+          result.outputPath,
+        );
+        expect(info, isNotNull);
+        final double measuredBps = _measuredAudioBitrateBps(info!, result);
+        final double deviation =
+            (measuredBps - requestedBitrateBps).abs() / requestedBitrateBps;
+        expect(
+          deviation,
+          lessThanOrEqualTo(0.25),
+          reason:
+              'measured $measuredBps bps vs requested $requestedBitrateBps bps',
+        );
+        return measuredBps;
+      }
+
+      final double lowBps = await measuredBpsAt(64000);
+      final double highBps = await measuredBpsAt(128000);
+
+      expect(
+        lowBps,
+        lessThan(highBps),
+        reason:
+            'the 64000bps request must measure lower than the 128000bps request',
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
 }

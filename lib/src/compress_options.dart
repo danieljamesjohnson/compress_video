@@ -60,7 +60,10 @@ enum AudioMode {
 /// A sealed class with three `const` subclasses rather than an enum, because [AudioReencode]
 /// carries its own required parameters ([AudioReencode.bitrateBps], [AudioReencode.channels])
 /// that an enum value cannot hold. Every subclass exposes the [AudioMode] it flattens to at the
-/// platform channel boundary.
+/// platform channel boundary. [AudioPassthrough] is the default (see [CompressOptions.audio]);
+/// [AudioReencode] and [AudioStrip] are opt-in. Every variant reports through the same
+/// [CompressResult.audioReencoded]/[CompressResult.audioCodec] pair -- no variant introduces a
+/// fourth reporting shape.
 @immutable
 sealed class AudioOptions {
   const AudioOptions();
@@ -71,6 +74,13 @@ sealed class AudioOptions {
 
 /// Keep the source audio track's encoding when it is already MP4-compatible AAC; re-encode
 /// otherwise. The default [CompressOptions.audio] value.
+///
+/// "MP4-compatible AAC" means the source audio track's normalised codec is AAC and the
+/// platform's own exporter can copy it into the output container without touching the encoded
+/// samples. When the source audio is present but is anything else, this option does not fail
+/// the job -- it falls back to an AAC re-encode automatically, and [CompressResult.audioReencoded]
+/// reports `true` for that fallback exactly like an explicit [AudioReencode] would, so a caller
+/// reading the result never has to guess which path actually ran.
 @immutable
 class AudioPassthrough extends AudioOptions {
   /// Creates an [AudioPassthrough].
@@ -93,10 +103,18 @@ class AudioReencode extends AudioOptions {
   /// [CompressOptions.validate] enforces both before the request crosses the platform channel.
   const AudioReencode({required this.bitrateBps, required this.channels});
 
-  /// Target audio bitrate, in bits per second.
+  /// Target audio bitrate, in bits per second. Any positive value is accepted here -- this
+  /// field is deliberately not range-checked against the device's own encoder, because that
+  /// range is a property of the device, not of this option. A value outside the device AAC
+  /// encoder's own advertised range (`8000` to `960000` on every device measured so far) is
+  /// clamped into that range natively before it reaches the encoder, never rejected: a caller
+  /// who asks for `1` still gets a working, if very low quality, audio track rather than a
+  /// thrown exception over a number that is merely impractical, not invalid.
   final int bitrateBps;
 
-  /// Target audio channel count. 1 (mono) or 2 (stereo).
+  /// Target audio channel count. Accepts `1` (mono) or `2` (stereo) in this release --
+  /// [CompressOptions.validate] rejects anything else. Wider channel counts (5.1 and similar)
+  /// are Phase 4's AUDO-03, not this release's scope.
   final int channels;
 
   @override
@@ -112,7 +130,8 @@ class AudioReencode extends AudioOptions {
   int get hashCode => Object.hash(AudioReencode, bitrateBps, channels);
 }
 
-/// Remove the audio track entirely. The result's `audioCodec` is `null`.
+/// Remove the audio track entirely. The result's `audioCodec` is `null` and `audioReencoded` is
+/// `false` -- nothing was re-encoded because nothing was kept.
 @immutable
 class AudioStrip extends AudioOptions {
   /// Creates an [AudioStrip].

@@ -37,10 +37,13 @@ class CompressResult {
   /// Size of the output file, in bytes.
   final int outputBytes;
 
-  /// Displayed (rotation-corrected) width of the output, in pixels.
+  /// Displayed (rotation-corrected) width of the output, in pixels -- the width a player shows,
+  /// never the coded, pre-rotation width. This is exactly the field pair the incumbent
+  /// (`video_compress`) reported backwards for a rotated source.
   final int widthPx;
 
-  /// Displayed (rotation-corrected) height of the output, in pixels.
+  /// Displayed (rotation-corrected) height of the output, in pixels -- the height a player
+  /// shows, never the coded, pre-rotation height.
   final int heightPx;
 
   /// Duration of the output, in milliseconds, from a re-probe of the finished file.
@@ -49,8 +52,10 @@ class CompressResult {
   /// Normalised video codec of the output (for example `h264`).
   final String videoCodec;
 
-  /// Normalised audio codec of the output, or `null` exactly when the audio track was
-  /// stripped or the source had none.
+  /// Normalised audio codec of the output, or `null` exactly when there is no audio track in
+  /// the output -- because it was stripped, or the source had none to begin with. This
+  /// describes the file that was produced, not the [AudioOptions] that were requested: reading
+  /// this field is reading the file, not the plan.
   final String? audioCodec;
 
   /// Whether the file at [outputPath] is the result of a transmux (container remux with no
@@ -76,7 +81,12 @@ class CompressResult {
   /// Reserved for Phase 4's HEVC hardware-fallback handling. Always `false` in this phase.
   final bool hevcFallback;
 
-  /// Whether the audio track was re-encoded (as opposed to passed through or stripped).
+  /// Whether the audio track was re-encoded (as opposed to passed through or stripped). Read
+  /// from the platform export's own record of what actually happened to the track, never from
+  /// the [AudioOptions] that were requested -- an [AudioPassthrough] request that fell back to
+  /// an AAC re-encode (because the source wasn't already MP4-compatible AAC) reports `true`
+  /// here, exactly like an explicit [AudioReencode] would, so this field always describes the
+  /// file the caller received rather than the option they asked for.
   final bool audioReencoded;
 
   /// Wall-clock time the compression took, in milliseconds.

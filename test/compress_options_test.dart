@@ -155,6 +155,46 @@ void main() {
       );
     });
 
+    test('an AudioReencode with a negative bitrateBps is rejected', () {
+      expect(
+        () => const CompressOptions(
+          audio: AudioReencode(bitrateBps: -1, channels: 2),
+        ).validate(),
+        throwsUnsupportedInput(),
+      );
+    });
+
+    test(
+      'an AudioReencode with a bitrateBps of 1 is accepted -- clamped up into '
+      "the device encoder's own range natively (SizeGuard rule 5), never rejected here",
+      () {
+        expect(
+          () => const CompressOptions(
+            audio: AudioReencode(bitrateBps: 1, channels: 2),
+          ).validate(),
+          returnsNormally,
+        );
+      },
+    );
+
+    test('an AudioReencode with channels of 1 (mono) is accepted', () {
+      expect(
+        () => const CompressOptions(
+          audio: AudioReencode(bitrateBps: 128000, channels: 1),
+        ).validate(),
+        returnsNormally,
+      );
+    });
+
+    test('an AudioReencode with channels of 2 (stereo) is accepted', () {
+      expect(
+        () => const CompressOptions(
+          audio: AudioReencode(bitrateBps: 128000, channels: 2),
+        ).validate(),
+        returnsNormally,
+      );
+    });
+
     test(
       'combining targetSizeMb with videoBitrateBps is rejected as a contradictory target',
       () {
