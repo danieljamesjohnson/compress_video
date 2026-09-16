@@ -22,8 +22,8 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 
 Phase: 2 of 6 (Android Compression on Media3) — 7/7 plans, ready for phase-level verification. Phase 1 at 5/7 plans, needs_human
 Plan: 7 of 7 in current phase (complete)
-Status: Phase 2 complete — ready for /gsd-verify-work 2, then /gsd-plan-phase 3
-Last activity: 2026-09-16 — 02-07 complete, closing Phase 2: Compression.estimate() implemented on Android, resolving TransformerEngine.resolvePlan (the same SizeGuard.Plan resolution startCompress uses) with no Transformer built and no frame decoded; Compression.clearCache() implemented via a new bounded, canonical-path-checked PluginFiles.sweep that skips live jobs' temp files and never reaches outside the plugin's own cache subdirectory; Thumbnails.kt now shares that one cache-directory helper instead of its own copy. tool/verify_apk_native_libs.sh proves the debug APK carries no native library beyond Flutter's own (libflutter.so per ABI, the debug-only Vulkan validation layer) and passes 16 KB alignment, wired into CI with a build-constraint grep step. INFO-03/CORE-09/BULD-01 now checked complete — all 14 Phase 2 requirements are done. Measured live that estimate()'s ±15% accuracy tolerance does not hold on this emulator's software encoder (7.9-67.0% divergence across the four presets); documented an honest ±75% emulator tolerance and extended QUESTIONS.md #3, per the plan's own flagged, deliberately unresolved INFO-03 assumption. Five items carried forward unresolved, all recorded in .planning/WINDOWS.md (estimate() tolerance gap, clearCache()'s symlink-escape mitigation has no dedicated test, the new CI step untested by a live run, BULD-01's debug-vs-release APK assumption, and an inconclusive optional manual UI check on the headless emulator)
+Status: Phase 2 executed and verified (14/14 must-haves, 79 emulator + 84 Dart + 148 Gradle tests green, code review clean); verification_deferred_human. Phase 1 needs_human (CI billing). Autonomous run stopped: every remaining phase needs Dan (CI billing / Mac / physical phone).
+Last activity: 2026-09-16 — Phase 2 complete through verification (human_needed: 6 UAT items); code review converged clean after 5 fixes; GitHub Actions still refusing all jobs (QUESTIONS.md #6)
 
 Progress: [█████████░] 86% (12/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
@@ -99,6 +99,12 @@ Recent decisions affecting current work:
 - [Phase 4]: HEVC/HDR hardware checks need a physical Android phone (QUESTIONS.md #3).
 - [Phase 6]: No verified pub.dev publisher yet (QUESTIONS.md #2).
 
+## Deferred Verification
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 2 | verification_deferred_human | /gsd-verify-work 2 (6 items in 02-UAT.md; #1 needs a physical phone, #2-#4 can be closed by an agent with new fixtures/tests) |
+
 ## Needs Human
 
 | Phase | State | Resume |
@@ -116,5 +122,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-16
-Stopped at: Completed 02-07-PLAN.md — the last plan in Phase 2. estimate() and clearCache() implemented on Android (both sharing the same TransformerEngine.resolvePlan/PluginFiles.cacheSubDir single-source-of-truth helpers the rest of the phase already established), the APK native-library allowlist + 16 KB alignment proof (tool/verify_apk_native_libs.sh) wired into CI, and doc/TOOLCHAIN.md's media3 pin reconciled to 1.11.1. INFO-03, CORE-09 and BULD-01 checked complete in REQUIREMENTS.md — all 14 Phase 2 requirements are now done. Five flagged items carried forward unresolved for the verifier, all recorded in .planning/WINDOWS.md (see Pending Todos). Phase 1's 01-06/01-07 remain parked needs_human on the GitHub Actions billing block (QUESTIONS.md #6), unaffected by this plan.
+Stopped at: Autonomous run halted 2026-09-16 — Phase 1 needs_human (GitHub Actions billing, QUESTIONS.md #6/#5), Phase 2 verification deferred to /gsd-verify-work 2, Phase 3 blocked on Mac SSH or CI. Resume: clear billing → `gh run rerun <latest> --failed` → /gsd-autonomous --from 1
 Resume file: None — Phase 2 is ready for /gsd-verify-work 2, then /gsd-plan-phase 3 (or resolve QUESTIONS.md #6 first to unpark Phase 1's 01-06/01-07)
