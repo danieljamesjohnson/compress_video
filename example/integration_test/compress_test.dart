@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:compress_video/compress_video.dart';
 import 'package:crypto/crypto.dart' show sha256;
@@ -36,6 +37,144 @@ Future<Map<String, dynamic>> _loadSidecar(String clipName) async {
     'assets/corpus/$clipName.expected.json',
   );
   return jsonDecode(raw) as Map<String, dynamic>;
+}
+
+/// Decodes [bytes] (JPEG, in this suite) into a [ui.Image]. Copied from thumbnail_test.dart's
+/// own small helper rather than shared, matching this project's existing per-file convention.
+Future<ui.Image> _decodeImage(Uint8List bytes) async {
+  final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+  final ui.FrameInfo frame = await codec.getNextFrame();
+  return frame.image;
+}
+
+/// Samples the RGB value at ([x], [y]) in [image] from its raw, straight-alpha RGBA bytes.
+Future<List<int>> _samplePixelRgb(ui.Image image, int x, int y) async {
+  final ByteData? byteData = await image.toByteData(
+    format: ui.ImageByteFormat.rawRgba,
+  );
+  if (byteData == null) {
+    fail('Could not read raw pixel data from the decoded thumbnail');
+  }
+  final int offset = (y * image.width + x) * 4;
+  return <int>[
+    byteData.getUint8(offset),
+    byteData.getUint8(offset + 1),
+    byteData.getUint8(offset + 2),
+  ];
+}
+
+/// Asserts that [actualRgb] matches [expectedRgb] within [tolerance] in every channel.
+void _expectRgbCloseTo(
+  List<int> actualRgb,
+  List<dynamic> expectedRgb,
+  int tolerance, {
+  String? reason,
+}) {
+  for (int channel = 0; channel < 3; channel++) {
+    expect(
+      actualRgb[channel],
+      closeTo((expectedRgb[channel] as num).toDouble(), tolerance.toDouble()),
+      reason: reason,
+    );
+  }
+}
+
+/// Proves a compressed OUTPUT is upright with no black-bar padding, by sampling the produced
+/// file's own pixels -- never the source's -- exactly the "prove what actually came out of it"
+/// philosophy this phase applies throughout (02-05-PLAN.md task 2).
+///
+/// [compressVideo] fetches a thumbnail of [result]'s own output at the sidecar's
+/// `thumbnailProbe.positionMs`; every probe coordinate is then scaled from the sidecar's
+/// SOURCE-displayed coordinates to this particular output's own displayed dimensions (uniform
+/// scale, since [Presentation.createForHeight] preserves aspect ratio) rather than hard-coded --
+/// that scaling is what keeps this one assertion valid at every preset/override, not just the
+/// default.
+Future<void> _expectUprightAndUnpadded(
+  CompressVideo compressVideo,
+  CompressResult result,
+  Map<String, dynamic> sidecar,
+) async {
+  final Map<String, dynamic> crossPlatform =
+      sidecar['crossPlatform'] as Map<String, dynamic>;
+  final Map<String, dynamic> thumbnailProbe =
+      sidecar['thumbnailProbe'] as Map<String, dynamic>;
+  final Map<String, dynamic> edgeProbe =
+      sidecar['edgeProbe'] as Map<String, dynamic>;
+
+  final int sourceHeightPx = crossPlatform['heightPx'] as int;
+  // The source is portrait (height is the long side) at every preset/override this phase
+  // resolves it to, since none of them ever rescale a long side to the SHORT axis -- so scaling
+  // by the height ratio is valid uniformly, whether or not this particular call rescaled at all
+  // (the adjacency case's ratio is exactly 1.0).
+  final double scale = result.heightPx / sourceHeightPx.toDouble();
+
+  final Uint8List thumbnailBytes = await compressVideo.getThumbnail(
+    result.outputPath,
+    positionMs: thumbnailProbe['positionMs'] as int,
+  );
+  final ui.Image image = await _decodeImage(thumbnailBytes);
+
+  expect(
+    image.height,
+    greaterThan(image.width),
+    reason: 'a portrait output must stay upright: taller than it is wide',
+  );
+  expect(image.width, result.widthPx);
+  expect(image.height, result.heightPx);
+
+  final int patchX = (thumbnailProbe['patchXPx'] as int) * scale ~/ 1;
+  final int patchY = (thumbnailProbe['patchYPx'] as int) * scale ~/ 1;
+  final List<int> patchRgb = await _samplePixelRgb(image, patchX, patchY);
+  _expectRgbCloseTo(
+    patchRgb,
+    thumbnailProbe['expectedRgb'] as List<dynamic>,
+    thumbnailProbe['rgbTolerance'] as int,
+    reason:
+        'sampled patch colour must match the sidecar, scaled for this output size',
+  );
+
+  // No black bars: a letterboxed or padded output would sample as black (or a black/border
+  // colour mix) at these four displayed-edge-midpoint coordinates instead of the sidecar's
+  // near-white border colour -- exactly what edgeProbe.rgbTolerance is tight enough to catch.
+  final int inset = (edgeProbe['insetPx'] as int) * scale ~/ 1;
+  final List<dynamic> edgeExpectedRgb =
+      edgeProbe['expectedRgb'] as List<dynamic>;
+  final int edgeTolerance = edgeProbe['rgbTolerance'] as int;
+  final int midX = image.width ~/ 2;
+  final int midY = image.height ~/ 2;
+
+  final List<int> topRgb = await _samplePixelRgb(image, midX, inset);
+  final List<int> bottomRgb = await _samplePixelRgb(
+    image,
+    midX,
+    image.height - 1 - inset,
+  );
+  final List<int> leftRgb = await _samplePixelRgb(image, inset, midY);
+  final List<int> rightRgb = await _samplePixelRgb(
+    image,
+    image.width - 1 - inset,
+    midY,
+  );
+
+  _expectRgbCloseTo(topRgb, edgeExpectedRgb, edgeTolerance, reason: 'top edge');
+  _expectRgbCloseTo(
+    bottomRgb,
+    edgeExpectedRgb,
+    edgeTolerance,
+    reason: 'bottom edge',
+  );
+  _expectRgbCloseTo(
+    leftRgb,
+    edgeExpectedRgb,
+    edgeTolerance,
+    reason: 'left edge',
+  );
+  _expectRgbCloseTo(
+    rightRgb,
+    edgeExpectedRgb,
+    edgeTolerance,
+    reason: 'right edge',
+  );
 }
 
 void main() {
@@ -681,4 +820,87 @@ void main() {
       timeout: const Timeout(Duration(seconds: 30)),
     );
   });
+
+  // Upright, no-letterbox, adjacency and trim (02-05-PLAN.md task 2). All four sample the
+  // compressed OUTPUT's own pixels/duration, never the source's.
+  group(
+    'Orientation, framing and trim: proven by sampling the compressed output itself',
+    () {
+      Future<String> copyHiBitrateClip() => _copyAssetToTempFile(
+        'assets/corpus/portrait_hibitrate_1080p60.mp4',
+        'orientation_hibitrate_${DateTime.now().microsecondsSinceEpoch}.mp4',
+      );
+
+      testWidgets(
+        'default preset compresses the portrait clip to an upright output with no '
+        'black-bar padding, proven by sampling the produced file',
+        (WidgetTester tester) async {
+          final String path = await copyHiBitrateClip();
+          final Map<String, dynamic> sidecar = await _loadSidecar(
+            'portrait_hibitrate_1080p60',
+          );
+          final CompressJob job = compressVideo.compress(path);
+          final CompressResult result = await job.result;
+
+          expect(result.widthPx, 720);
+          expect(result.heightPx, 1280);
+          await _expectUprightAndUnpadded(compressVideo, result, sidecar);
+        },
+        timeout: const Timeout(Duration(seconds: 20)),
+      );
+
+      testWidgets(
+        'a maxLongSidePx exactly equal to the source long side is not rescaled at '
+        'all, and the un-rescaled output is still upright and unpadded by the same probe',
+        (WidgetTester tester) async {
+          final String path = await copyHiBitrateClip();
+          final Map<String, dynamic> sidecar = await _loadSidecar(
+            'portrait_hibitrate_1080p60',
+          );
+          final Map<String, dynamic> crossPlatform =
+              sidecar['crossPlatform'] as Map<String, dynamic>;
+
+          final CompressJob job = compressVideo.compress(
+            path,
+            options: const CompressOptions(maxLongSidePx: 1920),
+          );
+          final CompressResult result = await job.result;
+
+          expect(
+            result.widthPx,
+            crossPlatform['widthPx'],
+            reason: 'equal does not trigger a resize',
+          );
+          expect(result.heightPx, crossPlatform['heightPx']);
+          await _expectUprightAndUnpadded(compressVideo, result, sidecar);
+        },
+        timeout: const Timeout(Duration(seconds: 20)),
+      );
+
+      testWidgets(
+        'a trim from 500ms to 3500ms produces an output whose duration matches the '
+        'requested 3000ms range within one output frame',
+        (WidgetTester tester) async {
+          final String path = await copyHiBitrateClip();
+          final CompressJob job = compressVideo.compress(
+            path,
+            options: const CompressOptions(trimStartMs: 500, trimEndMs: 3500),
+          );
+          final CompressResult result = await job.result;
+
+          final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+            result.outputPath,
+          );
+          final double outputFrameRate = outputInfo.frameRateFps ?? 30.0;
+          final double toleranceMs = (1000 / outputFrameRate).ceilToDouble();
+
+          expect(
+            (result.durationMs - 3000).abs().toDouble(),
+            lessThanOrEqualTo(toleranceMs),
+          );
+        },
+        timeout: const Timeout(Duration(seconds: 20)),
+      );
+    },
+  );
 }
