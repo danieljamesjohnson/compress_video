@@ -205,9 +205,15 @@ void main() {
       final CompressJob job = compressVideo.compress(path);
       final StreamSubscription<double> progressSubscription = job.progress
           .listen(progressValues.add);
+      // Attached immediately, before the stream can possibly have already closed --
+      // 02-06-PLAN.md task 1 made the progress stream close BEFORE `result` resolves, on every
+      // terminal path, so awaiting `asFuture()` only after `job.result` (as this line used to)
+      // would attach to an already-done subscription and hang forever waiting for a "done"
+      // event that already fired.
+      final Future<void> progressDone = progressSubscription.asFuture<void>();
 
       final CompressResult result = await job.result;
-      await progressSubscription.asFuture<void>();
+      await progressDone;
 
       // The never-larger/remux shortcuts must not be why this passed: this is a real encode.
       expect(result.outputBytes, lessThan(result.inputBytes));

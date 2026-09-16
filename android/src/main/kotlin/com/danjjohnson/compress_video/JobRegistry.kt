@@ -52,6 +52,22 @@ object JobRegistry {
     }
 
     /**
+     * Stops [jobId]'s progress polling WITHOUT forgetting it or touching its files -- called
+     * from [TransformerEngine]'s [androidx.media3.transformer.Transformer.Listener] terminal
+     * callbacks (`onCompleted`/`onError`) the instant they fire, rather than relying on
+     * [remove] after the suspended `compress` call resumes. The `Transformer` class javadoc
+     * states that `getProgress` reports `PROGRESS_STATE_NOT_STARTED` once an export completes,
+     * so the polling loop must stop itself proactively; stopping it here, synchronously inside
+     * the same main-Looper callback that already fired, closes the (normally harmless, but
+     * unnecessary) window between the listener firing and the coroutine's own cleanup running.
+     * A no-op if [jobId] is unknown.
+     */
+    fun stopPolling(jobId: String) {
+        val job = jobs[jobId] ?: return
+        job.mainHandler.removeCallbacks(job.progressRunnable)
+    }
+
+    /**
      * Cancels the job identified by [jobId]: stops its progress polling, cancels its
      * [Transformer], deletes its temp output file, forgets it, and invokes its
      * [LiveJob.onCancelled] callback so the suspended `startCompress` call can fail with a

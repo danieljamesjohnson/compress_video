@@ -237,6 +237,12 @@ class TransformerEngine(
                     composition: Composition,
                     exportResult: ExportResult,
                 ) {
+                    // Stop polling HERE, inside the terminal callback itself, rather than
+                    // waiting for JobRegistry.remove after this suspend function resumes: the
+                    // Transformer class javadoc states getProgress reports
+                    // PROGRESS_STATE_NOT_STARTED once an export completes, so the polling loop
+                    // must stop itself proactively rather than rely on that state change.
+                    JobRegistry.stopPolling(jobId)
                     deferred.complete(ExportOutcome.Success(exportResult))
                 }
 
@@ -245,6 +251,7 @@ class TransformerEngine(
                     exportResult: ExportResult,
                     exportException: ExportException,
                 ) {
+                    JobRegistry.stopPolling(jobId)
                     deferred.complete(ExportOutcome.Failure(exportException))
                 }
             }
@@ -298,16 +305,37 @@ class TransformerEngine(
         // Runnable below -- cancelled once this job settles so it never outlives it.
         val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+        // Remembers the last value actually forwarded for THIS job -- a fresh 0.0 per call to
+        // [compress], since this variable lives in this function's own local scope alongside
+        // the rest of this job's state, so two jobs polling concurrently can never see or
+        // affect each other's last-sent value.
+        var lastSentProgress = 0.0
         lateinit var progressRunnable: Runnable
         progressRunnable =
             Runnable {
                 val state = transformer.getProgress(progressHolder)
                 if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                    progressScope.launch { onProgress(progressHolder.progress.toDouble()) }
+                    // Clamp into 0..99, not 0..100: measured live this task -- the exporter can
+                    // report PROGRESS_STATE_AVAILABLE with progress already at 100 for several
+                    // poll ticks BEFORE onCompleted actually fires (muxing/finalisation happens
+                    // after the reported progress reaches its own ceiling), which would forward
+                    // 100 multiple times if this loop's own upper clamp allowed it through. The
+                    // single canonical terminal 100 is reserved for the explicit onProgress(100.0)
+                    // call made once, right before the success/never-larger/remux-shortcut reply
+                    // below -- this is what guarantees 100 appears exactly once in the whole
+                    // stream, per 02-06-PLAN.md task 1's acceptance criteria. Never forward a
+                    // value smaller than the last one actually sent for this job, either --
+                    // monotonically non-decreasing.
+                    val clamped = progressHolder.progress.toDouble().coerceIn(0.0, 99.0)
+                    val forwarded = maxOf(clamped, lastSentProgress)
+                    lastSentProgress = forwarded
+                    progressScope.launch { onProgress(forwarded) }
                 }
                 // The class javadoc: "After an export completes, this method returns
-                // PROGRESS_STATE_NOT_STARTED" -- JobRegistry.remove/cancel stop this loop on
-                // both terminal paths rather than relying on getProgress to signal completion.
+                // PROGRESS_STATE_NOT_STARTED" -- the terminal Transformer.Listener callbacks
+                // above call JobRegistry.stopPolling the instant they fire (rather than relying
+                // on this state change, or on JobRegistry.remove/cancel after this suspend
+                // function resumes) to stop this loop on every terminal path.
                 mainHandler.postDelayed(progressRunnable, PROGRESS_POLL_INTERVAL_MS)
             }
 

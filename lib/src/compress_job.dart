@@ -133,13 +133,23 @@ class CompressJob {
     CompressVideoException Function(MissingPluginException, String)
     wrapMissingPlugin,
   ) async {
+    // The eventual outcome is captured in a local rather than completing `_resultCompleter`
+    // immediately on each branch, so the progress stream can be closed BEFORE `result` resolves
+    // -- not merely "at some point around the same time" -- on every terminal path (02-06-PLAN.md
+    // task 1's "closes before or as the result completes"). `Completer.complete` schedules its
+    // listeners onto a later microtask rather than running them synchronously, so completing it
+    // first and closing the stream afterwards in a `finally` block does not actually guarantee
+    // an observer of `result` sees an already-closed stream; closing first and completing after
+    // does.
+    CompressResult? success;
+    CompressVideoException? failure;
     try {
       final messages.CompressResultMessage message = await _api.startCompress(
         path,
         id,
         request,
       );
-      final CompressResult compressResult = CompressResult(
+      success = CompressResult(
         outputPath: message.outputPath,
         inputBytes: message.inputBytes,
         outputBytes: message.outputBytes,
@@ -155,18 +165,20 @@ class CompressJob {
         audioReencoded: message.audioReencoded,
         elapsedMs: message.elapsedMs,
       );
-      if (!_resultCompleter.isCompleted) {
-        _resultCompleter.complete(compressResult);
-      }
     } on PlatformException catch (e) {
-      _failWith(wrapPlatformException(e, 'compress'));
+      failure = wrapPlatformException(e, 'compress');
     } on MissingPluginException catch (e) {
-      _failWith(wrapMissingPlugin(e, 'compress'));
+      failure = wrapMissingPlugin(e, 'compress');
     } finally {
       _jobRegistry.remove(id);
       if (!_progressController.isClosed) {
         await _progressController.close();
       }
+    }
+    if (success != null && !_resultCompleter.isCompleted) {
+      _resultCompleter.complete(success);
+    } else if (failure != null) {
+      _failWith(failure);
     }
   }
 
