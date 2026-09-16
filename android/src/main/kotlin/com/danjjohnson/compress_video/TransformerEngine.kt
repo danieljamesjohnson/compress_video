@@ -19,6 +19,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
@@ -205,11 +206,29 @@ class TransformerEngine(
         // empty and requesting H.264/AAC output already matches the input's own codecs (the
         // predicate requires exactly that), so Media3's own "transcode only if necessary"
         // behaviour transmuxes both tracks without any extra wiring on this builder.
+        //
+        // Explicit InAppMp4Muxer.Factory with streamable output DISABLED -- found and fixed
+        // this plan (Rule 1 bug, orchestrator-flagged): Transformer.Builder's own default
+        // muxer (DefaultMuxer.Factory, confirmed via javap on the installed
+        // media3-transformer:1.11.1 AAR) already delegates to InAppMp4Muxer with
+        // attemptStreamableOutputEnabled left at ITS OWN default of true. That default writes
+        // moov before mdat (so playback can start before the file finishes downloading) by
+        // reserving a speculative `free` box after moov sized for moov to grow into as samples
+        // arrive, then leaves whatever is unused as a real `free` box in the final file. For a
+        // short, few-sample clip that reservation dwarfs the actual content: a raw MP4-box walk
+        // of a remuxed small_480p.mp4 (77,504 input bytes) found a single 395,344-byte `free`
+        // box -- the entire cause of a measured 472,825-byte "remux" of a 77KB clip, not muxer
+        // overhead in any normal sense. Disabling streamable output removes that reservation
+        // entirely (the same remux then measures 77,481 bytes, smaller than the input) at the
+        // cost of moov landing at the end of the file instead of the start; this plugin's output
+        // is written to local storage for the caller to read as a whole file, not progressively
+        // streamed while still being written, so that cost is not a real one here.
         val transformer =
             Transformer.Builder(context)
                 .setVideoMimeType(MimeTypes.VIDEO_H264)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .setEncoderFactory(encoderFactory)
+                .setMuxerFactory(InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(false))
                 .addListener(listener)
                 .build()
 
@@ -268,10 +287,21 @@ class TransformerEngine(
 
     /**
      * Finishes a successful export: runs the never-larger POST-check on the real byte count on
-     * disk (the pre-check in [compress] is a heuristic; this is the fact), detects transmux
-     * from [exportResult]'s own per-track conversion-process fields rather than from the
-     * prediction -- the prediction is a plan, the export result is the record -- and builds the
-     * final result via [buildResultFromDestination].
+     * disk (the pre-check in [compress] is a heuristic; this is the fact) -- UNCONDITIONALLY,
+     * on every produced file, remux or real encode alike -- then, only for a file that survives
+     * that check, detects transmux from [exportResult]'s own per-track conversion-process
+     * fields rather than from the prediction, and builds the final result via
+     * [buildResultFromDestination].
+     *
+     * CORE-05 ("never makes the file bigger") describes the file the caller receives, not the
+     * code path that produced it: a caller who gets a bigger file has been harmed exactly the
+     * same amount whether that file came from an encode or a remux. "Transmux is decided first,
+     * never-larger second" (02-04-PLAN.md's decision order) governs which Media3 operation
+     * [compress] *attempts* -- it is not a license to skip re-verifying the result the same way
+     * every other path does. A discarded remux is reported [CompressResultMessage.transmuxed]
+     * `false`: the file the caller actually receives (a copy of the original) was not
+     * transmuxed, whatever Media3's own internal conversion-process fields say about the
+     * (discarded) temp file.
      */
     private suspend fun finishSuccess(
         exportResult: ExportResult,
@@ -281,32 +311,34 @@ class TransformerEngine(
         inputBytes: Long,
         startElapsedMs: Long,
     ): CompressResultMessage {
-        // Transmux is decided first, from the export result's own record of what actually
-        // happened -- never re-derived from a byte count. Only when this export was NOT a
-        // transmux does the never-larger POST-check apply (D-10/D-11's fixed precedence,
-        // 02-04-PLAN.md "The decision order this plan fixes"). Without this ordering, a
-        // genuine remux whose new container happens to land at or above the input's own byte
-        // count -- an ordinary muxer-overhead difference, not a failure to remux -- would be
-        // wrongly discarded and reported as usedOriginal instead of transmuxed.
-        val videoTransmuxed =
-            exportResult.videoConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED
-        val audioTransmuxedOrAbsent =
-            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED ||
-                exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_NA
-        val transmuxed = videoTransmuxed && audioTransmuxedOrAbsent
-        val audioReencoded =
-            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSCODED ||
-                exportResult.audioConversionProcess ==
-                ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
-
         val tempBytes = tempFile.length()
-        val usedOriginal = !transmuxed && tempBytes >= inputBytes
+        val usedOriginal = tempBytes >= inputBytes
         if (usedOriginal) {
             PluginFiles.quietDelete(tempFile)
             copyFileAtomically(inputFile, destinationFile)
         } else {
             PluginFiles.moveIntoPlace(tempFile, destinationFile)
         }
+
+        // Detected from the export result's own per-track conversion-process fields rather than
+        // from the prediction -- the prediction is a plan, the export result is the record --
+        // but only when usedOriginal is false: the returned file must describe itself, and a
+        // substituted original was never transmuxed or re-encoded, regardless of what Media3
+        // did to the temp file this job discarded.
+        val videoTransmuxed =
+            exportResult.videoConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED
+        val audioTransmuxedOrAbsent =
+            exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED ||
+                exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_NA
+        val transmuxed = !usedOriginal && videoTransmuxed && audioTransmuxedOrAbsent
+        val audioReencoded =
+            !usedOriginal &&
+                (
+                    exportResult.audioConversionProcess ==
+                        ExportResult.CONVERSION_PROCESS_TRANSCODED ||
+                        exportResult.audioConversionProcess ==
+                        ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
+                )
 
         return buildResultFromDestination(
             destinationFile = destinationFile,

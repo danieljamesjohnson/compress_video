@@ -120,19 +120,30 @@ object SizeGuard {
          */
         val predictedOutputBytes: Long,
         /**
-         * Whether this request would remux (container copy, no video re-encode) rather than
-         * transcode, decided from the exact seven conditions in 02-04-PLAN.md's "The decision
-         * order this plan fixes" / D-10. Decided first, ahead of [wouldUseOriginal] -- a clip
-         * that qualifies for transmux is remuxed, never substituted with the original, because a
-         * remux still normalises the container and still honours a trim-less request.
+         * Whether Media3 would be ASKED to remux (container copy, no video re-encode) rather
+         * than transcode, decided from the exact seven conditions in 02-04-PLAN.md's "The
+         * decision order this plan fixes" / D-10. This is a pre-flight recommendation for which
+         * operation [TransformerEngine.compress] attempts, and which encoder settings to build
+         * -- it is NOT a guarantee about the bytes the caller ultimately receives. The engine
+         * always re-verifies the real output against [InputInfo.sizeBytes] after the job runs
+         * (see [wouldUseOriginal]'s own note), whichever operation it attempted, and a remux
+         * whose real output is not smaller than the input is discarded exactly like a real
+         * encode would be -- CORE-05 describes the file the caller receives, not the operation
+         * that was attempted.
          */
         val wouldTransmux: Boolean,
         /**
-         * Whether this request would skip encoding and copy the original input to the output
-         * path instead, because [wouldTransmux] is `false` and [predictedOutputBytes] is greater
-         * than or equal to [InputInfo.sizeBytes] -- equality counts as "would not help" (D-11,
-         * CORE-05). Always `false` when [wouldTransmux] is `true`: a remux is never replaced by
-         * an original-copy substitution, even though its predicted bytes equal the input's own.
+         * Whether [TransformerEngine.compress] should skip attempting an encode at all and copy
+         * the original input to the output path instead, because [wouldTransmux] is `false` and
+         * [predictedOutputBytes] is already greater than or equal to [InputInfo.sizeBytes] --
+         * equality counts as "would not help" (D-11, CORE-05). This is the PRE-flight check
+         * only, deciding whether it is worth even attempting an operation; it is `false`
+         * whenever [wouldTransmux] is `true` because a remux is cheap enough, and often
+         * successful enough, that it is always worth attempting rather than skipped outright.
+         * The engine's POST-check, applied unconditionally to whatever real bytes an attempted
+         * remux OR a real encode actually produced, is a separate, later decision that this
+         * field does not by itself determine -- a `false` here does not mean the final returned
+         * file can never be the original; it means only that an attempt is worth making.
          */
         val wouldUseOriginal: Boolean,
     )

@@ -7,7 +7,8 @@ encoder is available on this device.
 **media3:** `androidx.media3:media3-transformer` / `-effect` / `-common` / `-muxer` **1.11.1**
 (`android/build.gradle.kts`).
 
-**Date:** 2026-09-15.
+**Date:** 2026-09-16 (re-measured after fixing the muxer configuration described in "The two
+shortcuts" below; see `02-04-SUMMARY.md` Deviations for the full investigation).
 
 **A hardware encoder on a real phone will be faster and may produce different bytes at the same
 settings.** Every row below came from `tool/measure_presets.dart` on the software encoder named
@@ -22,14 +23,14 @@ hand-edited** — see that file's header for the exact reproduction command.
 
 | Preset | Source clip | Source bytes | Output bytes | Width×Height | Frame rate (fps) | Video bitrate (bps) | Elapsed (ms) | `usedOriginal` | `transmuxed` | MB/min |
 |---|---|---|---|---|---|---|---|---|---|---|
-| p360 | small_480p | 77,504 | 77,504 | 854×480 | 30.0 | 129,866 | 28 | true | false | 1.539 |
-| p480 | small_480p | 77,504 | 472,825 | 854×480 | 30.0 | 128,623 | 347 | false | true | 9.366 |
-| p720 | small_480p | 77,504 | 472,825 | 854×480 | 30.0 | 128,623 | 163 | false | true | 9.366 |
-| p1080 | small_480p | 77,504 | 472,825 | 854×480 | 30.0 | 128,623 | 174 | false | true | 9.366 |
-| p360 | portrait_hibitrate_1080p60 | 4,454,349 | 840,262 | 360×640 | 30.0 | 745,553 | 4,570 | false | false | 12.504 |
-| p480 | portrait_hibitrate_1080p60 | 4,454,349 | 907,372 | 480×854 | 30.0 | 878,708 | 4,773 | false | false | 13.503 |
-| p720 | portrait_hibitrate_1080p60 | 4,454,349 | 1,209,980 | 720×1280 | 30.0 | 1,479,121 | 5,219 | false | false | 18.006 |
-| p1080 | portrait_hibitrate_1080p60 | 4,454,349 | 2,251,782 | 1080×1920 | 30.0 | 3,546,188 | 5,651 | false | false | 33.509 |
+| p360 | small_480p | 77,504 | 77,504 | 854×480 | 30.0 | 129,866 | 35 | true | false | 1.539 |
+| p480 | small_480p | 77,504 | 77,481 | 854×480 | 30.0 | 128,623 | 360 | false | true | 1.535 |
+| p720 | small_480p | 77,504 | 77,481 | 854×480 | 30.0 | 128,623 | 164 | false | true | 1.535 |
+| p1080 | small_480p | 77,504 | 77,481 | 854×480 | 30.0 | 128,623 | 165 | false | true | 1.535 |
+| p360 | portrait_hibitrate_1080p60 | 4,454,349 | 445,104 | 360×640 | 30.0 | 745,553 | 4,692 | false | false | 6.624 |
+| p480 | portrait_hibitrate_1080p60 | 4,454,349 | 512,214 | 480×854 | 30.0 | 878,708 | 4,784 | false | false | 7.622 |
+| p720 | portrait_hibitrate_1080p60 | 4,454,349 | 814,822 | 720×1280 | 30.0 | 1,479,121 | 5,283 | false | false | 12.125 |
+| p1080 | portrait_hibitrate_1080p60 | 4,454,349 | 1,856,625 | 1080×1920 | 30.0 | 3,546,188 | 5,748 | false | false | 27.628 |
 
 `Width×Height` is the output's own *displayed* long-side-first pair as reported by the plugin
 (`CompressResult.widthPx`/`heightPx`); it is not necessarily wider than tall — `portrait_*` stays
@@ -42,17 +43,19 @@ resolution/output-size ladder `doc/PRESETS.md`'s own guard test (`compress_test.
 5,000,000bps target (no downscale, no fps cap on this 30fps-target/60fps-source clip, so nothing
 reduces the nominal preset bitrate) but the re-probed *output* lands at 3,546,188bps — about 71%
 of the request. This is the same emulator software-encoder/short-clip CBR delivery gap 02-03-
-SUMMARY.md's `targetSizeMb` tolerance finding already documented (measured ±19–30% there); it is
-a characteristic of this specific encoder and prober, not an error in `SizeGuard`'s formula, which
-`SizeGuardTest.kt`'s `targetSizeMb_producesTheDocumentedFormulaBitrate` proves exactly against
-hand-computed arithmetic.
+SUMMARY.md's `targetSizeMb` tolerance finding already documented; it is a characteristic of this
+specific encoder and prober, not an error in `SizeGuard`'s formula, which `SizeGuardTest.kt`'s
+`targetSizeMb_producesTheDocumentedFormulaBitrate` proves exactly against hand-computed
+arithmetic. (This same undershoot pattern re-measured wider on `compress_test.dart`'s
+`targetSizeMb` cases in 02-04 once the muxer fix below stopped a container-padding artifact from
+partially offsetting it — see that test's own comment.)
 
 **No preset seed changed.** `lib/src/presets.dart`'s four `kPresetSpecs` entries were seeds,
 explicitly licensed by D-07 to change on measured evidence. The `portrait_hibitrate_1080p60` rows
 above are real, distinguishing re-encodes at every preset (transmux and never-larger cannot mask
 resolution differences there, unlike on `small_480p`) and form a strictly monotonic ladder in both
-resolution (640 < 854 < 1280 < 1920 long side) and output size (840,262 < 907,372 < 1,209,980 <
-2,251,782 bytes) exactly as seeded. Nothing needed adjustment.
+resolution (640 < 854 < 1280 < 1920 long side) and output size (445,104 < 512,214 < 814,822 <
+1,856,625 bytes) exactly as seeded. Nothing needed adjustment.
 
 ## The two rules that predict output size
 
@@ -71,17 +74,34 @@ resolution (640 < 854 < 1280 < 1920 long side) and output size (840,262 < 907,37
 
 ## The two shortcuts
 
-- **`transmuxed`** — the job container-copied the video and audio tracks instead of re-encoding
-  them, because the input already satisfied every one of D-10's seven conditions (H.264 video,
-  AAC-or-absent audio, no trim, already inside the target long side/frame-rate/bitrate headroom).
-  `small_480p.mp4`'s `p480`/`p720`/`p1080` rows above are all transmuxes — note their identical
-  472,825-byte output, larger than the 77,504-byte input, because Media3's own muxer repackaging
-  a container is not byte-preserving even when the samples are.
-- **`usedOriginal`** — the job skipped encoding (or discarded a real encode's result) and copied
-  the original input bytes to the output path instead, because the predicted or actual output
-  would not have been smaller. `small_480p.mp4`'s `p360` row above takes this path: at a 640px
-  cap the clip's 854px long side must downscale, ruling out a transmux, and the predicted encoded
-  size exceeds the tiny 77,504-byte input, so the original is returned unchanged.
+- **`transmuxed`** — the returned file is the result of a container copy of the video and audio
+  tracks instead of a re-encode, because the input already satisfied every one of D-10's seven
+  conditions (H.264 video, AAC-or-absent audio, no trim, already inside the target long
+  side/frame-rate/bitrate headroom) **and** the remuxed file was not larger than the input
+  (CORE-05 is unconditional — see `usedOriginal` below). `small_480p.mp4`'s `p480`/`p720`/`p1080`
+  rows above are all transmuxes at 77,481 bytes, 23 bytes *smaller* than the 77,504-byte input.
+  That narrow margin is itself measured evidence of a real bug this plan found and fixed: Media3's
+  default muxer configuration (`Transformer.Builder`'s own default, `DefaultMuxer.Factory`,
+  delegates to `InAppMp4Muxer` with `attemptStreamableOutputEnabled` left at its own default of
+  `true`) writes `moov` before `mdat` for progressive-download playback by reserving a speculative
+  `free` box sized for `moov` to grow into, then leaves whatever is unused as a real `free` box in
+  the final file. For this clip that reservation was measured at 395,344 bytes — the entire cause
+  of an earlier 472,825-byte "remux" of this same 77,504-byte input, a 6× bloat that violated
+  CORE-05 outright. `TransformerEngine` now builds an explicit `InAppMp4Muxer.Factory()` with
+  `setAttemptStreamableOutputEnabled(false)`, which removes that reservation for every export
+  (encode or remux) at the cost of `moov` landing at the end of the file instead of the start — a
+  cost that does not matter here, since this plugin hands the caller a finished local file rather
+  than serving it progressively while still being written.
+- **`usedOriginal`** — the returned file is a copy of the original input bytes, because either the
+  predicted output would not have been smaller (the pre-check, before an encode is attempted) or
+  the file actually produced — by an encode *or* an attempted remux — was not smaller than the
+  input (the post-check, applied unconditionally after the job runs). `small_480p.mp4`'s `p360`
+  row above takes the pre-check path: at a 640px cap the clip's 854px long side must downscale,
+  ruling out a transmux, and the predicted encoded size exceeds the tiny 77,504-byte input, so the
+  original is returned unchanged before any Transformer is even built. `noaudio_720p.mp4` (not
+  in this table, but exercised in `compress_test.dart`) takes the post-check path: it qualifies
+  for an attempted transmux, but the attempt lands at exactly the input's own byte count, and
+  CORE-05's equality-counts-as-larger reading means the original still wins.
 
 ---
 

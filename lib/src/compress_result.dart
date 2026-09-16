@@ -53,15 +53,21 @@ class CompressResult {
   /// stripped or the source had none.
   final String? audioCodec;
 
-  /// Whether the job ran as a transmux (container remux with no video re-encode) rather than
-  /// a full encode.
+  /// Whether the file at [outputPath] is the result of a transmux (container remux with no
+  /// video re-encode) rather than a full encode. Always `false` when [usedOriginal] is `true`:
+  /// a remux is re-verified against the input's own byte count exactly like a real encode is,
+  /// and one that did not come out smaller than or equal to the input is discarded in favour of
+  /// the original -- never larger makes a promise about the file the caller receives, and that
+  /// promise does not have an exception for a remux whose container ended up bigger than the
+  /// input.
   final bool transmuxed;
 
-  /// Whether the original input bytes were copied to [outputPath] because compressing would
-  /// have produced an equal-or-larger file. When `true`, [outputPath] is still a file the
-  /// plugin owns (a copy under its own cache directory, or the caller's requested
-  /// `outputPath`) -- never the caller's original input path, so a caller who deletes
-  /// [outputPath] never destroys their original.
+  /// Whether the original input bytes were copied to [outputPath] because compressing --
+  /// whether by a full encode or by a transmux -- would have produced (or did produce) an
+  /// equal-or-larger file. When `true`, [outputPath] is still a file the plugin owns (a copy
+  /// under its own cache directory, or the caller's requested `outputPath`) -- never the
+  /// caller's original input path, so a caller who deletes [outputPath] never destroys their
+  /// original.
   final bool usedOriginal;
 
   /// Reserved for Phase 4's HDR tone-mapping. Always `false` in this phase.
