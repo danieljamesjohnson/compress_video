@@ -43,11 +43,12 @@ import kotlinx.coroutines.withContext
  * Every call in this file that touches a [Transformer] -- build, start, poll, cancel -- happens
  * on the calling thread, which must already be the main Looper by the time [compress] is
  * invoked ([Compression] asserts this before calling in). The [Transformer] itself is never
- * built, started, polled or cancelled off that thread (02-RESEARCH.md Pattern 1); the
- * pre-Transformer input probe, the post-export re-probe, and the never-larger byte copy
- * ([copyFileAtomically], CR-01) all dispatch their own blocking I/O to [Dispatchers.IO] and
- * always resume back on the caller's original (main) context once it completes, the same
- * pattern [Probe] already uses for its own blocking native calls.
+ * built, started, polled or cancelled off that thread (02-RESEARCH.md Pattern 1); everything
+ * else that can block on I/O -- the pre-Transformer input probe, the post-export re-probe, the
+ * never-larger byte copy ([copyFileAtomically], CR-01), and the ancillary [MediaExtractor]
+ * metadata reads ([readAudioCodec], [readAudioChannelCount], WR-04) -- dispatches to
+ * [Dispatchers.IO] and always resumes back on the caller's original (main) context once it
+ * completes, the same pattern [Probe] already uses for its own blocking native calls.
  */
 class TransformerEngine(
     private val context: Context,
@@ -475,28 +476,31 @@ class TransformerEngine(
 
     /**
      * Reads the normalised codec of [file]'s first audio track, or `null` if it has none.
-     * Mirrors [Probe]'s own extractor-scan pattern without modifying that file.
+     * Mirrors [Probe]'s own extractor-scan pattern without modifying that file. Runs on
+     * [Dispatchers.IO] (WR-04): [MediaExtractor.setDataSource] performs a real file-open and
+     * container-header parse, which must not block the main Looper this is called from.
      */
-    private fun readAudioCodec(file: File): String? {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(file.path)
-            var codec: String? = null
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (mime.startsWith("audio/")) {
-                    codec = normalizeAudioCodec(mime)
-                    break
+    private suspend fun readAudioCodec(file: File): String? =
+        withContext(Dispatchers.IO) {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(file.path)
+                var codec: String? = null
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("audio/")) {
+                        codec = normalizeAudioCodec(mime)
+                        break
+                    }
                 }
+                codec
+            } catch (e: Exception) {
+                null
+            } finally {
+                extractor.release()
             }
-            codec
-        } catch (e: Exception) {
-            null
-        } finally {
-            extractor.release()
         }
-    }
 
     /**
      * Reads the channel count of [file]'s first audio track, or `null` if it has none or the
@@ -504,28 +508,30 @@ class TransformerEngine(
      * no channel-count field of its own to cross the wire, since the only place it is needed is
      * here, to decide whether [compress]'s re-encode branch must add a
      * [ChannelMixingAudioProcessor] at all (AUDO-02's "channels" only ever changes what the
-     * encoder is asked to produce, never what the caller is told about the source).
+     * encoder is asked to produce, never what the caller is told about the source). Runs on
+     * [Dispatchers.IO] (WR-04), same rationale as [readAudioCodec].
      */
-    private fun readAudioChannelCount(file: File): Int? {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(file.path)
-            var channels: Int? = null
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                    channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                    break
+    private suspend fun readAudioChannelCount(file: File): Int? =
+        withContext(Dispatchers.IO) {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(file.path)
+                var channels: Int? = null
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        break
+                    }
                 }
+                channels
+            } catch (e: Exception) {
+                null
+            } finally {
+                extractor.release()
             }
-            channels
-        } catch (e: Exception) {
-            null
-        } finally {
-            extractor.release()
         }
-    }
 
     /**
      * Normalises an audio track's MIME type into a wire-contract codec token. [MediaMath]'s own
@@ -577,9 +583,10 @@ class TransformerEngine(
      * audio-codec condition, D-10). Exposed (not `private`) so [Compression]'s pre-flight
      * free-space check can predict the SAME plan [compress] itself will resolve, before a
      * `Transformer` is ever built -- both call sites must resolve identically, or the free-space
-     * check could pass or fail against a prediction the actual encode does not honour.
+     * check could pass or fail against a prediction the actual encode does not honour. Suspend
+     * (WR-04): [readAudioCodec] now dispatches its native read to [Dispatchers.IO].
      */
-    fun resolvePlan(
+    suspend fun resolvePlan(
         inputFile: File,
         inputInfo: MediaInfoMessage,
         request: CompressRequestMessage,

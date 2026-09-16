@@ -122,7 +122,7 @@ class Compression(
      * own block-size rounding and any other concurrent writer, so a job that lands right at the
      * predicted size does not fail here only to succeed by a hair on a less cautious device.
      */
-    private fun requireSufficientFreeSpace(
+    private suspend fun requireSufficientFreeSpace(
         inputFile: File,
         inputInfo: MediaInfoMessage,
         request: CompressRequestMessage,
