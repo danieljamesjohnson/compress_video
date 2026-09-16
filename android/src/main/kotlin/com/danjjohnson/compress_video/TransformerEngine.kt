@@ -80,14 +80,9 @@ class TransformerEngine(
     ): CompressResultMessage {
         val startElapsedMs = SystemClock.elapsedRealtime()
         val inputBytes = inputFile.length()
-        val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
         val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
 
-        val target =
-            SizeGuard.resolve(
-                buildSizeGuardInput(inputInfo, inputAudioCodec),
-                buildSizeGuardOptions(request),
-            )
+        val target = resolvePlan(inputFile, inputInfo, request)
 
         // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
         // knows encoding would not help, skip building a Transformer at all rather than running
@@ -570,6 +565,26 @@ class TransformerEngine(
     }
 
     /**
+     * Resolves [request] against [inputInfo] into a [SizeGuard.Plan], reading [inputFile]'s own
+     * audio codec first when it has an audio track (needed by [SizeGuard.Plan.wouldTransmux]'s
+     * audio-codec condition, D-10). Exposed (not `private`) so [Compression]'s pre-flight
+     * free-space check can predict the SAME plan [compress] itself will resolve, before a
+     * `Transformer` is ever built -- both call sites must resolve identically, or the free-space
+     * check could pass or fail against a prediction the actual encode does not honour.
+     */
+    fun resolvePlan(
+        inputFile: File,
+        inputInfo: MediaInfoMessage,
+        request: CompressRequestMessage,
+    ): SizeGuard.Plan {
+        val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
+        return SizeGuard.resolve(
+            buildSizeGuardInput(inputInfo, inputAudioCodec),
+            buildSizeGuardOptions(request),
+        )
+    }
+
+    /**
      * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] itself has no
      * audio-codec field (see [readAudioCodec]'s own doc comment), so [audioCodec] is read
      * separately, once, in [compress] before this is called and threaded through here -- needed
@@ -623,36 +638,28 @@ class TransformerEngine(
      * 02-RESEARCH.md (its own Pitfalls #8/#9 explain the choices CONTEXT.md left as "per
      * research").
      */
+    /**
+     * Maps [exception] to a [CompressVideoError] via [ErrorMapping] -- the pure, JVM-testable
+     * table this plan (02-06) extracted from what used to be this function's own inline
+     * `when` block, plus [ErrorMapping.reasonForExportFailure]'s out-of-space message check
+     * ([exception]'s underlying `cause`, since [ExportException] itself carries no dedicated
+     * out-of-space code). Called from [compress]'s failure path, itself called AFTER the temp
+     * file has already been deleted (D-18, T-02-21): no failure path here writes to the
+     * platform log, and the original numeric [ExportException.errorCode] is always preserved as
+     * the error's detail, even when the reason is `"unknown"`.
+     */
     private fun mapExportException(exception: ExportException): CompressVideoError {
         val reason =
-            when (exception.errorCode) {
-                ExportException.ERROR_CODE_IO_FILE_NOT_FOUND -> "fileNotFound"
-                ExportException.ERROR_CODE_IO_UNSPECIFIED,
-                ExportException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                ExportException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                ExportException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
-                ExportException.ERROR_CODE_IO_BAD_HTTP_STATUS,
-                ExportException.ERROR_CODE_IO_NO_PERMISSION,
-                ExportException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
-                ExportException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
-                -> "io"
-                ExportException.ERROR_CODE_DECODER_INIT_FAILED -> "decoderUnavailable"
-                ExportException.ERROR_CODE_DECODING_FAILED,
-                ExportException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
-                -> "unsupportedInput"
-                ExportException.ERROR_CODE_ENCODER_INIT_FAILED,
-                ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED,
-                ExportException.ERROR_CODE_ENCODING_FAILED,
-                -> "encoderUnavailable"
-                ExportException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED,
-                ExportException.ERROR_CODE_AUDIO_PROCESSING_FAILED,
-                ExportException.ERROR_CODE_MUXING_FAILED,
-                ExportException.ERROR_CODE_MUXING_TIMEOUT,
-                ExportException.ERROR_CODE_MUXING_APPEND,
-                -> "io"
-                else -> "unknown"
-            }
-        val message = exception.message ?: "Media3 export failed with code ${exception.errorCode}"
+            ErrorMapping.reasonForExportFailure(exception.errorCode, exception.cause?.message)
+        // The numeric errorCode is always folded into the message text, not left to the
+        // platformDetail round trip alone -- CompressVideoException.platformDetail is only
+        // populated Dart-side when the mapped reason is "unknown" (see
+        // reasonFromPlatformCode/_wrapPlatformException), so a recognised reason like "io"
+        // would otherwise make the original ExportException.errorCode unobservable from Dart,
+        // defeating the whole point of this plan's error-mapping work when a caller needs to
+        // paste the exact code into an issue report.
+        val detailMessage = exception.message?.let { ": $it" } ?: ""
+        val message = "Media3 export failed with code ${exception.errorCode}$detailMessage"
         return CompressVideoError(reason, message, exception.errorCode.toString())
     }
 

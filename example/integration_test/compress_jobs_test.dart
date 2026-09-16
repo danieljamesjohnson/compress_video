@@ -368,4 +368,173 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
   });
+
+  group('Real failures: every one is typed, none logs, none leaves a file behind', () {
+    testWidgets(
+      'compressing the genuinely damaged truncated_mdat.mp4 fails with a typed '
+      'CompressVideoException rather than a crash or a null, and leaves no partial file behind',
+      (WidgetTester tester) async {
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/truncated_mdat.mp4',
+          'truncated_mdat_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final String outputPath = await _freshOutputPath(
+          'truncated_mdat_output.mp4',
+        );
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+
+        Object? caughtError;
+        try {
+          await job.result;
+        } catch (e) {
+          caughtError = e;
+        }
+
+        expect(
+          caughtError,
+          isA<CompressVideoException>(),
+          reason:
+              'a genuinely damaged file must fail typed, never crash and never return null',
+        );
+        final CompressVideoException exception =
+            caughtError as CompressVideoException;
+
+        // 02-RESEARCH.md Open Question 2: observe the REAL ExportException.errorCode a
+        // genuinely truncated file produces on this platform, rather than assuming one from the
+        // javadoc alone. Printed (not just asserted) so it can be transcribed into the plan's
+        // SUMMARY verbatim.
+        // ignore: avoid_print
+        print(
+          'Observed failure for truncated_mdat.mp4: reason=${exception.reason}, '
+          'platformDetail=${exception.platformDetail}, message=${exception.message}',
+        );
+
+        expect(
+          exception.reason,
+          isNot(CompressVideoErrorReason.cancelled),
+          reason:
+              'this was never cancelled -- it is a genuine decode/processing failure',
+        );
+        // The numeric ExportException.errorCode must be observable from Dart somewhere -- via
+        // platformDetail (only populated when reason is unknown) or, for every other reason,
+        // folded into message -- never silently dropped just because this reason was recognised.
+        final bool codeIsObservable =
+            (exception.platformDetail?.contains(RegExp(r'\d')) ?? false) ||
+            exception.message.contains(RegExp(r'\bcode \d+\b'));
+        expect(
+          codeIsObservable,
+          isTrue,
+          reason:
+              'the observed numeric export error code must appear in platformDetail or message',
+        );
+        expect(await File(outputPath).exists(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+
+    testWidgets(
+      'compressing a path that does not exist fails with reason fileNotFound',
+      (WidgetTester tester) async {
+        final String outputPath = await _freshOutputPath(
+          'does_not_exist_output.mp4',
+        );
+        final Directory tempDir = await Directory.systemTemp.createTemp(
+          'compress_video_jobs_test_missing_',
+        );
+        final String missingPath =
+            '${tempDir.path}/does_not_exist_${DateTime.now().microsecondsSinceEpoch}.mp4';
+
+        final CompressJob job = compressVideo.compress(
+          missingPath,
+          options: CompressOptions(outputPath: outputPath),
+        );
+
+        await expectLater(
+          () => job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.fileNotFound,
+            ),
+          ),
+        );
+        expect(await File(outputPath).exists(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+
+    testWidgets(
+      'compressing a zero-byte file fails with reason unsupportedInput',
+      (WidgetTester tester) async {
+        final String outputPath = await _freshOutputPath(
+          'zero_byte_output.mp4',
+        );
+        final Directory tempDir = await Directory.systemTemp.createTemp(
+          'compress_video_jobs_test_zero_byte_',
+        );
+        final File zeroByteFile = File(
+          '${tempDir.path}/zero_byte_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        await zeroByteFile.writeAsBytes(const <int>[], flush: true);
+
+        final CompressJob job = compressVideo.compress(
+          zeroByteFile.path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+
+        await expectLater(
+          () => job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.unsupportedInput,
+            ),
+          ),
+        );
+        expect(await File(outputPath).exists(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+
+    testWidgets(
+      'compressing a plain text file renamed to .mp4 fails with a typed reason and leaves '
+      'nothing behind',
+      (WidgetTester tester) async {
+        final String outputPath = await _freshOutputPath(
+          'plain_text_output.mp4',
+        );
+        final Directory tempDir = await Directory.systemTemp.createTemp(
+          'compress_video_jobs_test_plain_text_',
+        );
+        final File plainTextFile = File(
+          '${tempDir.path}/plain_text_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        await plainTextFile.writeAsString(
+          'This is not a video file, just plain text renamed to .mp4.',
+          flush: true,
+        );
+
+        final CompressJob job = compressVideo.compress(
+          plainTextFile.path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+
+        Object? caughtError;
+        try {
+          await job.result;
+        } catch (e) {
+          caughtError = e;
+        }
+        expect(caughtError, isA<CompressVideoException>());
+        expect(await File(outputPath).exists(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+  });
 }

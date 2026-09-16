@@ -2,6 +2,7 @@ package com.danjjohnson.compress_video
 
 import android.content.Context
 import android.os.Looper
+import android.os.StatFs
 import java.io.File
 
 /**
@@ -39,6 +40,10 @@ class Compression(
                 File(cacheDir, "$jobId.mp4")
             }
 
+        // Pre-flight space check (D-18): after validation and probing, before a Transformer
+        // exists -- a job that cannot possibly fit is never even attempted.
+        requireSufficientFreeSpace(inputFile, inputInfo, request, destinationFile)
+
         return engine.compress(
             jobId = jobId,
             inputFile = inputFile,
@@ -65,6 +70,43 @@ class Compression(
     /** Not yet implemented on Android -- lands in plan 02-07. */
     override suspend fun clearCache() {
         throw CompressVideoError("unsupportedInput", "clearCache() is implemented in plan 02-07")
+    }
+
+    /**
+     * Throws a [CompressVideoError] with reason `"outOfSpace"` when the destination
+     * filesystem's free space is less than 1.2 times [engine]'s own predicted output size for
+     * [request] against [inputInfo] -- computed via [TransformerEngine.resolvePlan], the SAME
+     * resolution [engine.compress] itself will use, so this pre-flight check can never disagree
+     * with what the real encode attempts. Reads [destinationFile]'s parent directory's free
+     * space via [StatFs] -- that directory is guaranteed to already exist by this point, either
+     * the plugin's own cache subdirectory ([PluginFiles.cacheSubDir]) or a caller-supplied
+     * `outputPath` whose parent [Arguments.requireWritableOutputParent] already validated.
+     *
+     * The 1.2x safety margin (not a bare 1.0x) leaves headroom for the destination filesystem's
+     * own block-size rounding and any other concurrent writer, so a job that lands right at the
+     * predicted size does not fail here only to succeed by a hair on a less cautious device.
+     */
+    private fun requireSufficientFreeSpace(
+        inputFile: File,
+        inputInfo: MediaInfoMessage,
+        request: CompressRequestMessage,
+        destinationFile: File,
+    ) {
+        val plan = engine.resolvePlan(inputFile, inputInfo, request)
+        val destinationDir =
+            destinationFile.parentFile
+                ?: throw CompressVideoError("io", "Could not resolve the output directory")
+        val freeBytes = StatFs(destinationDir.path).availableBytes
+        val requiredBytes = (plan.predictedOutputBytes * FREE_SPACE_SAFETY_FACTOR).toLong()
+        if (freeBytes < requiredBytes) {
+            throw CompressVideoError(
+                "outOfSpace",
+                "Not enough free space to compress: predicted output is " +
+                    "${plan.predictedOutputBytes} bytes, requiring approximately $requiredBytes " +
+                    "bytes with a $FREE_SPACE_SAFETY_FACTOR safety margin, but only $freeBytes " +
+                    "bytes are free on the destination filesystem",
+            )
+        }
     }
 
     /**
@@ -98,5 +140,9 @@ class Compression(
 
     private companion object {
         val JOB_ID_PATTERN = Regex("^[0-9]+-[0-9a-f]{16}$")
+
+        // D-18's pre-flight free-space margin: the destination filesystem must have at least
+        // this many times the predicted output size free before an encode is even attempted.
+        const val FREE_SPACE_SAFETY_FACTOR = 1.2
     }
 }
