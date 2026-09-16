@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 14
-  completed_plans: 10
-  percent: 71
+  completed_plans: 11
+  percent: 79
 ---
 
 # Project State
@@ -21,29 +21,29 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 ## Current Position
 
 Phase: 2 of 6 (Android Compression on Media3) — Phase 1 at 5/7 plans, needs_human
-Plan: 5 of 7 in current phase
-Status: Executing Phase 2 (wave 5 of 7 complete; wave 6 next — 02-06)
-Last activity: 2026-09-16 — 02-05 complete: all three audio modes (passthrough with automatic AAC fallback, strip, reencode with exact channel-count/clamped-bitrate control via ChannelMixingAudioProcessor + AudioEncoderSettings), Media3 ClippingConfiguration-based trim (previously unimplemented), a pinned/tested video-effects order (TransformerEngine.buildVideoEffects + EffectOrderTest.kt), and a pixel-probe proof that the compressed output is upright with no black-bar padding (compress_test.dart's _expectUprightAndUnpadded). AUDO-01/AUDO-02/ORNT-01 now checked complete. Two flagged assumptions carried forward unresolved for the verifier: AUDO-01's non-AAC-source fallback (no non-AAC corpus fixture exists) and ORNT-01's square-frame backstop truth (no square corpus fixture exists). Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
+Plan: 6 of 7 in current phase
+Status: Executing Phase 2 (wave 6 of 7 complete; wave 7 next — 02-07)
+Last activity: 2026-09-15 — 02-06 complete: per-job progress hardened (clamped 0..99 while polling, monotonically non-decreasing, one explicit terminal 100), cancel implemented end to end (typed cancelled outcome, partial file deleted before the future resolves, idempotent, cancel-all on detach reordered to run before host API teardown per T-02-25), the full 22-code ExportException error mapping extracted into a pure ErrorMapping.kt (28-case JVM suite), and a pre-flight StatFs-based free-space check (1.2x predicted output). Compressing corpus/truncated_mdat.mp4 observed a real ExportException.errorCode=2000 (ERROR_CODE_IO_UNSPECIFIED), agreeing with the recommended mapping and resolving 02-RESEARCH.md Open Question 2. JOBS-01/JOBS-02/CORE-03/CORE-04 now checked complete. Two flagged assumptions carried forward unresolved for the verifier: the pre-flight free-space check has no functional trigger test (impractical on the shared emulator), and CORE-04's DECODER_INIT_FAILED/DECODING_FORMAT_UNSUPPORTED split (A1) was not exercised by the one real failure observed. Phase 1 parked at 01-06/01-07 pending GitHub Actions billing (QUESTIONS.md #6)
 
-Progress: [███████░░░] 71% (10/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
+Progress: [████████░░] 79% (11/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 63 min
-- Total execution time: 10.6 hours
+- Total plans completed: 11
+- Average duration: 62 min
+- Total execution time: 11.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5 | 249 min | 50 min |
-| 2 | 5 | 379 min | 76 min |
+| 2 | 6 | 427 min | 71 min |
 
 **Recent Trend:**
-- Last 5 plans: 49 min, 105 min, ~130 min, ~75 min
-- Trend: 02-05 (audio modes + trim + orientation proof) took ~75 min after 02-04's ~130 min rework-heavy plan — most of the time spent on a test-fixture-choice bug (small_480p.mp4's video re-encode could trip the never-larger post-check and silently defeat the audio assertions, fixed by switching to the high-bitrate clip) and a 64-bit-extended-box-size bug in the test-only MP4 parser, both confined to test code rather than production `TransformerEngine.kt`
+- Last 5 plans: 105 min, ~130 min, ~75 min, ~48 min
+- Trend: 02-06 (per-job progress hardening, cancel end-to-end, complete error mapping, pre-flight space check) took ~48 min — the fastest Phase 2 plan since 02-02's tracer, despite six deviations, because each was a small, well-isolated fix (a clamp bound, a Completer ordering swap, a Mockito-unfriendly field replaced with a callback) rather than a rework of already-shipped behavior
 - 01-06 (not yet counted as completed — halted, see Blockers/Concerns): 166 min elapsed, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, final fix unverified due to a GitHub Actions billing block
 
 *Updated after each plan completion*
@@ -80,6 +80,7 @@ Recent decisions affecting current work:
 - [02-03]: `CompressRequestMessage` gained `presetMaxLongSidePx`/`presetVideoBitrateBps` (always the selected preset's own nominal values) and `maxLongSidePx`/`videoBitrateBps` became true explicit-override-or-null — 02-02's pre-resolved-into-a-concrete-value shape would have made `SizeGuard`'s preset-bitrate-scaling rule unreachable from the real Dart-to-native path. `TransformerEngine` now uses `BITRATE_MODE_CBR` (not the default VBR) after measuring VBR overshoot ~28% vs CBR's ~20% on this emulator's software encoder for an explicit bitrate request. `Probe.kt` gained a sample-size-summation bitrate fallback since Media3's `InAppMp4Muxer` output never carries a `MediaFormat.KEY_BIT_RATE` value, unlike the ffmpeg-authored corpus fixtures — confirmed accurate against an independently pulled file's `ffprobe` measurement. `targetSizeMb`'s documented ±15% tolerance could not be proven on the emulator's software encoder for the 4-second corpus clip (measured +19.1%/-29.9%); the formula itself is exact and unit-tested, so the emulator test uses a documented ±35% tolerance pending physical-device re-verification (QUESTIONS.md #3). See 02-03-SUMMARY.md Deviations.
 - [02-04]: `SizeGuard.Plan` gained `wouldTransmux`/`wouldUseOriginal` as PRE-FLIGHT recommendations of which Media3 operation to attempt (transmux first, never-larger pre-check second, real encode last) — not a guarantee about the file the caller receives. Found and fixed two real Media3 bugs live on the emulator: (1) `DefaultEncoderFactory.videoNeedsEncoding()` returns `true` whenever `requestedVideoEncoderSettings != VideoEncoderSettings.DEFAULT` (confirmed via `javap` on the installed `media3-transformer:1.11.1` AAR — undocumented anywhere), which made the transmux fast path unreachable regardless of prediction; fixed by leaving encoder settings at default whenever `wouldTransmux` is true. (2) `Transformer.Builder`'s own default muxer (`DefaultMuxer.Factory` -> `InAppMp4Muxer`) leaves `attemptStreamableOutputEnabled` at its own default of `true`, reserving a speculative `free` box (measured 395,344 bytes) for moov-before-mdat layout — the entire cause of a remuxed `small_480p.mp4` measuring 472,825 bytes against a 77,504-byte input. An initial fix (committed, then orchestrator-flagged as wrong) made `finishSuccess` decide transmux before the never-larger check, exempting remuxes from CORE-05 entirely rather than fixing the cause. The corrected fix: the never-larger post-check is unconditional (`usedOriginal = tempBytes >= inputBytes`, no exception), and `TransformerEngine` builds an explicit `InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(false)` for every export, which drops the same remux to 77,481 bytes — smaller than the input. This muxer change also reduced every OTHER export's byte count, exposing a larger true CBR-undershoot on `targetSizeMb` (measured -49.6% at a 2.0MB target, tolerance widened ±35%→±55%) that had been partially masked by the same container padding. `doc/PRESETS.md` re-measured after the fix; no preset seed changed. CORE-05/CORE-06's flagged assumptions were implemented as written and carried forward unresolved for the verifier. See 02-04-SUMMARY.md Deviations.
 - [02-05]: `TransformerEngine` now has three audio-mode branches: passthrough leaves audio encoder settings untouched (the Transformer-level unconditional `AUDIO_AAC` mime request alone both copies an already-AAC source and falls back to an AAC re-encode for a non-AAC one), strip removes the track, and reencode sets explicit `AudioEncoderSettings`/`ChannelMixingAudioProcessor` — confirmed via `javap` that `DefaultEncoderFactory.audioNeedsEncoding()` mirrors 02-04's video `videoNeedsEncoding()` precondition (reference equality against `AudioEncoderSettings.DEFAULT`), so audio settings are only ever built for an explicit reencode. Implemented trim via `MediaItem.ClippingConfiguration` (previously not implemented at all). Extracted `TransformerEngine.buildVideoEffects` (geometry-then-frame-selection order, pinned by `EffectOrderTest.kt`) and proved upright/no-letterbox output by sampling the compressed OUTPUT's own pixels (`compress_test.dart`'s `_expectUprightAndUnpadded`). `AudioReencode`/`AudioStrip` integration cases moved from `small_480p.mp4` to `portrait_hibitrate_1080p60.mp4` after discovering the former's near-source-bitrate re-encode could trip the never-larger post-check and silently substitute the original, defeating the audio assertions. Channel count and audio-only bitrate are read in Dart integration tests directly from the produced MP4's own `moov`/`stsd`/`stsz` boxes (including the 64-bit extended `mdat` size), since neither `CompressResult` nor `MediaInfo` exposes either fact and adding a wire field was out of this plan's declared scope. AUDO-01's non-AAC-source-fallback and ORNT-01's square-frame backstop truth are both carried forward unresolved — no corpus fixture exercises either. See 02-05-SUMMARY.md Deviations.
+- [02-06]: Progress polling clamps into 0..99 (not 0..100) so a single explicit terminal `onProgress(100.0)` call is the only source of 100 — Media3 can report progress already at 100 for several poll ticks before `onCompleted` fires. `CompressJob._run` now closes the progress stream BEFORE completing `result` on every terminal path (was: complete-then-close in one `finally`, which never actually guaranteed the ordering since `Completer.complete` schedules listeners onto a later microtask) — this is a real behavior change; fixed `compress_test.dart`'s pre-existing `await job.result; await subscription.asFuture()` pattern, which would otherwise hang forever under the new ordering. `JobRegistry.LiveJob` now holds a `cancelTransformer: () -> Unit` callback instead of a raw `androidx.media3.transformer.Transformer` reference, since `Transformer`'s own static initializer cannot run (construct OR mock) in a plain JVM unit test — this is what makes `CompressVideoPluginTest`'s new detach cases possible at all. `CompressVideoPlugin.onDetachedFromEngine` now cancels every live job BEFORE clearing host API registrations (was reversed, contradicting T-02-25). `ErrorMapping.kt` extracts the full 22-code mapping into a pure, JVM-testable object; `TransformerEngine.mapExportException` now always folds the numeric `ExportException.errorCode` into the failure message text, since `CompressVideoException.platformDetail` is only populated Dart-side for the `unknown` reason. Compressing `truncated_mdat.mp4` observed `errorCode=2000` (`ERROR_CODE_IO_UNSPECIFIED`), agreeing with the mapping. See 02-06-SUMMARY.md Deviations.
 
 ### Pending Todos
 
@@ -87,6 +88,7 @@ Recent decisions affecting current work:
 - [02-03]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the `targetSizeMb` 1.0/2.0 emulator cases against its hardware encoder and tighten `compress_test.dart`'s ±35% tolerance comment (or confirm ±15% only holds on hardware and adjust `CompressOptions.targetSizeMb`'s dartdoc accordingly).
 - [02-04]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the transmux speed-ratio test against its hardware encoder to confirm the <30% elapsed-time claim (CORE-06) holds outside the emulator's software encoder, and re-verify `targetSizeMb`'s now ±55% emulator tolerance against hardware CBR delivery. Also: `doc/TOOLCHAIN.md` still lists `androidx.media3` as 1.11.0; the actual pin in `android/build.gradle.kts` is 1.11.1 — reconcile in a later plan. Also: no corpus clip demonstrates an observable `transmuxed:true` result via the no-audio-track branch specifically (see 02-04-SUMMARY.md coverage note); consider adding one if a later plan needs that proof.
 - [02-05]: AUDO-01's non-AAC-source passthrough-fallback path has no automated end-to-end proof (no corpus fixture has non-AAC audio) — the real phone clips requested in QUESTIONS.md #4 may incidentally provide one; otherwise a future plan should add a synthetic non-AAC-audio fixture. ORNT-01's backstop truth (equal-width/height source, rotation 0) also has no corpus fixture (no square clip exists) and is unverified.
+- [02-06]: The pre-flight free-space check (StatFs against 1.2x predicted output) has no functional trigger test — there is no practical way to make the shared danserver emulator's filesystem genuinely run out of space in an automated test; a future plan could add a Robolectric-based unit test around a small extracted comparison function if tighter proof is wanted. CORE-04's flagged assumption (A1: `DECODER_INIT_FAILED`/`DECODING_FORMAT_UNSUPPORTED` split; A2: the ENOSPC message match) remains unresolved — the one real failure observed (`truncated_mdat.mp4` → `ERROR_CODE_IO_UNSPECIFIED`) did not exercise either ambiguous branch; no corpus fixture reliably produces a genuine decoder-unavailable or decoding-format-unsupported failure.
 
 ### Blockers/Concerns
 
@@ -111,6 +113,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16
-Stopped at: Completed 02-05-PLAN.md — all three audio modes, ClippingConfiguration-based trim, pinned video-effects order (EffectOrderTest.kt), and an upright/no-letterbox proof via pixel sampling of the compressed output. AUDO-01, AUDO-02 and ORNT-01 checked complete in REQUIREMENTS.md; two flagged assumptions (AUDO-01's non-AAC fallback, ORNT-01's square-frame backstop) carried forward unresolved for the verifier. Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
-Resume file: None — next is 02-06-PLAN.md
+Last session: 2026-09-15
+Stopped at: Completed 02-06-PLAN.md — per-job progress hardening, cancel implemented end to end, complete 22-code error mapping (ErrorMapping.kt), and a pre-flight free-space check. Compressing truncated_mdat.mp4 observed ExportException.errorCode=2000, agreeing with the mapping. JOBS-01, JOBS-02, CORE-03 and CORE-04 checked complete in REQUIREMENTS.md; two flagged items (the pre-flight check's untested trigger path, CORE-04's DECODER_INIT_FAILED/DECODING_FORMAT_UNSUPPORTED split) carried forward unresolved for the verifier. Phase 1's 01-06 remains code-complete and committed; CI verification halted on GitHub Actions billing block (QUESTIONS.md #6)
+Resume file: None — next is 02-07-PLAN.md

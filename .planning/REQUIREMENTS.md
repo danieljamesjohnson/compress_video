@@ -11,8 +11,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **CORE-01**: App can compress a local video file to an H.264 + AAC MP4 with a single call, on Android, iOS and macOS, with the same Dart API and the same observable behaviour on each
 - [x] **CORE-02**: Caller can choose output size by a named preset (documented per platform: what resolution and bitrate it really produces) or by an explicit target: max long side in pixels, video bitrate, or target file size in MB
-- [ ] **CORE-03**: Caller receives a typed result: output path, bytes before and after, width, height, duration, codec used, whether the video track was transmuxed, whether HDR was tone-mapped, elapsed time; the call never resolves to `null`
-- [ ] **CORE-04**: Failures surface as typed errors with a reason (unsupported input, encoder unavailable, out of space, interrupted, cancelled); no failure can crash the host app, and no failure is swallowed into a debug print
+- [x] **CORE-03**: Caller receives a typed result: output path, bytes before and after, width, height, duration, codec used, whether the video track was transmuxed, whether HDR was tone-mapped, elapsed time; the call never resolves to `null`
+- [x] **CORE-04**: Failures surface as typed errors with a reason (unsupported input, encoder unavailable, out of space, interrupted, cancelled); no failure can crash the host app, and no failure is swallowed into a debug print
 - [x] **CORE-05**: Output is never larger than the input: when the encode would be bigger, the plugin returns the original bytes (copied to the output path) and the result says so
 - [x] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
 - [ ] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
@@ -34,8 +34,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Jobs, progress and cancellation
 
-- [ ] **JOBS-01**: Each compression is a job with its own progress stream (0–100) and completion future; there is no global progress stream shared across calls
-- [ ] **JOBS-02**: Caller can cancel a job; the job resolves with a distinct Cancelled outcome, and any partial output file is deleted
+- [x] **JOBS-01**: Each compression is a job with its own progress stream (0–100) and completion future; there is no global progress stream shared across calls
+- [x] **JOBS-02**: Caller can cancel a job; the job resolves with a distinct Cancelled outcome, and any partial output file is deleted
 - [ ] **JOBS-03**: Caller can submit several jobs; they run sequentially by default with an optional concurrency limit, and each reports its own progress
 - [ ] **JOBS-04**: The API can be called from a background isolate
 - [ ] **JOBS-05**: On Android, caller can opt into a `mediaProcessing` foreground service so a job survives the app going to the background; on iOS the plugin documents that exports are interrupted on suspension and surfaces that case as a retryable Interrupted error
@@ -102,8 +102,8 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 |-------------|-------|--------|
 | CORE-01 | Phase 3 | Pending |
 | CORE-02 | Phase 2 | Complete |
-| CORE-03 | Phase 2 | Pending |
-| CORE-04 | Phase 2 | Pending |
+| CORE-03 | Phase 2 | Complete |
+| CORE-04 | Phase 2 | Complete |
 | CORE-05 | Phase 2 | Complete |
 | CORE-06 | Phase 2 | Complete |
 | CORE-07 | Phase 3 | Pending |
@@ -116,8 +116,8 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | AUDO-01 | Phase 2 | Complete |
 | AUDO-02 | Phase 2 | Complete |
 | AUDO-03 | Phase 4 | Pending |
-| JOBS-01 | Phase 2 | Pending |
-| JOBS-02 | Phase 2 | Pending |
+| JOBS-01 | Phase 2 | Complete |
+| JOBS-02 | Phase 2 | Complete |
 | JOBS-03 | Phase 5 | Pending |
 | JOBS-04 | Phase 5 | Pending |
 | JOBS-05 | Phase 5 | Pending |
