@@ -89,7 +89,7 @@ Plans:
   4. Two jobs started together each have their own 0-100 progress stream and completion future. Cancelling one resolves it as Cancelled and deletes its partial file. Failures (unsupported input, out of space) arrive as typed errors and never crash the app.
   5. A pre-flight estimate for a clip and options returns output size and duration without encoding, within the documented tolerance of the real result. Output lands in the chosen directory/name or a unique cache name, and `clearCache()` deletes only the plugin's files. The Android build uses Media3 Transformer, minSdk 23 and compileSdk 36, contains no `.so` files, and builds on the current stable AGP/Kotlin.
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -118,7 +118,7 @@ Plans:
 
 **Wave 7** *(blocked on Waves 4 and 6 completion)*
 
-- [ ] 02-07-PLAN.md — Pre-flight estimate sharing one resolver with the real job, output placement and a bounded `clearCache()`, the APK native-library and 16 KB proof, and CI wiring
+- [x] 02-07-PLAN.md — Pre-flight estimate sharing one resolver with the real job, output placement and a bounded `clearCache()`, the APK native-library and 16 KB proof, and CI wiring
 
 **Research**: Not flagged. Media3 Transformer, `VideoEncoderSettings`, `Presentation` and `ClippingConfiguration` are covered in research/STACK.md. The preset table (maxLongSide × bitrate) is a measurement task on the corpus, not a research task. A phase research pass ran anyway and produced `02-RESEARCH.md`, which pinned media3 1.11.1 live, verified the Transformer main-Looper contract, and found every existing corpus clip too low-bitrate to exercise a real encode — the reason plan 02-01 exists.
 **Notes**: This phase sets the observable behaviour that Phase 3 must match. Write the README preset constants from measured sizes here so later docs are generated, not written from memory. The gate for this phase is the local emulator: GitHub Actions is refused on an account billing limit (QUESTIONS.md #6), so CI wiring is written and committed but a refused run is recorded as an external blocker, never as a task failure.
@@ -197,7 +197,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
-| 2. Android Compression on Media3 | 6/7 | In Progress|  |
+| 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 0/TBD | Not started | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |

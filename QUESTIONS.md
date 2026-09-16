@@ -36,6 +36,18 @@ comment (or confirm ±15% only holds on hardware, and adjust `CompressOptions.ta
 dartdoc accordingly) — see `02-03-SUMMARY.md` Deviations for the full writeup. Not blocking;
 grouped with this phone's other hardware-encoder verification work.
 
+**Added 2026-09-15 (02-07):** the same software-encoder CBR characteristic affects
+`CompressEstimate.outputBytes`'s pre-flight accuracy, not just `targetSizeMb`. Measured live
+against all four presets on the high-bitrate corpus clip: the real encode diverged from the
+formula's designed plus-or-minus 15 percent tolerance by 7.9 to 67.0 percent (p360 7.9%, p480
+34.2%, p720 67.0%, p1080 43.0% — not monotonic with resolution). `SizeGuardTest.kt` proves the
+underlying arithmetic is exact; this is real rate-control behavior, the same class of finding as
+the `targetSizeMb` note above. `example/integration_test/compress_output_test.dart` uses a
+documented ±75% emulator tolerance for this reason, and `CompressEstimate.outputBytes`'s dartdoc
+carries the same caveat. When a physical phone is available, re-run the estimate-accuracy cases
+against its hardware encoder and tighten (or confirm) the tolerance — see `02-07-SUMMARY.md`
+Deviations. Not blocking; grouped with this phone's other hardware-encoder verification work.
+
 ## 4. Real phone clips for the test corpus
 
 Phase 1 ships an ffmpeg-generated corpus that mirrors phone structure (rotation display matrix, AAC, no-audio, already-small). Real clips are still needed for the rotation/HDR checks that every competitor got wrong. When convenient, get these onto danserver (the feedback drop at http://danserver/drop, or `scp` into `~/CodeProjects/compress-video/corpus/incoming/`):

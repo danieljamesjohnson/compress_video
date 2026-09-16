@@ -17,7 +17,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
 - [ ] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
 - [x] **CORE-08**: Caller can cap the output frame rate (default cap 30 fps); resolution and frame rate are never upscaled
-- [ ] **CORE-09**: Caller can choose the output directory and file name; the default is a unique name in the app cache directory, and a `clearCache()` removes only files the plugin created
+- [x] **CORE-09**: Caller can choose the output directory and file name; the default is a unique name in the app cache directory, and a `clearCache()` removes only files the plugin created
 
 ### Orientation, codecs and HDR
 
@@ -44,11 +44,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **INFO-01**: Caller can read media info for a file: duration, rotation-corrected width and height, rotation, file size, video codec, bitrate, frame rate, whether it has audio, whether it is HDR
 - [ ] **INFO-02**: Caller can get a thumbnail at a position given in milliseconds (the same unit on every platform), as bytes or as a file with a unique name, rotation-correct, with JPEG quality and maximum dimension options
-- [ ] **INFO-03**: Caller can ask for an estimate of output size and duration for a given input and options without running the encode
+- [x] **INFO-03**: Caller can ask for an estimate of output size and duration for a given input and options without running the encode
 
 ### Build, platforms and verification
 
-- [ ] **BULD-01**: Android implementation uses Media3 Transformer with minSdk 23, builds on the current stable AGP and Kotlin with the AGP-9 built-in Kotlin path, targets compileSdk 36, and contains no native `.so` code (16 KB page-size safe by construction)
+- [x] **BULD-01**: Android implementation uses Media3 Transformer with minSdk 23, builds on the current stable AGP and Kotlin with the AGP-9 built-in Kotlin path, targets compileSdk 36, and contains no native `.so` code (16 KB page-size safe by construction)
 - [ ] **BULD-02**: iOS (13+) and macOS (11+) implementations share one Swift core, and the package installs through both CocoaPods and Swift Package Manager
 - [ ] **BULD-03**: Dart and native sides communicate through Pigeon-generated typed messages; every quantity has one unit documented in the Dart API
 - [ ] **BULD-04**: The example app picks a video, compresses it with chosen options, shows live progress, cancels, and plays the result, on all three platforms
@@ -108,7 +108,7 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | CORE-06 | Phase 2 | Complete |
 | CORE-07 | Phase 3 | Pending |
 | CORE-08 | Phase 2 | Complete |
-| CORE-09 | Phase 2 | Pending |
+| CORE-09 | Phase 2 | Complete |
 | ORNT-01 | Phase 2 | Complete |
 | CDEC-01 | Phase 4 | Pending |
 | CDEC-02 | Phase 4 | Pending |
@@ -123,8 +123,8 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | JOBS-05 | Phase 5 | Pending |
 | INFO-01 | Phase 1 | Pending |
 | INFO-02 | Phase 1 | Pending |
-| INFO-03 | Phase 2 | Pending |
-| BULD-01 | Phase 2 | Pending |
+| INFO-03 | Phase 2 | Complete |
+| BULD-01 | Phase 2 | Complete |
 | BULD-02 | Phase 3 | Pending |
 | BULD-03 | Phase 1 | Pending |
 | BULD-04 | Phase 3 | Pending |
