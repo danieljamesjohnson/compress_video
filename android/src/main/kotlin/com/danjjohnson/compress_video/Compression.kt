@@ -93,9 +93,19 @@ class Compression(
         )
     }
 
-    /** Not yet implemented on Android -- lands later in plan 02-07. */
+    /**
+     * Deletes every file this plugin has written to its own cache directory, except a file a
+     * still-running job is currently writing to (T-02-28) -- succeeds as a no-op when the
+     * directory is empty or does not exist yet (D-15).
+     *
+     * Requires the main Looper: [JobRegistry.liveTempFilePaths] reads [JobRegistry]'s
+     * main-thread-confined job map with no lock of its own.
+     */
     override suspend fun clearCache() {
-        throw CompressVideoError("unsupportedInput", "clearCache() is implemented in plan 02-07")
+        requireMainLooper("clearCache")
+        val cacheDir = PluginFiles.cacheSubDir(context)
+        val skip = JobRegistry.liveTempFilePaths()
+        PluginFiles.sweep(cacheDir, skip)
     }
 
     /**

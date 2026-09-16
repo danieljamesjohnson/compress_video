@@ -1,8 +1,11 @@
-// Integration test for CompressVideo.estimate -- 02-07-PLAN.md task 1. Every case proves the
-// prediction can never disagree with the real job, because both are resolved by the SAME native
-// function (SizeGuard.kt, via TransformerEngine.resolvePlan) -- exactly the "prove what actually
-// came out of it" philosophy this phase applies throughout (02-05-PLAN.md task 2, 02-06-PLAN.md
-// task 3). Output placement and clearCache() are added by task 2.
+// Integration test for CompressVideo.estimate, output placement and clearCache -- the phase's
+// closing plan (02-07-PLAN.md). The estimate group proves a caller can ask what a compression
+// will produce, and that the prediction can never disagree with the real job, because both are
+// resolved by the SAME native function (SizeGuard.kt, via TransformerEngine.resolvePlan) --
+// exactly the "prove what actually came out of it" philosophy this phase applies throughout
+// (02-05-PLAN.md task 2, 02-06-PLAN.md task 3). The placement/clearCache group proves where this
+// plugin writes and what clearCache() is, and is not, allowed to delete.
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -42,6 +45,29 @@ Future<String> _copySmall480pClip(String suffix) => _copyAssetToTempFile(
   'assets/corpus/small_480p.mp4',
   'estimate_small480p_${suffix}_${DateTime.now().microsecondsSinceEpoch}.mp4',
 );
+
+/// Starts compressing [path] and completes once the job's progress stream has emitted at least
+/// one value strictly below 100 -- copied from compress_jobs_test.dart's own helper
+/// (02-06-PLAN.md), reused here so the clearCache()-mid-flight case genuinely lands mid-job.
+Future<void> _awaitProgressBelow100(CompressJob job) async {
+  if (job.isCancelled) return;
+  final Completer<void> sawProgressBelow100 = Completer<void>();
+  late final StreamSubscription<double> subscription;
+  subscription = job.progress.listen(
+    (double value) {
+      if (value < 100 && !sawProgressBelow100.isCompleted) {
+        sawProgressBelow100.complete();
+      }
+    },
+    onDone: () {
+      if (!sawProgressBelow100.isCompleted) {
+        sawProgressBelow100.complete();
+      }
+    },
+  );
+  await sawProgressBelow100.future.timeout(const Duration(seconds: 30));
+  await subscription.cancel();
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -251,4 +277,227 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+
+  group('output placement (CORE-09, D-15)', () {
+    testWidgets(
+      'the default output path lies inside the plugin cache subdirectory, named after the '
+      'job id',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip('placement_default');
+        final CompressJob job = compressVideo.compress(path);
+        final CompressResult result = await job.result;
+
+        expect(
+          result.outputPath,
+          anyOf(
+            contains('/cache/compress_video/'), // Android's context.cacheDir
+            contains('/Caches/compress_video/'), // Apple's .cachesDirectory
+          ),
+        );
+        final String fileName = result.outputPath.split('/').last;
+        expect(fileName, '${job.id}.mp4');
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
+    testWidgets(
+      "an explicit outputPath under the test's own temporary directory is honoured exactly, "
+      'the returned path resolving to the same file',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip('placement_explicit');
+        final Directory outputDir = await Directory.systemTemp.createTemp(
+          'compress_video_output_explicit_',
+        );
+        final String outputPath = '${outputDir.path}/exact_name.mp4';
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+        final CompressResult result = await job.result;
+
+        expect(
+          File(result.outputPath).resolveSymbolicLinksSync(),
+          File(outputPath).resolveSymbolicLinksSync(),
+          reason:
+              'the returned path must resolve to exactly the requested outputPath',
+        );
+        expect(File(outputPath).existsSync(), isTrue);
+        expect(File(outputPath).lengthSync(), result.outputBytes);
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
+    testWidgets('an explicit outputPath with non-ASCII characters in its filename is honoured '
+        'byte-for-byte', (WidgetTester tester) async {
+      final String path = await _copyHiBitrateClip('placement_nonascii');
+      final Directory outputDir = await Directory.systemTemp.createTemp(
+        'compress_video_output_nonascii_',
+      );
+      final String outputPath = '${outputDir.path}/vidéo_日本語_output.mp4';
+
+      final CompressJob job = compressVideo.compress(
+        path,
+        options: CompressOptions(outputPath: outputPath),
+      );
+      final CompressResult result = await job.result;
+
+      // Not a literal string comparison of the FULL path: Android's own `/data/data/<pkg>`
+      // and `/data/user/0/<pkg>` name the identical directory via a bind-mount alias, and
+      // `File.canonicalFile` (the native side's own canonicalisation, T-02-27) resolves
+      // `Directory.systemTemp`'s `/data/data/...` form to its `/data/user/0/...` canonical
+      // form -- a real platform quirk, not a bug in preserving the filename. The meaningful
+      // proof for non-ASCII handling is the FILENAME itself: byte-for-byte identical, with
+      // no case folding, Unicode normalisation or extension rewriting.
+      expect(
+        File(result.outputPath).resolveSymbolicLinksSync(),
+        File(outputPath).resolveSymbolicLinksSync(),
+        reason:
+            'the returned path must resolve to exactly the requested outputPath',
+      );
+      expect(
+        result.outputPath.split('/').last,
+        outputPath.split('/').last,
+        reason: 'the filename itself must be preserved byte-for-byte',
+      );
+      expect(File(outputPath).existsSync(), isTrue);
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    testWidgets(
+      'an explicit outputPath whose parent directory does not exist fails with reason io '
+      'and leaves no file behind',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip(
+          'placement_missing_parent',
+        );
+        final Directory tempDir = await Directory.systemTemp.createTemp(
+          'compress_video_output_missing_parent_',
+        );
+        final String outputPath = '${tempDir.path}/does_not_exist_dir/out.mp4';
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+
+        await expectLater(
+          job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.io,
+            ),
+          ),
+        );
+        expect(File(outputPath).existsSync(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
+  });
+
+  group('clearCache() (CORE-09, D-15, T-02-26, T-02-28)', () {
+    testWidgets(
+      'clearCache() on an empty or absent cache succeeds as a no-op',
+      (WidgetTester tester) async {
+        await compressVideo.clearCache();
+        await compressVideo.clearCache();
+      },
+    );
+
+    testWidgets(
+      'clearCache() deletes a compression output and a thumbnail this plugin wrote, and '
+      'leaves a control file in the app cache root and one in a sibling subdirectory '
+      'untouched -- asserted in one test body',
+      (WidgetTester tester) async {
+        final String compressInputPath = await _copyHiBitrateClip(
+          'sweep_compress_input',
+        );
+        final CompressJob job = compressVideo.compress(compressInputPath);
+        final CompressResult result = await job.result;
+        final File compressionOutputFile = File(result.outputPath);
+        expect(compressionOutputFile.existsSync(), isTrue);
+
+        final String thumbInputPath = await _copyHiBitrateClip(
+          'sweep_thumb_input',
+        );
+        final String thumbnailPath = await compressVideo.getThumbnailFile(
+          thumbInputPath,
+          positionMs: 0,
+        );
+        final File thumbnailFile = File(thumbnailPath);
+        expect(thumbnailFile.existsSync(), isTrue);
+
+        // Derived from the plugin's own default output path (<cacheDir>/compress_video/
+        // <jobId>.mp4) rather than via path_provider, which this package does not otherwise
+        // depend on.
+        final Directory pluginCacheDir = compressionOutputFile.parent;
+        final Directory appCacheDir = pluginCacheDir.parent;
+
+        final File controlFileInAppCacheRoot = File(
+          '${appCacheDir.path}/sibling_control_file.txt',
+        );
+        await controlFileInAppCacheRoot.writeAsString('control');
+        final Directory siblingSubDir = Directory(
+          '${appCacheDir.path}/some_other_plugin_cache',
+        );
+        await siblingSubDir.create(recursive: true);
+        final File controlFileInSiblingSubDir = File(
+          '${siblingSubDir.path}/sibling_control_file.txt',
+        );
+        await controlFileInSiblingSubDir.writeAsString('control');
+
+        try {
+          await compressVideo.clearCache();
+
+          expect(
+            compressionOutputFile.existsSync(),
+            isFalse,
+            reason: 'clearCache() must delete the compression output it owns',
+          );
+          expect(
+            thumbnailFile.existsSync(),
+            isFalse,
+            reason: 'clearCache() must delete the thumbnail it owns too (D-15)',
+          );
+          expect(
+            controlFileInAppCacheRoot.existsSync(),
+            isTrue,
+            reason:
+                'a file directly in the app cache root, outside compress_video/, must survive',
+          );
+          expect(
+            controlFileInSiblingSubDir.existsSync(),
+            isTrue,
+            reason:
+                "a file in a sibling subdirectory must survive -- it isn't this plugin's",
+          );
+        } finally {
+          // Never leak state outside the plugin's own cache directory into a later test run
+          // on the same emulator.
+          await controlFileInAppCacheRoot.delete();
+          await siblingSubDir.delete(recursive: true);
+        }
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
+    testWidgets(
+      "clearCache() called mid-flight never deletes the running job's live output; the job "
+      'still completes with a readable file at its reported outputPath',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip('sweep_concurrency');
+        final CompressJob job = compressVideo.compress(path);
+
+        await _awaitProgressBelow100(job);
+        await compressVideo.clearCache();
+
+        final CompressResult result = await job.result;
+        final File outputFile = File(result.outputPath);
+        expect(outputFile.existsSync(), isTrue);
+        expect(outputFile.lengthSync(), result.outputBytes);
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+  });
 }

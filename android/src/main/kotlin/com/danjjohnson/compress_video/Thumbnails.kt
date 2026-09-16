@@ -176,11 +176,10 @@ class Thumbnails(
             if (outputPath != null) {
                 Arguments.requireWritableOutputParent(outputPath)
             } else {
-                val cacheSubDir = File(context.cacheDir, "compress_video")
-                if (!cacheSubDir.exists() && !cacheSubDir.mkdirs() && !cacheSubDir.exists()) {
-                    throw CompressVideoError("io", "Could not create the thumbnail cache directory")
-                }
-                File(cacheSubDir, uniqueThumbnailFileName())
+                // The plugin's own cache subdirectory -- the SAME helper the compression engine
+                // uses (PluginFiles.kt, plan 02-07), so there is exactly one definition of where
+                // this plugin writes and `clearCache()` reclaims thumbnails too (D-15).
+                File(PluginFiles.cacheSubDir(context), uniqueThumbnailFileName())
             }
 
         val tempFile = File(destinationFile.parentFile, "${destinationFile.name}.tmp-${randomHex(8)}")

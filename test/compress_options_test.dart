@@ -117,6 +117,25 @@ void main() {
       );
     });
 
+    test(
+      'an empty outputPath is rejected, a whitespace-only outputPath is rejected, and '
+      'null (the default) is accepted -- blank is never silently treated as null',
+      () {
+        expect(
+          () => const CompressOptions(outputPath: '').validate(),
+          throwsUnsupportedInput(),
+        );
+        expect(
+          () => const CompressOptions(outputPath: '   ').validate(),
+          throwsUnsupportedInput(),
+        );
+        expect(
+          () => const CompressOptions(outputPath: null).validate(),
+          returnsNormally,
+        );
+      },
+    );
+
     test('a codec other than h264 is rejected', () {
       expect(
         () => const CompressOptions(codec: VideoCodec.hevc).validate(),

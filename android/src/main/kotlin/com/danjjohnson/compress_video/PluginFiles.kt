@@ -53,6 +53,50 @@ object PluginFiles {
         file?.delete()
     }
 
+    /**
+     * Deletes the immediate contents of [cacheDir], except [skipCanonicalPaths] (files a
+     * still-running job owns) and anything whose canonical path resolves outside [cacheDir]'s
+     * own canonical path -- a symbolic link placed inside the directory cannot be used to walk
+     * a delete outside it (T-02-26). A no-op, not an error, when [cacheDir] does not exist.
+     *
+     * A single, bounded [File.listFiles] call over [cacheDir] itself -- never a recursive tree
+     * walk, and never a touch of [cacheDir]'s own parent. A subdirectory placed inside
+     * [cacheDir] is deleted only if [File.delete] can remove it as-is (an empty directory); a
+     * non-empty one is left alone rather than walked into, which this plugin never creates in
+     * the first place.
+     */
+    fun sweep(
+        cacheDir: File,
+        skipCanonicalPaths: Set<String>,
+    ) {
+        val canonicalCacheDir =
+            try {
+                cacheDir.canonicalFile
+            } catch (e: Exception) {
+                return
+            }
+        val entries = cacheDir.listFiles() ?: return
+        val cacheDirPrefix = canonicalCacheDir.path + File.separator
+
+        for (entry in entries) {
+            val canonicalEntry =
+                try {
+                    entry.canonicalFile
+                } catch (e: Exception) {
+                    continue
+                }
+            if (!canonicalEntry.path.startsWith(cacheDirPrefix)) {
+                // Escapes the plugin's own directory (a symbolic link pointing elsewhere) --
+                // never delete something this sweep did not create.
+                continue
+            }
+            if (canonicalEntry.path in skipCanonicalPaths) {
+                continue
+            }
+            entry.delete()
+        }
+    }
+
     private fun randomHex(length: Int): String {
         val bytes = ByteArray((length + 1) / 2)
         random.nextBytes(bytes)

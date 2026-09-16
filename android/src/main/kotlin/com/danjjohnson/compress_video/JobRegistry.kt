@@ -98,4 +98,12 @@ object JobRegistry {
             cancel(jobId)
         }
     }
+
+    /**
+     * Canonical paths of every live job's temp output file -- used by [PluginFiles.sweep] to
+     * skip a file a still-running job is currently writing to, even when `clearCache()` runs
+     * mid-job (T-02-28). Must be called on the main thread, exactly like every other method
+     * here.
+     */
+    fun liveTempFilePaths(): Set<String> = jobs.values.map { it.tempFile.canonicalPath }.toSet()
 }

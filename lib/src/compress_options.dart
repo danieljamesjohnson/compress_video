@@ -233,6 +233,15 @@ class CompressOptions {
 
   /// Destination path for the compressed output, or `null` to use the plugin's own cache
   /// directory with a name derived from the job id.
+  ///
+  /// When given, the path is used exactly as provided -- apart from canonical resolution (the
+  /// native side resolves `.`/`..` segments and symbolic links before writing) -- with no case
+  /// folding, no Unicode normalisation and no extension rewriting, so a path whose filename
+  /// contains non-ASCII characters is honoured byte-for-byte and the value this call returns
+  /// names that exact file. An empty or whitespace-only string is rejected by [validate] with
+  /// [CompressVideoErrorReason.unsupportedInput] rather than silently treated the same as
+  /// `null`; a parent directory that does not already exist, or is not writable, fails with
+  /// reason [CompressVideoErrorReason.io] before any bytes are written.
   final String? outputPath;
 
   /// Requested output video codec. Reserved: only [VideoCodec.h264] is accepted in this phase;

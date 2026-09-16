@@ -200,11 +200,17 @@ class CompressVideo {
     }
   }
 
-  /// Deletes every file this plugin has written to its own cache directory.
+  /// Deletes every file this plugin has written to its own cache directory -- compression
+  /// outputs and thumbnails alike, since both are written through the same shared cache-
+  /// directory helper natively.
   ///
-  /// Not yet implemented natively on Android -- lands later in plan 02-07; until then this
-  /// throws a [CompressVideoException] with reason [CompressVideoErrorReason.unsupportedInput]
-  /// naming that plan, rather than being absent from the Dart API.
+  /// Never touches anything outside that one directory: a file placed directly in the app's
+  /// own wider cache directory, or in any other subdirectory of it, is left alone. A file a
+  /// still-running [compress] job is currently writing to is also left alone -- calling this
+  /// while a job is in flight never corrupts it; the job still completes normally and its
+  /// reported [CompressResult.outputPath] is still readable afterwards. Succeeds as a no-op
+  /// when the cache directory is empty or does not exist yet -- never an error for "nothing to
+  /// delete".
   Future<void> clearCache() async {
     final messages.CompressHostApi api = messages.CompressHostApi(
       binaryMessenger: _binaryMessenger,
