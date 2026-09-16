@@ -342,7 +342,7 @@ class TransformerEngine(
         JobRegistry.register(
             jobId,
             JobRegistry.LiveJob(
-                transformer = transformer,
+                cancelTransformer = { transformer.cancel() },
                 tempFile = tempFile,
                 mainHandler = mainHandler,
                 progressRunnable = progressRunnable,

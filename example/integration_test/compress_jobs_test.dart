@@ -32,6 +32,44 @@ Future<String> _copyHiBitrateClip(String suffix) => _copyAssetToTempFile(
   'jobs_hibitrate_${suffix}_${DateTime.now().microsecondsSinceEpoch}.mp4',
 );
 
+/// Returns a path inside a fresh temporary directory that no file has ever been written to.
+/// Cancellation and failure cases pass this as `CompressOptions.outputPath` so the exact
+/// destination is known up front and "no file exists here" can be asserted deterministically,
+/// without needing to know the plugin's own private cache-directory naming scheme.
+Future<String> _freshOutputPath(String fileName) async {
+  final Directory tempDir = await Directory.systemTemp.createTemp(
+    'compress_video_jobs_test_output_',
+  );
+  return '${tempDir.path}/$fileName';
+}
+
+/// Starts compressing [path] and completes once the job's progress stream has emitted at least
+/// one value strictly below 100 -- proof a cancel issued right after this returns lands
+/// genuinely mid-flight, not on an already-finished job.
+Future<void> _awaitProgressBelow100(CompressJob job) async {
+  if (job.isCancelled) return;
+  final Completer<void> sawProgressBelow100 = Completer<void>();
+  late final StreamSubscription<double> subscription;
+  subscription = job.progress.listen(
+    (double value) {
+      if (value < 100 && !sawProgressBelow100.isCompleted) {
+        sawProgressBelow100.complete();
+      }
+    },
+    onDone: () {
+      if (!sawProgressBelow100.isCompleted) {
+        // The job finished (or failed) before ever reporting a value below 100 -- extremely
+        // unlikely for the high-bitrate clip this suite uses, but complete rather than hang so a
+        // genuine regression surfaces as a failed "strictly below 100" assertion downstream,
+        // not a timeout with no diagnostic.
+        sawProgressBelow100.complete();
+      }
+    },
+  );
+  await sawProgressBelow100.future.timeout(const Duration(seconds: 30));
+  await subscription.cancel();
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -86,12 +124,14 @@ void main() {
         expect(
           progressValues.where((double v) => v == 100.0).length,
           1,
-          reason: '100 must appear exactly once, not repeated on every trailing poll',
+          reason:
+              '100 must appear exactly once, not repeated on every trailing poll',
         );
         expect(
           streamAlreadyDoneWhenResultResolved,
           isTrue,
-          reason: "the job's progress stream must have closed by the time result completed",
+          reason:
+              "the job's progress stream must have closed by the time result completed",
         );
         expect(result.usedOriginal, isFalse);
       },
@@ -152,6 +192,180 @@ void main() {
         expect(resultB.heightPx, 1280);
       },
       timeout: const Timeout(Duration(seconds: 40)),
+    );
+  });
+
+  group('Cancel: typed outcome, closed stream, deleted partial, idempotent', () {
+    testWidgets(
+      'cancelling mid-flight resolves as cancelled with the partial file already gone before '
+      'the future resolves',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip('cancel_midflight');
+        final String outputPath = await _freshOutputPath(
+          'cancel_midflight_output.mp4',
+        );
+        final List<double> progressValues = <double>[];
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+        final StreamSubscription<double> subscription = job.progress.listen(
+          progressValues.add,
+        );
+
+        // Proves the cancel below genuinely lands mid-flight: issued only after a progress
+        // value strictly below 100 was observed, so this case cannot silently degrade into
+        // cancelling an already-finished job.
+        await _awaitProgressBelow100(job);
+        expect(
+          progressValues.any((double v) => v < 100),
+          isTrue,
+          reason: 'must have observed progress below 100 before cancelling',
+        );
+
+        await job.cancel();
+        expect(job.isCancelled, isTrue);
+
+        Object? caughtError;
+        try {
+          await job.result;
+        } catch (e) {
+          caughtError = e;
+        }
+        expect(caughtError, isA<CompressVideoException>());
+        expect(
+          (caughtError as CompressVideoException).reason,
+          CompressVideoErrorReason.cancelled,
+        );
+
+        // Checked AFTER awaiting the result above -- proving the deletion happens before the
+        // future resolves, not merely "eventually".
+        expect(await File(outputPath).exists(), isFalse);
+
+        await expectLater(job.progress, emitsDone);
+        await subscription.cancel();
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+
+    testWidgets('a second cancel() on the same job completes without error and does not change the '
+        'outcome', (WidgetTester tester) async {
+      final String path = await _copyHiBitrateClip('cancel_double');
+      final String outputPath = await _freshOutputPath(
+        'cancel_double_output.mp4',
+      );
+
+      final CompressJob job = compressVideo.compress(
+        path,
+        options: CompressOptions(outputPath: outputPath),
+      );
+      await _awaitProgressBelow100(job);
+
+      // The result-failure expectation is registered IMMEDIATELY, in the same statement as
+      // triggering both cancels -- not after `await`ing something else first. `job.result`'s
+      // completer resolving with an error needs a listener attached promptly or Dart's zone
+      // reports it as an unhandled exception; a `Future` obtained later, after another
+      // multi-step await has already let that error propagate unheard, is too late.
+      final Future<void> resultFailureExpectation = expectLater(
+        job.result,
+        throwsA(
+          isA<CompressVideoException>().having(
+            (CompressVideoException e) => e.reason,
+            'reason',
+            CompressVideoErrorReason.cancelled,
+          ),
+        ),
+      );
+      final List<Future<void>> cancelFutures = <Future<void>>[
+        job.cancel(),
+        job.cancel(),
+      ];
+      await expectLater(Future.wait(cancelFutures), completes);
+      await resultFailureExpectation;
+
+      expect(await File(outputPath).exists(), isFalse);
+    }, timeout: const Timeout(Duration(seconds: 40)));
+
+    testWidgets(
+      'a cancel issued after successful completion is a no-op: the finished output stays in '
+      "place and the result is unchanged",
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip('cancel_after_success');
+        final String outputPath = await _freshOutputPath(
+          'cancel_after_success_output.mp4',
+        );
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: outputPath),
+        );
+        final CompressResult result = await job.result;
+        expect(result.usedOriginal, isFalse);
+        expect(await File(outputPath).exists(), isTrue);
+
+        await job.cancel();
+
+        expect(
+          await File(outputPath).exists(),
+          isTrue,
+          reason: 'a cancel after success must not delete the finished output',
+        );
+        final CompressResult resultAfterCancel = await job.result;
+        // Compared against the FIRST result, not against the raw `outputPath` string this test
+        // constructed -- the native side canonicalises the path (e.g. Android's `/data/user/0`
+        // symlink resolves to `/data/data`), so `result.outputPath` legitimately differs from
+        // the caller-supplied string even on the very first, successful call.
+        expect(resultAfterCancel, result);
+        expect(resultAfterCancel.usedOriginal, isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+
+    testWidgets(
+      'cancelling one of three jobs leaves the other two to complete normally, with only the '
+      "cancelled job's partial file gone",
+      (WidgetTester tester) async {
+        final String pathSurvivorA = await _copyHiBitrateClip('three_a');
+        final String pathSurvivorB = await _copyHiBitrateClip('three_b');
+        final String pathCancelled = await _copyHiBitrateClip('three_c');
+        final String outputPathCancelled = await _freshOutputPath(
+          'three_c_output.mp4',
+        );
+
+        final CompressJob jobA = compressVideo.compress(
+          pathSurvivorA,
+          options: const CompressOptions(preset: CompressPreset.p360),
+        );
+        final CompressJob jobB = compressVideo.compress(
+          pathSurvivorB,
+          options: const CompressOptions(preset: CompressPreset.p720),
+        );
+        final CompressJob jobC = compressVideo.compress(
+          pathCancelled,
+          options: CompressOptions(outputPath: outputPathCancelled),
+        );
+
+        await _awaitProgressBelow100(jobC);
+        await jobC.cancel();
+        // Registered immediately after cancelling, before awaiting jobA/jobB below -- those two
+        // awaits can each take several seconds, long enough for jobC.result's completer (which
+        // resolves independently, shortly after the cancel call) to be treated as an unhandled
+        // async error by Dart's zone if nothing had attached a listener to it yet.
+        final Future<void> jobCFailureExpectation = expectLater(
+          jobC.result,
+          throwsA(isA<CompressVideoException>()),
+        );
+
+        final CompressResult resultA = await jobA.result;
+        final CompressResult resultB = await jobB.result;
+        await jobCFailureExpectation;
+
+        expect(await File(resultA.outputPath).exists(), isTrue);
+        expect(await File(resultB.outputPath).exists(), isTrue);
+        expect(await File(outputPathCancelled).exists(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
     );
   });
 }

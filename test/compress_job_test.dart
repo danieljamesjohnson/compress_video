@@ -98,18 +98,19 @@ void main() {
   });
 
   group('CompressVideoFlutterApiImpl progress routing', () {
-    test('a progress event addressed to an unknown id is dropped without throwing', () {
-      _installHangingStartCompressHandler();
-      compressVideo.compress('/tmp/a.mp4');
+    test(
+      'a progress event addressed to an unknown id is dropped without throwing',
+      () {
+        _installHangingStartCompressHandler();
+        compressVideo.compress('/tmp/a.mp4');
 
-      expect(
-        () => CompressVideoFlutterApiImpl().onProgress(
-          'no-such-job-id',
-          42.0,
-        ),
-        returnsNormally,
-      );
-    });
+        expect(
+          () =>
+              CompressVideoFlutterApiImpl().onProgress('no-such-job-id', 42.0),
+          returnsNormally,
+        );
+      },
+    );
 
     test(
       "an event addressed to a known id reaches only that job's stream, never a second job's",
@@ -195,76 +196,91 @@ void main() {
   });
 
   group('CompressJob controller closed exactly once per terminal path', () {
-    test('success: the progress stream closes exactly once and stays closed', () async {
-      _installSucceedingStartCompressHandler(_fakeResultMessage());
-      final CompressJob job = compressVideo.compress('/tmp/a.mp4');
-      await job.result;
+    test(
+      'success: the progress stream closes exactly once and stays closed',
+      () async {
+        _installSucceedingStartCompressHandler(_fakeResultMessage());
+        final CompressJob job = compressVideo.compress('/tmp/a.mp4');
+        await job.result;
 
-      // Two independent late listeners must both observe an already-closed stream -- proof
-      // there is exactly one controller and it was closed once, not left half-open.
-      await expectLater(job.progress, emitsDone);
-      await expectLater(job.progress, emitsDone);
-    });
+        // Two independent late listeners must both observe an already-closed stream -- proof
+        // there is exactly one controller and it was closed once, not left half-open.
+        await expectLater(job.progress, emitsDone);
+        await expectLater(job.progress, emitsDone);
+      },
+    );
 
-    test('failure: the progress stream closes exactly once and stays closed', () async {
-      _installFailingStartCompressHandler('unsupportedInput');
-      final CompressJob job = compressVideo.compress('/tmp/a.mp4');
-      await expectLater(() => job.result, throwsA(isA<CompressVideoException>()));
+    test(
+      'failure: the progress stream closes exactly once and stays closed',
+      () async {
+        _installFailingStartCompressHandler('unsupportedInput');
+        final CompressJob job = compressVideo.compress('/tmp/a.mp4');
+        await expectLater(
+          () => job.result,
+          throwsA(isA<CompressVideoException>()),
+        );
 
-      await expectLater(job.progress, emitsDone);
-      await expectLater(job.progress, emitsDone);
-    });
+        await expectLater(job.progress, emitsDone);
+        await expectLater(job.progress, emitsDone);
+      },
+    );
 
-    test('cancellation: the progress stream closes exactly once and result fails as cancelled', () async {
-      const String cancelChannelName =
-          'dev.flutter.pigeon.compress_video.CompressHostApi.cancel';
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMessageHandler(cancelChannelName, (ByteData? message) async {
-            return _codec.encodeMessage(<Object?>[null]);
-          });
-      addTearDown(() {
+    test(
+      'cancellation: the progress stream closes exactly once and result fails as cancelled',
+      () async {
+        const String cancelChannelName =
+            'dev.flutter.pigeon.compress_video.CompressHostApi.cancel';
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMessageHandler(cancelChannelName, null);
-      });
+            .setMockMessageHandler(cancelChannelName, (
+              ByteData? message,
+            ) async {
+              return _codec.encodeMessage(<Object?>[null]);
+            });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMessageHandler(cancelChannelName, null);
+        });
 
-      // The mocked startCompress reply is held open until this test decides the "native" side
-      // has finished cancelling -- exactly mirroring how the real platform call stays
-      // in-flight until JobRegistry.cancel resolves it.
-      final Completer<ByteData?> pendingStartCompressReply = Completer<ByteData?>();
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMessageHandler(_startCompressChannelName, (
-            ByteData? message,
-          ) async {
-            return pendingStartCompressReply.future;
-          });
+        // The mocked startCompress reply is held open until this test decides the "native" side
+        // has finished cancelling -- exactly mirroring how the real platform call stays
+        // in-flight until JobRegistry.cancel resolves it.
+        final Completer<ByteData?> pendingStartCompressReply =
+            Completer<ByteData?>();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMessageHandler(_startCompressChannelName, (
+              ByteData? message,
+            ) async {
+              return pendingStartCompressReply.future;
+            });
 
-      final CompressJob job = compressVideo.compress('/tmp/a.mp4');
-      await job.cancel();
-      expect(job.isCancelled, isTrue);
+        final CompressJob job = compressVideo.compress('/tmp/a.mp4');
+        await job.cancel();
+        expect(job.isCancelled, isTrue);
 
-      // Simulate native's own cancellation reply arriving on the still-pending startCompress
-      // call, exactly as TransformerEngine.compress does when JobRegistry.cancel resolves it.
-      pendingStartCompressReply.complete(
-        _codec.encodeMessage(<Object?>[
-          'cancelled',
-          'The compression job was cancelled',
-          null,
-        ]),
-      );
+        // Simulate native's own cancellation reply arriving on the still-pending startCompress
+        // call, exactly as TransformerEngine.compress does when JobRegistry.cancel resolves it.
+        pendingStartCompressReply.complete(
+          _codec.encodeMessage(<Object?>[
+            'cancelled',
+            'The compression job was cancelled',
+            null,
+          ]),
+        );
 
-      await expectLater(
-        () => job.result,
-        throwsA(
-          isA<CompressVideoException>().having(
-            (CompressVideoException e) => e.reason,
-            'reason',
-            CompressVideoErrorReason.cancelled,
+        await expectLater(
+          () => job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.cancelled,
+            ),
           ),
-        ),
-      );
+        );
 
-      await expectLater(job.progress, emitsDone);
-      await expectLater(job.progress, emitsDone);
-    });
+        await expectLater(job.progress, emitsDone);
+        await expectLater(job.progress, emitsDone);
+      },
+    );
   });
 }
