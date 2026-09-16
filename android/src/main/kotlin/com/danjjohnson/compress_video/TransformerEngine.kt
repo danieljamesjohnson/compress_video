@@ -35,17 +35,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Builds and drives one [Transformer] per compression job, entirely on the main Looper.
  *
  * Every call in this file that touches a [Transformer] -- build, start, poll, cancel -- happens
  * on the calling thread, which must already be the main Looper by the time [compress] is
- * invoked ([Compression] asserts this before calling in). Nothing here ever dispatches that
- * work to a background thread pool (02-RESEARCH.md Pattern 1); only the pre-Transformer input
- * probe and the post-export re-probe leave the main thread, and both do so through [Probe],
- * whose own background-dispatched work always resumes back on the caller's original (main)
- * context once it completes.
+ * invoked ([Compression] asserts this before calling in). The [Transformer] itself is never
+ * built, started, polled or cancelled off that thread (02-RESEARCH.md Pattern 1); the
+ * pre-Transformer input probe, the post-export re-probe, and the never-larger byte copy
+ * ([copyFileAtomically], CR-01) all dispatch their own blocking I/O to [Dispatchers.IO] and
+ * always resume back on the caller's original (main) context once it completes, the same
+ * pattern [Probe] already uses for its own blocking native calls.
  */
 class TransformerEngine(
     private val context: Context,
@@ -543,12 +545,17 @@ class TransformerEngine(
     /**
      * Copies [source] to [destination] atomically (temp file beside the destination, then
      * rename), for the never-larger path where the original's own bytes become the output.
-     * Never opens [source] for writing.
+     * Never opens [source] for writing. Runs on [Dispatchers.IO] (CR-01): both call sites
+     * ([compress]'s pre-check fast path and [finishSuccess]'s post-check fallback) can be a
+     * multi-hundred-megabyte-to-multi-gigabyte disk-to-disk copy, and both used to run it
+     * synchronously on the calling (main) thread. [Dispatchers.IO] always resumes back on the
+     * caller's original context once the block completes, so no [Transformer] or [JobRegistry]
+     * access ever happens off the main Looper.
      */
-    private fun copyFileAtomically(
+    private suspend fun copyFileAtomically(
         source: File,
         destination: File,
-    ) {
+    ) = withContext(Dispatchers.IO) {
         val temp = PluginFiles.tempFileBeside(destination)
         try {
             source.inputStream().use { input ->
