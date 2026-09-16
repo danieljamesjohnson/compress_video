@@ -11,8 +11,12 @@ import android.os.SystemClock
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
+import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -77,6 +81,7 @@ class TransformerEngine(
         val startElapsedMs = SystemClock.elapsedRealtime()
         val inputBytes = inputFile.length()
         val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
+        val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
 
         val target =
             SizeGuard.resolve(
@@ -107,41 +112,63 @@ class TransformerEngine(
         val inputDisplayedHeightPx = inputInfo.heightPx.toInt()
 
         val videoEffects =
-            buildList<Effect> {
-                if (target.targetWidthPx != inputDisplayedWidthPx ||
-                    target.targetHeightPx != inputDisplayedHeightPx
-                ) {
-                    // Presentation.createForHeight preserves the frame's own aspect ratio, so
-                    // handing it only the target height is sufficient: SizeGuard computed both
-                    // dimensions from the same ratio, so the resulting width already matches
-                    // target.targetWidthPx.
-                    //
-                    // No coded/displayed swap for rotation: measured live on the emulator
-                    // (02-02-PLAN.md task 3's own instruction to record this). A rotated
-                    // 1920x1080-coded, 90deg-matrix input targeting a 720-long-side preset
-                    // produced width=406 when the target height was computed by swapping into
-                    // coded space (720 as a "coded height", 720*1080/1920=405 rounded) --
-                    // proving the effect pipeline already sees the DECODED, DISPLAY-oriented
-                    // frame (1080x1920), not the coded pre-rotation frame. Passing the target
-                    // straight from MediaInfoMessage's own displayed dimensions, with no swap,
-                    // produced the correct 720x1280 output.
-                    add(Presentation.createForHeight(target.targetHeightPx))
-                }
-                val inputFps = inputInfo.frameRateFps
-                if (inputFps != null && target.effectiveFps < inputFps) {
-                    // The frame-rate-cap effect from the effect library, not the
-                    // EditedMediaItem builder's still-image frame-rate generator -- that
-                    // builder method only synthesizes a frame rate when converting a still
-                    // image to video and is a no-op on real video input (02-RESEARCH.md
-                    // Pattern 3's "Important distinction").
-                    add(FrameDropEffect.createDefaultFrameDropEffect(target.effectiveFps.toFloat()))
-                }
+            buildVideoEffects(
+                target = target,
+                inputDisplayedWidthPx = inputDisplayedWidthPx,
+                inputDisplayedHeightPx = inputDisplayedHeightPx,
+                inputFps = inputInfo.frameRateFps,
+            )
+
+        // Channel-count changes go through the platform's own mixing processor
+        // (ChannelMixingAudioProcessor + ChannelMixingMatrix.createForConstantGain), never
+        // hand-written per-sample downmix math (02-RESEARCH.md Pattern 5, Don't Hand-Roll):
+        // AudioEncoderSettings has no channel-count field of its own to set. Only meaningful --
+        // and only added -- for an explicit re-encode with a target channel count that differs
+        // from what the source actually has; passthrough and strip never touch this list, for
+        // the same "leave the audio pipeline alone unless asked to change it" reason the
+        // encoder-factory branch below leaves audio encoder settings at their Media3 default
+        // for anything other than a forced re-encode.
+        val requestedAudioChannels = request.audioChannels?.toInt()
+        val audioProcessors: List<AudioProcessor> =
+            if (request.audioMode == AudioModeMessage.REENCODE &&
+                requestedAudioChannels != null &&
+                inputAudioChannels != null &&
+                requestedAudioChannels != inputAudioChannels
+            ) {
+                listOf(
+                    ChannelMixingAudioProcessor().apply {
+                        putChannelMixingMatrix(
+                            ChannelMixingMatrix.createForConstantGain(
+                                inputAudioChannels,
+                                requestedAudioChannels,
+                            ),
+                        )
+                    },
+                )
+            } else {
+                emptyList()
             }
 
+        // Trim: Media3's own MediaItem.ClippingConfiguration, never hand-rolled range maths
+        // (D-16). setEndPositionMs takes an END POSITION, not a duration -- the incumbent's own
+        // Android trim bug (02-05-PLAN.md task 2) came from passing a duration where the
+        // library wanted an end position. Both positions are taken straight from the request in
+        // milliseconds with this one conversion at the boundary; a `null` trimStartMs/trimEndMs
+        // defaults to the start/end of the input, matching SizeGuard's own rule 6/7 fallback.
+        val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(inputFile))
+        if (request.trimStartMs != null || request.trimEndMs != null) {
+            mediaItemBuilder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(request.trimStartMs ?: 0L)
+                    .setEndPositionMs(request.trimEndMs ?: inputInfo.durationMs)
+                    .build(),
+            )
+        }
+
         val editedMediaItem =
-            EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(inputFile)))
+            EditedMediaItem.Builder(mediaItemBuilder.build())
                 .setRemoveAudio(request.audioMode == AudioModeMessage.STRIP)
-                .setEffects(Effects(emptyList(), videoEffects))
+                .setEffects(Effects(audioProcessors, videoEffects))
                 .build()
 
         // DefaultEncoderFactory.videoNeedsEncoding() returns true whenever
@@ -157,6 +184,18 @@ class TransformerEngine(
         // [VideoEncoderSettings.DEFAULT] (no [DefaultEncoderFactory.Builder.setRequestedVideoEncoderSettings]
         // call at all), which is also why no bitrate is requested on this branch -- a remux
         // copies the input's own bitrate, it does not target one.
+        //
+        // Audio encoder settings follow exactly the same rule (`DefaultEncoderFactory.
+        // audioNeedsEncoding()` -- confirmed by the same javap read this plan -- returns true
+        // whenever `requestedAudioEncoderSettings != AudioEncoderSettings.DEFAULT`, using plain
+        // reference/Object equality since AudioEncoderSettings has no `equals()` override, so
+        // even a structurally-default-looking built settings object would still force a
+        // transcode): they are only ever set below for an explicit `REENCODE` request, never for
+        // passthrough or strip, so an already-AAC passthrough track can still be transmuxed
+        // rather than needlessly re-encoded. `wouldTransmux` is already false for any REENCODE
+        // or STRIP request (SizeGuard's audioPassthroughRequested condition), so this branch is
+        // always the "not transmuxing" branch in that case, and it is safe to add audio encoder
+        // settings here without risking the transmux fast path.
         val encoderFactory =
             if (target.wouldTransmux) {
                 DefaultEncoderFactory.Builder(context).build()
@@ -175,9 +214,20 @@ class TransformerEngine(
                         // undocumented behaviour.
                         .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
                         .build()
-                DefaultEncoderFactory.Builder(context)
-                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
-                    .build()
+                val builder =
+                    DefaultEncoderFactory.Builder(context)
+                        .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                if (request.audioMode == AudioModeMessage.REENCODE) {
+                    // target.audioBitrateBps is SizeGuard rule 5's already-clamped resolution
+                    // (8,000-960,000bps, request-or-source-or-default) -- this branch trusts it
+                    // rather than re-deriving or re-clamping the request's own raw bitrate.
+                    builder.setRequestedAudioEncoderSettings(
+                        AudioEncoderSettings.Builder()
+                            .setBitrate(target.audioBitrateBps.toInt())
+                            .build(),
+                    )
+                }
+                builder.build()
             }
 
         val deferred = CompletableDeferred<ExportOutcome>()
@@ -206,6 +256,16 @@ class TransformerEngine(
         // empty and requesting H.264/AAC output already matches the input's own codecs (the
         // predicate requires exactly that), so Media3's own "transcode only if necessary"
         // behaviour transmuxes both tracks without any extra wiring on this builder.
+        //
+        // setAudioMimeType(AUDIO_AAC) is unconditional, for every audio mode -- deliberately not
+        // branched the way the encoder-factory settings above are. It is what makes AUDO-01's
+        // default path safe: when the source audio is already AAC, requesting AAC output simply
+        // matches (no forced transcode, confirmed by the passing small_480p.mp4 transmux case
+        // below), so passthrough still copies; when the source audio is present but NOT AAC,
+        // this same unconditional request is what makes Media3 transcode it to AAC rather than
+        // failing outright or trying to mux an incompatible codec into the output MP4 (D-14) --
+        // there is deliberately no separate "is this AAC" branch here because the one
+        // unconditional call already covers both outcomes.
         //
         // Explicit InAppMp4Muxer.Factory with streamable output DISABLED -- found and fixed
         // this plan (Rule 1 bug, orchestrator-flagged): Transformer.Builder's own default
@@ -414,6 +474,35 @@ class TransformerEngine(
     }
 
     /**
+     * Reads the channel count of [file]'s first audio track, or `null` if it has none or the
+     * platform could not determine it. This is native-only information -- [MediaInfoMessage] has
+     * no channel-count field of its own to cross the wire, since the only place it is needed is
+     * here, to decide whether [compress]'s re-encode branch must add a
+     * [ChannelMixingAudioProcessor] at all (AUDO-02's "channels" only ever changes what the
+     * encoder is asked to produce, never what the caller is told about the source).
+     */
+    private fun readAudioChannelCount(file: File): Int? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.path)
+            var channels: Int? = null
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                    channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    break
+                }
+            }
+            channels
+        } catch (e: Exception) {
+            null
+        } finally {
+            extractor.release()
+        }
+    }
+
+    /**
      * Normalises an audio track's MIME type into a wire-contract codec token. [MediaMath]'s own
      * `normalizeCodec` only recognises video tokens (it has no case for AAC's own MIME,
      * `audio/mp4a-latm`), so it is not reused here as-is -- extending it is deferred to a later
@@ -547,7 +636,54 @@ class TransformerEngine(
         object Cancelled : ExportOutcome()
     }
 
-    private companion object {
-        const val PROGRESS_POLL_INTERVAL_MS = 250L
+    internal companion object {
+        private const val PROGRESS_POLL_INTERVAL_MS = 250L
+
+        /**
+         * Builds the video effects list in one fixed, documented order: geometry
+         * ([Presentation], the resize) first, then frame selection ([FrameDropEffect], the fps
+         * cap). The two are independent today -- resizing doesn't change which frames are kept,
+         * and dropping frames doesn't change their size -- but the order is pinned here, once,
+         * so a future edit to either one cannot silently reorder them. [EffectOrderTest]
+         * exercises this function directly and constructs no [Transformer].
+         *
+         * Pure: no [Context], no Looper, no Transformer -- callable from a plain JVM unit test
+         * exactly like [SizeGuard.resolve].
+         */
+        internal fun buildVideoEffects(
+            target: SizeGuard.Plan,
+            inputDisplayedWidthPx: Int,
+            inputDisplayedHeightPx: Int,
+            inputFps: Double?,
+        ): List<Effect> =
+            buildList<Effect> {
+                if (target.targetWidthPx != inputDisplayedWidthPx ||
+                    target.targetHeightPx != inputDisplayedHeightPx
+                ) {
+                    // Presentation.createForHeight preserves the frame's own aspect ratio, so
+                    // handing it only the target height is sufficient: SizeGuard computed both
+                    // dimensions from the same ratio, so the resulting width already matches
+                    // target.targetWidthPx.
+                    //
+                    // No coded/displayed swap for rotation: measured live on the emulator
+                    // (02-02-PLAN.md task 3's own instruction to record this). A rotated
+                    // 1920x1080-coded, 90deg-matrix input targeting a 720-long-side preset
+                    // produced width=406 when the target height was computed by swapping into
+                    // coded space (720 as a "coded height", 720*1080/1920=405 rounded) --
+                    // proving the effect pipeline already sees the DECODED, DISPLAY-oriented
+                    // frame (1080x1920), not the coded pre-rotation frame. Passing the target
+                    // straight from MediaInfoMessage's own displayed dimensions, with no swap,
+                    // produced the correct 720x1280 output.
+                    add(Presentation.createForHeight(target.targetHeightPx))
+                }
+                if (inputFps != null && target.effectiveFps < inputFps) {
+                    // The frame-rate-cap effect from the effect library, not the
+                    // EditedMediaItem builder's still-image frame-rate generator -- that
+                    // builder method only synthesizes a frame rate when converting a still
+                    // image to video and is a no-op on real video input (02-RESEARCH.md
+                    // Pattern 3's "Important distinction").
+                    add(FrameDropEffect.createDefaultFrameDropEffect(target.effectiveFps.toFloat()))
+                }
+            }
     }
 }

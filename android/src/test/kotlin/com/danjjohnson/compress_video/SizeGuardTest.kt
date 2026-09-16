@@ -227,6 +227,26 @@ internal class SizeGuardTest {
     }
 
     @Test
+    fun requestedAudioBitrateInsideTheRange_passesThroughUnchanged() {
+        val options = defaultOptions().copy(requestedAudioBitrateBps = 64000L)
+        val plan = SizeGuard.resolve(defaultInput(), options)
+        assertEquals(64000L, plan.audioBitrateBps)
+    }
+
+    @Test
+    fun noRequestedAudioBitrate_fallsBackToTheSourceSOwnAudioBitrate() {
+        // defaultInput().audioBitrateBps is 128000L; requestedAudioBitrateBps is null in
+        // defaultOptions(), so rule 5's fallback chain (request, then source, then the
+        // 128,000bps project default) resolves to the source's own value here -- which happens
+        // to equal the same project default, so this case also overrides the source value to
+        // something else to prove the fallback is really reading the source, not coincidentally
+        // landing on the same default either way.
+        val input = defaultInput().copy(audioBitrateBps = 96000L)
+        val plan = SizeGuard.resolve(input, defaultOptions())
+        assertEquals(96000L, plan.audioBitrateBps)
+    }
+
+    @Test
     fun requestedAudioBitrateBelow8000_clampedUpToTheFloor() {
         val options = defaultOptions().copy(requestedAudioBitrateBps = 100L)
         val plan = SizeGuard.resolve(defaultInput(), options)
