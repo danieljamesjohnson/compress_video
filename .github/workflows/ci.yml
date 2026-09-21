@@ -105,6 +105,36 @@ jobs:
       - name: Analyze
         run: flutter analyze --fatal-infos --fatal-warnings
 
+      - name: Verify no hand-written channel plumbing remains (BULD-03, success criterion 4)
+        # Every quantity crossing the Dart/native boundary must be a Pigeon-generated field --
+        # no hand-written channel map may remain anywhere in the package. Enumerates lib/,
+        # android/src/main/, and darwin/compress_video/Sources/ for channel primitives OUTSIDE
+        # the Pigeon-generated Messages.g.* files and fails, naming the offending file(s), if
+        # any hand-written channel plumbing is found.
+        #
+        # Deliberately does NOT use `|| true` or any redirection that would hide grep's real
+        # exit status: `set -e` is off for the grep line itself so a "no matches" (exit 1) does
+        # not abort the script before this step can act on it, and the captured exit code is
+        # branched on explicitly (0 = match found = fail; 1 = no match = pass; >1 = grep itself
+        # errored = fail) so a false positive here is impossible to silently ignore.
+        run: |
+          PATTERN='MethodChannel|EventChannel|BasicMessageChannel|FlutterMethodChannel'
+          set +e
+          MATCHES=$(grep -RIln -E "$PATTERN" \
+            lib/ android/src/main/ darwin/compress_video/Sources/ \
+            --exclude='messages.g.dart' --exclude='Messages.g.kt' --exclude='Messages.g.swift')
+          GREP_STATUS=$?
+          set -e
+          if [ "$GREP_STATUS" -eq 0 ]; then
+            echo "FATAL: hand-written channel plumbing found outside the Pigeon-generated files:" >&2
+            echo "$MATCHES" >&2
+            exit 1
+          elif [ "$GREP_STATUS" -gt 1 ]; then
+            echo "FATAL: grep itself failed (exit $GREP_STATUS) while scanning for hand-written channel plumbing" >&2
+            exit 1
+          fi
+          echo "No hand-written channel plumbing found outside Messages.g.*"
+
       - name: Regenerate the Pigeon contract and verify it matches committed output
         # Guards against the contract being hand-edited without regenerating, or the
         # generator being upgraded without recommitting its output. `dart format` runs
