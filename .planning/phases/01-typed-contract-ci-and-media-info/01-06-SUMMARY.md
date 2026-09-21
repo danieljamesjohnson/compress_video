@@ -114,7 +114,7 @@ coverage:
 # Metrics
 duration: 166min
 completed: 2026-09-15
-status: halted
+status: complete
 ---
 
 # Phase 1 Plan 06: Apple Core (Probe, Thumbnails, XCTest on iOS and macOS) Summary
@@ -251,3 +251,13 @@ None — no external service configuration required for the plugin itself. A Git
 - CI evidence (not a fresh run against current HEAD, per the halted status above): run 35012589390 — Android job fully `success`; Apple job's `Build iOS (CocoaPods)`, `XCTest - iOS Runner`, `Boot the iOS simulator`, and `Run corpus integration tests on the iOS simulator` (30/32 tests, 2 known-and-now-fixed failures) all completed; `Build macOS`/`XCTest - macOS Runner`/SPM steps did not run in that attempt because the job failed before reaching them (their own success was previously confirmed against Task 1's code in run 35008007617 before Task 3's iOS-simulator step was added after them in the job order)
 - `git status --short` clean at every commit boundary
 - **Residual, undischarged item:** a fresh, fully green CI run of current HEAD (`c10689a`) is still needed and is blocked on GitHub Actions billing (QUESTIONS.md #6) — this is the reason for `status: halted` rather than `status: complete`
+
+## Halt resolved — 2026-09-21
+
+The GitHub Actions billing block (QUESTIONS.md #6) was lifted when Dan made the repository public
+(#5). CI run 35606910435 on `e8ad34c` then ran the `apple` job end to end and concluded **success**:
+Build iOS (CocoaPods), XCTest - iOS Runner, the iOS-simulator corpus suites (media_info_test.dart,
+thumbnail_test.dart, with this plan's Thumbnails.swift fix), Build macOS, XCTest - macOS Runner and
+the Swift Package Manager build. The Phase 2 compress_*_test.dart suites are excluded from the
+iOS step until Phase 3 lands the Apple engine (see ci.yml). This plan's status moves from `halted`
+to `complete`; 01-07 may start.

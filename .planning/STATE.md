@@ -22,8 +22,8 @@ See: .planning/PROJECT.md (updated 2026-09-15)
 
 Phase: 2 of 6 (Android Compression on Media3) — 7/7 plans, ready for phase-level verification. Phase 1 at 5/7 plans, needs_human
 Plan: 7 of 7 in current phase (complete)
-Status: Phase 2 executed and verified (14/14 must-haves, 79 emulator + 84 Dart + 148 Gradle tests green, code review clean); verification_deferred_human. Phase 1 needs_human (CI billing). Autonomous run stopped: every remaining phase needs Dan (CI billing / Mac / physical phone).
-Last activity: 2026-09-16 — Phase 2 complete through verification (human_needed: 6 UAT items); code review converged clean after 5 fixes; GitHub Actions still refusing all jobs (QUESTIONS.md #6)
+Status: Phase 1 resumed 2026-09-21 — 01-06 confirmed by CI run 35606910435 (Apple job success); executing 01-07 (wave 5 of 5). Phase 2 verification_deferred_human (see table).
+Last activity: 2026-09-21 — Repo made public, Actions unblocked, Mac SSH authorized; Apple CI green confirms 01-06; Android job now failing only on Pigeon-regeneration drift under Flutter 3.47.5 (being fixed)
 
 Progress: [█████████░] 86% (12/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
 
@@ -104,12 +104,6 @@ Recent decisions affecting current work:
 | Phase | State | Resume |
 |-------|-------|--------|
 | 2 | verification_deferred_human | /gsd-verify-work 2 (6 items in 02-UAT.md; #1 needs a physical phone, #2-#4 can be closed by an agent with new fixtures/tests) |
-
-## Needs Human
-
-| Phase | State | Resume |
-|-------|-------|--------|
-| 1 | needs_human | GitHub Actions billing/spending limit (QUESTIONS.md #6) or make repo public (#5); then `gh run rerun <latest main run> --failed` and `/gsd-autonomous --from 1` |
 
 ## Deferred Items
 
