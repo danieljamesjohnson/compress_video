@@ -318,13 +318,19 @@ jobs:
           xcrun simctl bootstatus "${{ steps.ios_sim.outputs.udid }}" -b
 
       - name: Run corpus integration tests on the iOS simulator
-        # Runs the same corpus integration suite (media_info_test.dart, thumbnail_test.dart)
-        # the Android emulator runs, on a concrete simulator resolved above rather than a
-        # hard-coded device name. Bounded so a genuine hang fails fast and visibly instead of
-        # silently consuming this free-tier account's 10x-billed macOS minutes.
+        # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) on a
+        # concrete simulator resolved above rather than a hard-coded device name. The Phase 2
+        # compress_*_test.dart suites are Android-only until Phase 3 lands the Apple engine:
+        # on iOS they hang the runner (20-minute timeout observed on 2026-09-21), so they are
+        # listed explicitly here AND skip themselves on non-Android platforms. Phase 3 must
+        # widen this to the whole directory. Bounded so a genuine hang fails fast and visibly.
         working-directory: example
         timeout-minutes: 20
-        run: flutter test integration_test -d "${{ steps.ios_sim.outputs.udid }}" -r expanded
+        run: |
+          flutter test \
+            integration_test/media_info_test.dart \
+            integration_test/thumbnail_test.dart \
+            -d "${{ steps.ios_sim.outputs.udid }}" -r expanded
 
       - name: Build macOS
         working-directory: example

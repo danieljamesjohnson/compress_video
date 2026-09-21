@@ -73,6 +73,19 @@ Future<void> _awaitProgressBelow100(CompressJob job) async {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  // Compression is implemented on Android only until Phase 3 lands the Apple engine
+  // (AVAssetReader/AVAssetWriter). On iOS/macOS these suites would talk to a host API no
+  // Swift code implements yet; register one skipped placeholder and stop so the run stays
+  // honest and finite. Phase 3 removes this guard.
+  if (!Platform.isAndroid) {
+    test(
+      'compression suites are Android-only until Phase 3',
+      () {},
+      skip: 'Apple compression engine lands in Phase 3 (CORE-01/CORE-07).',
+    );
+    return;
+  }
+
   const CompressVideo compressVideo = CompressVideo();
 
   group('Per-job progress: ordering, range and a single terminal 100', () {
