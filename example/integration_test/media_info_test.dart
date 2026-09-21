@@ -3,6 +3,7 @@
 // MediaMetadataRetriever/MediaExtractor and back; every expected value is read from the corpus
 // sidecar rather than hard-coded here, so this file and the sidecar can never silently drift
 // apart.
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -11,6 +12,46 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates the `crossPlatform` values THIS platform actually observed for every clip in
+/// the suite, so the parity gate diffs a real per-clip record instead of inferring parity from
+/// two platforms merely running the same test file (01-07). Keyed by clip name, sorted, so the
+/// emitted JSON is byte-comparable between the Android and iOS runs regardless of test order.
+final SplayTreeMap<String, dynamic> _parityRecords =
+    SplayTreeMap<String, dynamic>();
+
+/// Rounds [durationMs] into the sidecar's own tolerance bucket so a legitimate one-millisecond
+/// platform rounding difference never reads as a divergence, while a real mismatch still does.
+int _bucketDuration(int durationMs, int toleranceMs) {
+  if (toleranceMs <= 0) {
+    return durationMs;
+  }
+  return (durationMs / toleranceMs).round() * toleranceMs;
+}
+
+/// Records [info]'s `crossPlatform` field set for [clipName] into [_parityRecords], with keys
+/// in a fixed sorted order (via [SplayTreeMap]) so the two platforms' emitted lines are
+/// directly comparable as text.
+void _recordParity(
+  String clipName,
+  MediaInfo info,
+  Map<String, dynamic> sidecar,
+) {
+  final int toleranceMs =
+      (sidecar['crossPlatform'] as Map<String, dynamic>)['durationToleranceMs']
+          as int;
+  _parityRecords[clipName] =
+      SplayTreeMap<String, dynamic>.from(<String, dynamic>{
+        'durationMs': _bucketDuration(info.durationMs, toleranceMs),
+        'hasAudio': info.hasAudio,
+        'heightPx': info.heightPx,
+        'isHdr': info.isHdr,
+        'rotationDegrees': info.rotationDegrees,
+        'sizeBytes': info.sizeBytes,
+        'videoCodec': info.videoCodec,
+        'widthPx': info.widthPx,
+      });
+}
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform probe reads from a real file path, not asset bytes.
@@ -111,6 +152,14 @@ void main() {
 
   const CompressVideo compressVideo = CompressVideo();
 
+  // Emitted once, after every clip's crossPlatform assertions have run, so tool/check_parity.sh
+  // (01-07) can diff exactly what this platform observed against the other platform's own
+  // PARITY_JSON line from the same suite.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print('PARITY_JSON ${jsonEncode(_parityRecords)}');
+  });
+
   for (final String clipName in <String>[
     'portrait_rot90',
     'small_480p',
@@ -129,6 +178,7 @@ void main() {
 
       _expectCrossPlatformMatches(info, sidecar);
       _expectTolerantWithinBounds(info, sidecar);
+      _recordParity(clipName, info, sidecar);
     });
   }
 

@@ -2,6 +2,7 @@
 // emulator (and, once Apple simulator/device access exists, the same suite on iOS/macOS).
 // Every expected value is read from the corpus sidecar's `thumbnailProbe` block, never
 // hard-coded here, so this file and the sidecar can never silently drift apart.
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -11,6 +12,13 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates the decoded thumbnail's observed width/height/sampled-patch-RGB, under a second
+/// key (`thumbnail`) distinct from media_info_test.dart's per-clip-name keys, so
+/// tool/check_parity.sh (01-07) can diff what this platform's thumbnail decode actually
+/// produced against the other platform's own PARITY_JSON line.
+final SplayTreeMap<String, dynamic> _parityRecords =
+    SplayTreeMap<String, dynamic>();
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform thumbnail call reads from a real file path, not
@@ -90,6 +98,11 @@ void main() {
 
   const CompressVideo compressVideo = CompressVideo();
 
+  tearDownAll(() {
+    // ignore: avoid_print
+    print('PARITY_JSON ${jsonEncode(_parityRecords)}');
+  });
+
   testWidgets(
     'getThumbnail of the portrait clip at the sidecar position is upright, at the '
     'sidecar moment',
@@ -136,6 +149,14 @@ void main() {
         expectedRgb,
         rgbTolerance,
         reason: 'sampled patch colour must match the sidecar at $positionMs ms',
+      );
+
+      _parityRecords['thumbnail'] = SplayTreeMap<String, dynamic>.from(
+        <String, dynamic>{
+          'heightPx': image.height,
+          'patchRgb': sampledRgb,
+          'widthPx': image.width,
+        },
       );
     },
   );

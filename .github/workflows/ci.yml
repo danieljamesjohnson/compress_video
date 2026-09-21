@@ -172,7 +172,24 @@ jobs:
           force-avd-creation: false
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -partition-size 2048
-          script: cd example && flutter test integration_test
+          # Captured with `tee` (not swallowed behind a bare pipe) so the step still shows the
+          # full test log AND still fails when a test fails: `set -o pipefail` makes the step's
+          # own exit status the `flutter test` exit status, not `tee`'s.
+          script: |
+            cd example
+            set -o pipefail
+            flutter test integration_test | tee /tmp/android_integration.log
+
+      - name: Extract cross-platform parity records (Android)
+        # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
+        # for the `parity` job (01-07) to diff against the same records from the `apple` job.
+        run: grep '^PARITY_JSON ' /tmp/android_integration.log > /tmp/parity-android.txt
+
+      - name: Upload Android parity artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-android
+          path: /tmp/parity-android.txt
 
       - name: Install ffmpeg
         run: |
@@ -333,7 +350,12 @@ jobs:
         run: |
           set -o pipefail
           UDID="${{ steps.ios_sim.outputs.udid }}"
-          run_suite() { perl -e 'alarm shift; exec @ARGV' 540 flutter test "$1" -d "$UDID" -r expanded; }
+          LOG=/tmp/apple_integration.log
+          : > "$LOG"
+          # Captured with `tee -a` (not swallowed behind a bare pipe) so the step still shows
+          # the full test log AND still fails when a test fails: `set -o pipefail` above makes
+          # each `run_suite` call's exit status `flutter test`'s, not `tee`'s.
+          run_suite() { perl -e 'alarm shift; exec @ARGV' 540 flutter test "$1" -d "$UDID" -r expanded | tee -a "$LOG"; }
           for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart; do
             if ! run_suite "$suite"; then
               echo "::warning::$suite hung or failed on the first attempt; resetting the simulator and retrying once"
@@ -343,6 +365,17 @@ jobs:
               run_suite "$suite"
             fi
           done
+
+      - name: Extract cross-platform parity records (Apple)
+        # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
+        # for the `parity` job (01-07) to diff against the same records from the `android` job.
+        run: grep '^PARITY_JSON ' /tmp/apple_integration.log > /tmp/parity-apple.txt
+
+      - name: Upload Apple parity artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-apple
+          path: /tmp/parity-apple.txt
 
       - name: Build macOS
         working-directory: example
@@ -372,3 +405,30 @@ jobs:
       - name: Build iOS via Swift Package Manager
         working-directory: example
         run: flutter build ios --simulator --no-codesign
+
+  parity:
+    name: Cross-platform parity
+    runs-on: ubuntu-latest
+    needs: [android, apple]
+    # Reports its own clear failure rather than a confusing skip when an upstream job already
+    # failed. The two platform jobs stay independent (neither is in the other's `needs`) - this
+    # job alone depends on both, purely to gate on their artifacts.
+    if: ${{ !cancelled() && needs.android.result == 'success' && needs.apple.result == 'success' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Android parity artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: parity-android
+          path: parity-artifacts/android
+
+      - name: Download Apple parity artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: parity-apple
+          path: parity-artifacts/apple
+
+      - name: Diff cross-platform parity values (media info + thumbnail)
+        run: bash tool/check_parity.sh parity-artifacts/android/parity-android.txt parity-artifacts/apple/parity-apple.txt
