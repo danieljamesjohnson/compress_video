@@ -1,6 +1,6 @@
 ---
 phase: 01-typed-contract-ci-and-media-info
-reviewed: 2026-09-21T00:00:00Z
+reviewed: 2026-09-21T19:00:00Z
 depth: standard
 files_reviewed: 46
 files_reviewed_list:
@@ -51,177 +51,141 @@ files_reviewed_list:
   - tool/check_parity.sh
   - tool/check_parity_test.sh
 findings:
-  critical: 1
-  warning: 3
-  info: 2
-  total: 6
-status: issues_found
+  critical: 0
+  warning: 0
+  info: 1
+  total: 1
+status: clean
 ---
 
-# Phase 01: Code Review Report
+# Phase 01: Code Review Report (re-review, iteration 2)
 
 **Reviewed:** 2026-09-21
 **Depth:** standard
 **Files Reviewed:** 46
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-Reviewed the Pigeon typed contract, the Dart public API/mapping layer, the Android
-(Probe.kt/Thumbnails.kt/Arguments.kt/MediaMath.kt) and Apple (Probe.swift/Thumbnails.swift/
-Arguments.swift/MediaMath.swift) media-info and thumbnail implementations, the corpus
-generation/verification tooling, `tool/check_parity.sh`/`check_parity_test.sh`, and
-`.github/workflows/ci.yml`.
+This is iteration 2, a re-review after the fix pass recorded in
+`01-REVIEW-FIX.md` (commits `f3d5dd6`, `c55c0ef`, `89fd89b`, `c9bca86`). All four
+findings from iteration 1 (CR-01, WR-01, WR-02, WR-03/IN-02) were re-verified directly
+against the current code, not just trusted from the fix report, and each is confirmed
+genuinely resolved with no regressions.
 
-The Dart API surface is careful about null-safety, argument validation, and error mapping —
-no raw `PlatformException` escapes, and every failure path is exercised by
-`test/media_info_mapping_test.dart`. The Android and Apple native implementations mirror each
-other closely (rotation math, scaling, clamping, atomic writes, resource cleanup on every path)
-and are backed by a genuinely rigorous corpus/parity mechanism. No hardcoded secrets, no
-injection vectors, no obvious null-pointer crashes were found in the reviewed native code.
+**CR-01 (CI path filter gap).** Confirmed fixed and hardened beyond the minimal
+suggestion. `tool/` and `corpus/` are now in the `changes` job's filter regex
+(`.github/workflows/ci.yml:71`), so any PR touching `tool/check_parity.sh` or
+`tool/check_parity_test.sh` now forces the `apple` job to run. The `parity` job no
+longer depends on `needs.apple.result == 'success'` to execute at all — its new `gate`
+step (lines 454-473) explicitly branches on `apple`'s result: `success` proceeds,
+`skipped` is checked against `needs.changes.outputs.apple` (a legitimate skip is a
+clean no-op; a skip that contradicts the changes filter is a loud `FATAL` failure), and
+anything else (`failure`, `cancelled`) is also a loud failure. Traced both required
+semantics by hand: (1) a change to only `tool/` or `corpus/` now causes `apple=true` →
+`apple` job runs → self-test step (`bash tool/check_parity_test.sh`) actually executes
+before the real diff, closing the exact "green CI, ungated regression" hole the
+original finding described; (2) a change to only Android-relevant paths (e.g.
+`android/build.gradle.kts`) causes `apple=false` → `apple` skipped → gate's `skipped`
+branch confirms the skip against `changes`' own output and passes clean, so a
+legitimately-scoped change is never penalized for the Apple job not running. This was
+also exercised for real: the CI run captured in the fix report shows the `apple` job
+correctly triggered by this exact push (which touched `tool/`, `darwin/`, and the
+workflow file itself), and separately shows the new gate correctly turning a real
+`apple` failure into a loud, named `parity` job failure rather than a silent skip.
+Verified `.github/workflows/ci.yml` is still valid YAML.
 
-The one BLOCKER is in the CI pipeline: the path filter that decides whether the expensive
-`apple` job (and, transitively, the `parity` job that self-tests and runs `check_parity.sh`)
-executes does not include `tool/`, so a change that breaks the parity gate itself can merge
-with a fully green CI run that never exercised the gate. The WARNING findings cover a
-platform behavior asymmetry in path standardization, a real (documented but under-flagged)
-codec-detection blind spot on older Apple OS versions, and a robustness gap in
-`check_parity.sh`'s handling of missing/malformed fields.
+**WR-01 (Apple symlink resolution).** Confirmed fixed. `standardizedAbsolutePath` in
+`Arguments.swift:160-197` now calls `.resolvingSymlinksInPath()` on the full path when
+it already exists, and — for a not-yet-existing `outputPath` — walks up to the nearest
+existing ancestor, resolves symlinks there, and reattaches the nonexistent suffix
+literally, mirroring `File.canonicalFile`'s behavior on the Kotlin side for the same
+not-yet-existing-leaf case. Traced the ancestor-walk loop by hand for termination and
+safety, specifically to answer whether it can loop, block, or throw:
+- **Cannot loop indefinitely.** Each iteration calls `deletingLastPathComponent()`,
+  which strictly shortens the path by one component; the loop's own exit condition
+  (`existingAncestor.path != "/"`) is defensive against `deletingLastPathComponent()`
+  becoming a no-op once it reaches `/` (root is idempotent under that call). For any
+  absolute path (guaranteed by `URL(fileURLWithPath:)`), this converges in at most the
+  path's component count — bounded, typically under 20 iterations even for a deeply
+  nested simulator sandbox path.
+- **Cannot block.** Every check in the loop is `FileManager.fileExists(atPath:)`, a
+  synchronous local `stat(2)`-class call with no network or long-running I/O involved;
+  nothing in this function is `async`, awaits anything, or acquires a lock.
+  `resolvingSymlinksInPath()` is likewise a synchronous, local, bounded call.
+- **Cannot throw.** `standardizedAbsolutePath` is not a `throws` function and contains
+  no call that can propagate an error out of it; it always returns a `String`.
+- Hand-traced the exact failing-test scenario ("outputPath whose parent directory does
+  not exist") in `thumbnail_test.dart`: `.../does_not_exist_dir/thumb.jpg` under a
+  freshly created temp dir resolves in exactly two loop iterations (walking up past
+  `does_not_exist_dir` to the existing temp dir) and reassembles the identical path —
+  correct, not a hang risk.
 
-## Critical Issues
+Given this, the CI hang the fix report attributes to a known
+`flutter test -d <sim>` app-launch flake (zero test output before Flutter's harness
+even attaches to the launched app, both original and retry) is the more plausible
+explanation than a WR-01 regression: the code that would run inside that hung suite is
+synchronous and bounded by construction, and the hang manifests *before* any Dart test
+code — and therefore before any call into `Arguments.swift` — executes at all. This
+matches the CI comment's own record of the same flake on 2026-09-15 and again on
+2026-09-21.
 
-### CR-01: `tool/` is missing from the Apple-relevant CI path filter, so a broken parity gate can merge without ever running
+One residual, non-blocking gap carried forward as an info item below: the
+not-yet-existing-ancestor branch of `standardizedAbsolutePath` (the new code this fix
+actually added) has not yet been exercised by a passing CI run on real Apple hardware/
+simulator, only by static/code-level analysis and by the Swift compiler accepting it
+(proven indirectly: `media_info_test.dart`, compiled in the same target, ran and passed
+in the same job). This does not block the fix — the logic is sound by inspection — but
+it should be closed out once the simulator flake clears.
 
-**File:** `.github/workflows/ci.yml:71` (filter), `.github/workflows/ci.yml:448` (parity gating)
+**WR-02 (Apple codec-detection documentation).** Confirmed fixed as documentation, per
+the review's own offered fallback path. `Probe.swift`'s legacy-path comment
+(lines 80-84), `MediaInfo.videoCodec`'s dartdoc, and the README's field table +
+"Known limitation" callout all now name the exact iOS 13-15/macOS 11-12 boundary and
+cross-reference each other. Verified the documentation is technically accurate against
+the code: the async path (`#available(iOS 16, macOS 13, *)`) does call
+`track.load(.formatDescriptions)` as the dartdoc claims, and the legacy path does
+hardcode `formatDescriptions = []` as described. `dart analyze` confirms no issues in
+`lib/src/media_info.dart`.
 
-**Issue:** The `changes` job (lines 42-75) decides whether the `apple` job runs by grepping
-the diff against:
-```
-^(darwin/|pigeons/|lib/|example/|pubspec\.yaml$|\.github/workflows/ci\.yml$)
-```
-`tool/` is not in this list. The `parity` job (line 441) requires
-`needs.android.result == 'success' && needs.apple.result == 'success'` to run at all — and
-when `apple` is skipped (not run, because no listed path changed), its result is `'skipped'`,
-not `'success'`, so `parity`'s `if` evaluates false and the whole job — including
-`tool/check_parity_test.sh`, the self-test that proves `check_parity.sh` itself still catches
-an out-of-tolerance divergence — is skipped.
+**WR-03 / IN-02 (`check_parity.sh` null guards).** Confirmed fixed. `durationMs` (both
+platforms), the sidecar's `durationToleranceMs`, each `patchRgb[i]` channel, and the
+sidecar's `rgbTolerance` are all now guarded for `"null"`/empty before being used in
+bash arithmetic, each producing a clean, field-naming `MISMATCH` via the existing
+`fail()` helper (which sets a flag and lets the script continue — confirmed `continue`
+after each new guard correctly returns to the right enclosing loop: the per-clip `for`
+loop for `durationMs`, the per-channel `for i in 0 1 2` loop for `patchRgb`). Ran
+`bash tool/check_parity_test.sh` directly during this review (not just trusting the fix
+report): all four fixtures — within-tolerance pass, out-of-tolerance fail naming the
+field, missing-`durationMs` fail naming the field, missing-`patchRgb` fail naming
+`thumbnail.patchRgb[0]` — pass cleanly.
 
-Concretely: a PR that only touches `tool/check_parity.sh` or `tool/check_parity_test.sh` (for
-example, one that accidentally weakens the tolerance comparison, inverts a condition, or
-introduces the "missing field → bash arithmetic error masks as pass" issue in WR-03 below)
-will show a fully green CI run, because the one job that would have caught the regression
-never executes. This is exactly the failure mode the parity mechanism exists to prevent
-(silent cross-platform divergence), just moved one level up: the guard's own correctness is
-unguarded on the PRs most likely to change it.
-
-**Fix:** Add `tool/` (or at minimum `tool/check_parity` for a narrower match) to the filter
-regex, and/or make the `parity` job's self-test step independent of the `apple` job (run
-`tool/check_parity_test.sh` unconditionally, e.g., inside the `android` job or a new
-lightweight job with no `needs`, so it always executes regardless of what changed):
-```yaml
-if git diff --name-only "$BASE" "$HEAD" | grep -Eq '^(darwin/|pigeons/|lib/|example/|tool/|pubspec\.yaml$|\.github/workflows/ci\.yml$)'; then
-```
-
-## Warnings
-
-### WR-01: Apple's path standardization does not resolve symlinks, unlike Android's — undocumented cross-platform asymmetry
-
-**File:** `darwin/compress_video/Sources/compress_video/Arguments.swift:160-165` vs
-`android/src/main/kotlin/com/danjjohnson/compress_video/Arguments.kt:31-36`
-
-**Issue:** `Arguments.kt`'s `requireReadableMediaFile`/`requireWritableOutputParent` resolve
-`File(path).canonicalFile`, which fully resolves symlinks. `Arguments.swift`'s
-`standardizedAbsolutePath` uses `URL(fileURLWithPath:).standardizedFileURL.path`, which the
-code's own doc comment states explicitly does **not** resolve symlinks ("this is
-standardisation, not canonicalisation"). Both files independently justify their own choice by
-appeal to the OS sandbox already limiting what's reachable, but neither doc comment
-acknowledges that the two platforms now canonicalize a caller-supplied path differently. A
-caller that passes a path through a symlink whose target does not yet exist, or that changes
-between validation and use (TOCTOU), is validated differently on Android vs. Apple, and this
-divergence is never exercised or caught by the cross-platform parity gate (which only diffs
-the *content* the two platforms report for the *same* fixed corpus paths, not path-resolution
-policy for adversarial paths).
-
-**Fix:** Either resolve symlinks on both platforms (Swift: use
-`URL(fileURLWithPath:).resolvingSymlinksInPath()` in addition to standardization) or
-explicitly document, in both files, that the two platforms deliberately differ here and why
-that is safe (the sandbox argument), so a future reader doesn't have to rediscover the
-asymmetry by diffing the two files.
-
-### WR-02: Apple's video codec detection silently degrades to `unknown` for the entire iOS 13–15 / macOS 11–12 range
-
-**File:** `darwin/compress_video/Sources/compress_video/Probe.swift:66-85`
-
-**Issue:** On the legacy (`loadValuesAsynchronously`) path — which runs on every OS below the
-`#available(iOS 16, macOS 13, *)` guard, i.e. the entire iOS 13–15 / macOS 11–12 range that the
-project's own minimum-target constraint (iOS 13+, macOS 11+) commits to supporting —
-`formatDescriptions` is hardcoded to `[]`. That flows into
-`MediaMath.normalizeCodec(fourCharacterCode(from: formatDescriptions.first))`, which then
-always returns `"unknown"` for `videoCodec` on those OS versions, regardless of the file's
-actual codec. This is a real, silent capability gap (not a crash, but a materially less useful
-result) for a a multi-year span of the plugin's committed OS support matrix, and it is not
-exercised by the cross-platform parity gate (parity only runs on `macos-latest`'s current
-simulator/OS, which is far newer than the affected range) or covered by any CI job pinned to
-an older Apple OS.
-
-**Fix:** At minimum, add a unit test (or an explicit note in TOOLCHAIN.md/README) that documents
-this as a known, accepted platform-version limitation with its exact OS boundary, so it doesn't
-get rediscovered as a field bug later. If avoiding the forced/conditional downcast the comment
-describes is the only blocker, consider `unsafeBitCast`-free alternatives such as
-`CMFormatDescriptionGetMediaSubType` reachable another way on the legacy path (e.g., via
-`AVAssetTrack.formatDescriptions` boxed as `[CMFormatDescription]` through
-`.compactMap { $0 as! CMFormatDescription? }` guarded by a count/type check before the cast, or
-by using `withUnsafeBytes`-style type-checked extraction) rather than dropping the value
-entirely.
-
-### WR-03: `check_parity.sh` can produce a confusing bash arithmetic error instead of a clean MISMATCH when a field is missing
-
-**File:** `tool/check_parity.sh:104-109`, `130-137`
-
-**Issue:** `DUR_A`/`DUR_B` (line 104-105) and `C_A`/`C_B` (line 131-132) are read via
-`jq -r ... '.[$clip].durationMs'` / `'.thumbnail.patchRgb[$i]'` with no fallback. If either
-field is absent from a PARITY_JSON record (e.g., a future refactor renames a field, or a
-platform's test crashes before recording it, leaving a partial/malformed line), `jq -r` returns
-the literal string `"null"`, and the subsequent bash arithmetic
-`$(( DUR_A > DUR_B ? DUR_A - DUR_B : DUR_B - DUR_A ))` fails with a bash syntax error
-(`value too great for base` / `syntax error: operand expected`) rather than the script's
-documented, clean `MISMATCH`/`FATAL` failure modes. Under `set -euo pipefail`, this still exits
-non-zero (so the gate does still fail closed), but the failure message is an opaque bash
-internal error instead of naming the missing field, undermining the debuggability the rest of
-the script is deliberately designed around (see the `fail()` helper and its call sites).
-
-**Fix:** Guard for `null`/missing before the arithmetic, e.g.:
-```bash
-if [ "$DUR_A" = "null" ] || [ "$DUR_B" = "null" ]; then
-  fail "$clip.durationMs: A=$DUR_A B=$DUR_B (field missing on at least one platform)"
-  continue
-fi
-```
-and similarly for the `patchRgb` loop.
+No new Critical or Warning issues were found in this iteration. `flutter analyze
+--fatal-infos --fatal-warnings` was re-run during this review and reports no issues.
 
 ## Info
 
-### IN-01: `Messages.g.*` regeneration is enforced by CI but not independently verified in this review
+### IN-01: WR-01's new not-yet-existing-ancestor branch remains unexercised by a passing CI run
 
-**File:** `lib/src/messages.g.dart`, `android/src/main/kotlin/com/danjjohnson/compress_video/Messages.g.kt`, `darwin/compress_video/Sources/compress_video/Messages.g.swift`
+**File:** `darwin/compress_video/Sources/compress_video/Arguments.swift:178-196`
 
-All three carry the `// Autogenerated from Pigeon (v29.0.2), do not edit directly.` header and
-show no evidence of hand-editing (consistent field ordering/counts across the three
-generated languages, matching `pigeons/messages.dart`). `.github/workflows/ci.yml:138-156`
-already regenerates and diffs these on every CI run, which is the correct enforcement
-mechanism — noted here only for completeness since `dart run pigeon` was not re-run during
-this review.
+**Issue:** The ancestor-walking loop added for WR-01 is sound by code inspection (see
+Summary above: bounded, synchronous, non-throwing) and is known to compile (the Apple
+job's Swift build succeeded and ran `media_info_test.dart` to completion in the same
+job before `thumbnail_test.dart` hung). But no CI run has yet completed
+`thumbnail_test.dart`'s "outputPath whose parent directory does not exist" and
+"an explicit outputPath is honoured exactly" tests, which are the only tests
+exercising this specific branch, due to the unrelated simulator app-launch flake. This
+is not a defect in the fix — it is a gap in verification coverage, tracked here so it
+isn't lost.
 
-### IN-02: `check_parity.sh`'s duration-tolerance lookup has the same unguarded-null issue as WR-03 for a missing sidecar field
-
-**File:** `tool/check_parity.sh:94`
-
-`TOLERANCE_MS=$(jq -r '.crossPlatform.durationToleranceMs' "$SIDECAR")` has no fallback if a
-sidecar is missing that key; `[ "$DIFF" -gt "$TOLERANCE_MS" ]` would then emit a bash `-gt`
-usage error rather than a clean message. Lower priority than WR-03 since every committed
-sidecar currently carries this field and `corpus/verify_corpus.sh` enforces the sidecar shape,
-but the same defensive fix (checking for `"null"` before the comparison) would make this
-uniform with the rest of the script's error handling.
+**Fix:** Re-run the Apple CI job (or investigate the hosted macOS runner's simulator
+health, as the fix report already recommends) until `thumbnail_test.dart` completes
+cleanly, and confirm the two relevant test cases pass. Optionally add a dedicated
+symlinked-output-directory test case (a genuine symlink in the yet-to-exist prefix) to
+either `thumbnail_test.dart` or a Swift XCTest, since no current test constructs a
+symlinked ancestor and so even a clean CI run would only prove the "no symlinks
+present" path through this new code, not symlink resolution itself.
 
 ---
 
