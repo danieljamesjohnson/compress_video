@@ -58,7 +58,7 @@ Phase 1 ships an ffmpeg-generated corpus that mirrors phone structure (rotation 
 
 Not blocking until Phase 4 (Codecs, HDR and Hard Inputs).
 
-## 5. GitHub repository visibility
+## 5. GitHub repository visibility — RESOLVED 2026-09-21 (Dan: "make it public"; repo is now public, Actions minutes uncapped)
 
 Phase 1 creates `github.com/danieljamesjohnson/compress_video` as **private** and wires GitHub Actions to it (Linux + macOS runners). Your account is on the free plan: private repos get 2,000 Actions minutes/month and macOS is billed at 10×, so the macOS job is path-filtered to Apple-relevant changes. Making the repo public (Settings → General → Change visibility) lifts the cap entirely and is the intended MIT end state. Your call on when.
 
