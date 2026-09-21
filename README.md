@@ -32,6 +32,82 @@ Every quantity that crosses the Dart/native boundary carries its unit in its nam
 `frameRateFps`, `rotationDegrees`. There is no ambiguous bare `duration` or `position` anywhere
 in the public API.
 
+## Usage
+
+```dart
+const compressVideo = CompressVideo();
+
+// Media info: duration, dimensions, rotation, codec, HDR-ness — read without decoding the
+// whole file.
+final MediaInfo info = await compressVideo.getMediaInfo(path);
+print('${info.widthPx}x${info.heightPx}, ${info.durationMs}ms, ${info.videoCodec}');
+
+// A rotation-correct poster frame as JPEG bytes, at an exact millisecond.
+final Uint8List jpegBytes = await compressVideo.getThumbnail(
+  path,
+  positionMs: 1500,
+  quality: 80,
+  maxDimensionPx: 512,
+);
+
+// The same frame, written to a file instead — either a unique name inside the app's own
+// cache directory, or exactly at a caller-chosen outputPath.
+final String cachedThumbPath = await compressVideo.getThumbnailFile(path, positionMs: 1500);
+final String exactThumbPath = await compressVideo.getThumbnailFile(
+  path,
+  positionMs: 1500,
+  outputPath: '/some/writable/dir/poster.jpg',
+);
+```
+
+### `MediaInfo` fields
+
+| Field | Unit | Unknown sentinel |
+|---|---|---|
+| `durationMs` | milliseconds | always present (never unknown) |
+| `widthPx` / `heightPx` | pixels, **displayed** (rotation-corrected), never coded | always present |
+| `rotationDegrees` | unsigned clockwise degrees, as reported before the correction above | always present; `0` for an unrotated clip |
+| `sizeBytes` | bytes | always present |
+| `videoCodec` | normalised token (`h264`, `hevc`, `av1`, `vp9`, `unknown`) | `null` when the platform can't determine it |
+| `videoBitrateBps` | bits per second, platform-reported (tolerant, may vary slightly between platforms) | `null`, never `0` |
+| `frameRateFps` | frames per second, `double`, platform-reported (tolerant) | `null`, never `0` |
+| `hasAudio` | `bool` | always present |
+| `isHdr` | `bool` (PQ or HLG transfer characteristic) | `false` when undetermined — never an exception |
+
+### `getThumbnail` / `getThumbnailFile` semantics
+
+* **`positionMs`** — milliseconds from the start of the clip. Negative values throw
+  [`CompressVideoErrorReason.unsupportedInput`] synchronously (no frame before the start of a
+  clip is ever returned). A value beyond the clip's duration is **clamped to the last frame**
+  rather than rejected — duration reporting is approximate and both platforms' own frame APIs
+  already clamp this way.
+* **`quality`** — JPEG quality, `1` (lowest) to `100` (highest) inclusive; anything outside that
+  range throws `unsupportedInput` before crossing the platform channel.
+* **`maxDimensionPx`** — caps the longer side of the returned, displayed (rotation-corrected)
+  frame. The frame is **never upscaled**: a value at or above the native longer side returns the
+  native size unchanged. Must be positive when given; `null` (the default) means no cap.
+* **`outputPath`** (file variant only) — with no `outputPath`, the file is written to a
+  uniquely-named JPEG inside the app's own cache directory; a call never overwrites a previous
+  call's file. With an explicit `outputPath`, the file is written exactly there; a parent
+  directory that doesn't exist or isn't writable throws `io` and leaves no file behind.
+
+### `CompressVideoErrorReason` values
+
+Every public call throws a [`CompressVideoException`] instead of returning `null` or letting a
+raw platform exception escape. `reason` is one of:
+
+| Reason | Meaning |
+|---|---|
+| `fileNotFound` | The given path did not resolve to a readable file. |
+| `unsupportedInput` | The file exists but its container/codec isn't supported (or an argument, like a blank path or an out-of-range `quality`, was rejected before crossing the channel). |
+| `decoderUnavailable` | The platform could not obtain a decoder for the input. |
+| `io` | A platform I/O error not covered by a more specific reason above. |
+| `cancelled` | The operation was cancelled before it completed. |
+| `unknown` | The platform reported an error code this plugin version doesn't recognise; the original code is preserved in [`CompressVideoException.platformDetail`]. |
+| `encoderUnavailable` | The device could not obtain/configure an encoder for the requested output (compression, later versions). |
+| `outOfSpace` | The destination filesystem has no room for the output (compression, later versions). |
+| `interrupted` | The operation was interrupted by the system before completing and can be retried (Apple engine, later versions). |
+
 ## Supported platforms
 
 | Platform | Minimum version |

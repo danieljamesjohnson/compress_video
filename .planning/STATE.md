@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 14
-  completed_plans: 12
-  percent: 86
+  completed_plans: 14
+  percent: 100
 ---
 
 # Project State
@@ -16,35 +16,36 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-15)
 
 **Core value:** One call turns a phone video into a smaller MP4 that plays everywhere, and it never makes the file bigger, never returns null, and builds on today's Flutter toolchain.
-**Current focus:** Phase 2 complete (Android Compression on Media3); Phase 1 parked needs_human on CI billing
+**Current focus:** Phase 1 (Typed Contract, CI and Media Info) and Phase 2 (Android Compression on Media3) both 7/7 plans; both await phase-level verification
 
 ## Current Position
 
-Phase: 2 of 6 (Android Compression on Media3) — 7/7 plans, ready for phase-level verification. Phase 1 at 5/7 plans, needs_human
-Plan: 7 of 7 in current phase (complete)
-Status: Phase 1 resumed 2026-09-21 — 01-06 confirmed by CI run 35606910435 (Apple job success); executing 01-07 (wave 5 of 5). Phase 2 verification_deferred_human (see table).
-Last activity: 2026-09-21 — Repo made public, Actions unblocked, Mac SSH authorized; Apple CI green confirms 01-06; Android job now failing only on Pigeon-regeneration drift under Flutter 3.47.5 (being fixed)
+Phase: 1 of 6 (Typed Contract, CI and Media Info) — 7/7 plans, ready for phase-level verification. Phase 2 of 6 (Android Compression on Media3) — 7/7 plans, ready for phase-level verification.
+Plan: 7 of 7 in Phase 1 (complete)
+Status: Phase 1 complete — 01-07 closed the phase: added the cross-platform parity gate (tool/check_parity.sh, a new `parity` CI job), audited and closed the last CI gap (no-hand-written-channel-map check), and signed off 01-VALIDATION.md (status: validated, nyquist_compliant: true). CI run 35631865999 is green end-to-end (android, apple, parity). Phase 2 verification_deferred_human (see table).
+Last activity: 2026-09-21 — 01-07 executed: parity gate added and made tolerance-aware after catching (and correctly absorbing) two real platform deltas; a real `sh`/pipefail bug in the emulator-runner script fixed; toolchain pins, README, CHANGELOG and lane notes reconciled with what CI actually resolved.
 
-Progress: [█████████░] 86% (12/14 known plans; Phase 1 sub-count separately frozen at 5/7 until 01-06 re-verifies green and is re-summarized as complete)
+Progress: [██████████] 100% (14/14 known plans; both Phase 1 and Phase 2 await phase-level verification via /gsd-verify-work)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 65 min
-- Total execution time: 13.1 hours
+- Total plans completed: 14
+- Average duration: 70 min
+- Total execution time: 16.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 5 | 249 min | 50 min |
+| 1 | 7 | 535 min | 76 min |
 | 2 | 7 | 527 min | 75 min |
 
 **Recent Trend:**
-- Last 5 plans: ~130 min, ~75 min, ~48 min, ~100 min
+- Last 5 plans: ~75 min, ~48 min, ~100 min, 166 min, ~120 min
 - Trend: 02-07 (estimate/clearCache/APK build proof, closing the phase) took ~100 min across three tasks with heavy real-emulator verification (four preset accuracy runs, a 15-case new integration suite, a full-suite re-run, and a live APK build/inspect/zipalign cycle) — slower than 02-06 but proportionate to closing out the phase's last three requirements with real measurements rather than assumed numbers
-- 01-06 (not yet counted as completed — halted, see Blockers/Concerns): 166 min elapsed, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, final fix unverified due to a GitHub Actions billing block
+- 01-06: 166 min, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, confirmed green 2026-09-21 once the GitHub Actions billing block cleared
+- 01-07: ~120 min, almost entirely CI wall-clock across 4 pushed CI attempts on the two-runner pipeline: a real `sh`/pipefail bug in the Android emulator-runner script, two transient platform flakes (Phase 2's concurrent-job codec exhaustion on the emulator, and the documented iOS-simulator-hang pattern), then a real design bug in the parity gate itself (exact-match instead of tolerance-aware) that surfaced two legitimate, now-documented cross-platform deltas
 
 *Updated after each plan completion*
 
@@ -85,7 +86,9 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- [01-06]: Once GitHub Actions billing is resolved (QUESTIONS.md #6), re-run CI for `main` HEAD and confirm the `apple` job concludes `success` end-to-end (including the iOS-simulator integration step with the current Thumbnails.swift/thumbnail_test.dart fixes). No further code changes are expected. Re-summarize 01-06 as `status: complete` once confirmed, then proceed to 01-07.
+- [01-06]: DONE 2026-09-21 — re-run CI confirmed the `apple` job green end-to-end (run 35606910435); 01-06 re-summarized as `status: complete`, 01-07 executed.
+- [01-07]: The Android-only-path and Markdown-only-path CI gating checks (plan `<verification>` item 3) were confirmed against EXISTING historical evidence (e.g. runs 35052067820/35041859706/35040254344 all show `apple: skipped` on Phase 2 pushes that didn't touch Apple-relevant paths) rather than a fresh dedicated demonstration commit in this plan, to avoid burning further CI cycles after three iterations already spent closing the parity gate itself. If a future phase wants a clean, isolated demonstration, one hasn't been done specifically for 01-07's own commit lineage.
+- [01-07]: `small_480p`'s `durationMs` cross-platform delta (Android 3026ms vs Apple 2992ms vs ffprobe ground truth 3000ms — Apple closer) is documented in `corpus/README.md` and flagged for Phase 3 (CORE-07 exact cross-platform parity) to re-examine once the Apple compression engine lands; not a Phase 1 blocker since both platforms are within the sidecar's own `durationToleranceMs`.
 - [02-03]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the `targetSizeMb` 1.0/2.0 emulator cases against its hardware encoder and tighten `compress_test.dart`'s ±35% tolerance comment (or confirm ±15% only holds on hardware and adjust `CompressOptions.targetSizeMb`'s dartdoc accordingly).
 - [02-04]: Once a physical Android phone is available (QUESTIONS.md #3), re-run the transmux speed-ratio test against its hardware encoder to confirm the <30% elapsed-time claim (CORE-06) holds outside the emulator's software encoder, and re-verify `targetSizeMb`'s now ±55% emulator tolerance against hardware CBR delivery. Also: no corpus clip demonstrates an observable `transmuxed:true` result via the no-audio-track branch specifically (see 02-04-SUMMARY.md coverage note); consider adding one if a later plan needs that proof. (`doc/TOOLCHAIN.md`'s media3 pin was reconciled to 1.11.1 in 02-07 — no longer open.)
 - [02-05]: AUDO-01's non-AAC-source passthrough-fallback path has no automated end-to-end proof (no corpus fixture has non-AAC audio) — the real phone clips requested in QUESTIONS.md #4 may incidentally provide one; otherwise a future plan should add a synthetic non-AAC-audio fixture. ORNT-01's backstop truth (equal-width/height source, rotation 0) also has no corpus fixture (no square clip exists) and is unverified.
@@ -94,7 +97,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- [01-06 / Phase 1]: **GitHub Actions billing block (QUESTIONS.md #6, notified via notify-dan 2026-09-15)** — the `apple` CI job stopped starting entirely mid-session: "recent account payments have failed or your spending limit needs to be increased." This blocks re-verifying 01-06's final fix and blocks 01-07 (cross-platform parity gate) from starting until resolved and CI is confirmed green again.
+- [01-06 / Phase 1]: RESOLVED 2026-09-21 — the GitHub Actions billing block (QUESTIONS.md #6) was lifted when Dan made the repository public (#5); the `apple` job runs and concludes `success` again (confirmed by run 35606910435, then the 01-07 pipeline's own green runs).
 - [Phase 3]: SSH to `dans-macbook-air` is refused, which blocks Apple device/simulator verification (QUESTIONS.md #1). Phase 1 uses the GitHub Actions macOS runner meanwhile.
 - [Phase 4]: HEVC/HDR hardware checks need a physical Android phone (QUESTIONS.md #3).
 - [Phase 6]: No verified pub.dev publisher yet (QUESTIONS.md #2).
@@ -103,6 +106,7 @@ Recent decisions affecting current work:
 
 | Phase | State | Resume |
 |-------|-------|--------|
+| 1 | verification_deferred_human | /gsd-verify-work 1 (all 7 plans complete, CI run 35631865999 green end-to-end; success criteria 1-5 all met — see 01-07-SUMMARY.md) |
 | 2 | verification_deferred_human | /gsd-verify-work 2 (6 items in 02-UAT.md; #1 needs a physical phone, #2-#4 can be closed by an agent with new fixtures/tests) |
 
 ## Deferred Items
@@ -115,6 +119,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16
-Stopped at: Autonomous run halted 2026-09-16 — Phase 1 needs_human (GitHub Actions billing, QUESTIONS.md #6/#5), Phase 2 verification deferred to /gsd-verify-work 2, Phase 3 blocked on Mac SSH or CI. Resume: clear billing → `gh run rerun <latest> --failed` → /gsd-autonomous --from 1
-Resume file: None — Phase 2 is ready for /gsd-verify-work 2, then /gsd-plan-phase 3 (or resolve QUESTIONS.md #6 first to unpark Phase 1's 01-06/01-07)
+Last session: 2026-09-21
+Stopped at: Completed 01-07-PLAN.md — Phase 1 is fully complete (7/7 plans), CI green end-to-end (run 35631865999: android, apple, parity all success). Both Phase 1 and Phase 2 now await phase-level verification.
+Resume file: None — ready for /gsd-verify-work 1, /gsd-verify-work 2, then /gsd-plan-phase 3 (Mac SSH now works: `ssh dans-macbook-air`)

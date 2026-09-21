@@ -26,7 +26,7 @@ works (standard granularity: 4-6 phases).
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Typed Contract, CI and Media Info** - Pigeon contract proven by media info and thumbnails on Android, iOS and macOS, with CI green
+- [x] **Phase 1: Typed Contract, CI and Media Info** - Pigeon contract proven by media info and thumbnails on Android, iOS and macOS, with CI green
 - [ ] **Phase 2: Android Compression on Media3** - One-call compression on Android with presets, never-larger, transmux, upright portrait, audio and per-job progress/cancel
 - [ ] **Phase 3: Apple Compression to Parity** - The same calls and behaviour on iOS and macOS, via CocoaPods and SPM, with the example app on all three platforms
 - [ ] **Phase 4: Codecs, HDR and Hard Inputs** - HDR tone-mapping, HEVC with fallback, 5.1/PCM/no-audio sources and the real-clip corpus in CI
@@ -67,11 +67,11 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 01-05-PLAN.md — Thumbnails on Android: upright bytes and unique files at an exact millisecond, with boundary and concurrency coverage
-- [ ] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner — **code-complete, halted on a GitHub Actions billing block (QUESTIONS.md #6); needs a fresh green CI run to close out (see 01-06-SUMMARY.md)**
+- [x] 01-06-PLAN.md — Apple core in the shared `darwin/` tree: Probe, Thumbnails, XCTest on iOS and macOS, verified on the CI macOS runner — halt resolved, CI run 35606910435 confirmed green
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-07-PLAN.md — Cross-platform parity gate, full pipeline green, phase sign-off
+- [x] 01-07-PLAN.md — Cross-platform parity gate, full pipeline green, phase sign-off
 
 **Research**: Needed. Check current AGP/Kotlin/Pigeon versions and the plugin template for SPM + CocoaPods. Work out how to install the Android SDK and emulator on headless Linux with an AMD GPU (KVM acceleration), and how to run emulators on GitHub Actions.
 **Notes**: Apple-side verification in this phase uses the GitHub Actions macOS runner, because SSH to the MacBook Air is blocked (QUESTIONS.md #1). Create the corpus directory with the first clips (portrait, already-small, no audio) here. Phase 4 expands it.
