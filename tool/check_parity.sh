@@ -6,10 +6,19 @@
 # each expected to contain one or more "PARITY_JSON <json>" lines emitted by the integration-test
 # suites (media_info_test.dart, thumbnail_test.dart) and captured by CI via tee + grep.
 #
-# Exits non-zero on: a missing file, an empty file, a file with no PARITY_JSON lines, or any
-# value mismatch between the two merged records. A missing artifact is never treated as a match.
+# Uses the SAME field-level contract corpus/README.md already defines for the two platforms'
+# OWN per-clip assertions: `crossPlatform` fields other than durationMs must be byte-identical;
+# durationMs may differ by up to the clip's own sidecar `durationToleranceMs` (never a hardcoded
+# number); the thumbnail's width/height must be byte-identical and its sampled patch RGB may
+# differ per channel by up to the sidecar's own `thumbnailProbe.rgbTolerance` -- the same
+# tolerance each platform's own integration test already uses for JPEG re-encoding loss, reused
+# here rather than re-guessed. Exits non-zero on: a missing file, an empty file, a file with no
+# PARITY_JSON lines, a clip with no matching corpus sidecar, or any field outside its tolerance.
+# A missing artifact is never treated as a match.
 #
 # Usage: tool/check_parity.sh <platform-a-parity-file> <platform-b-parity-file>
+# Env: PARITY_CORPUS_DIR overrides the corpus directory (default: ../corpus relative to this
+#      script) -- used by check_parity_test.sh to point at hand-written fixture sidecars.
 
 set -euo pipefail
 
@@ -20,6 +29,8 @@ fi
 
 FILE_A="$1"
 FILE_B="$2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORPUS_DIR="${PARITY_CORPUS_DIR:-$SCRIPT_DIR/../corpus}"
 
 for f in "$FILE_A" "$FILE_B"; do
   if [ ! -f "$f" ]; then
@@ -50,17 +61,85 @@ merge() {
 MERGED_A="$(merge "$FILE_A")"
 MERGED_B="$(merge "$FILE_B")"
 
-COMPACT_A="$(printf '%s' "$MERGED_A" | jq -S -c .)"
-COMPACT_B="$(printf '%s' "$MERGED_B" | jq -S -c .)"
+FAILED=0
 
-if [ "$COMPACT_A" = "$COMPACT_B" ]; then
-  echo "Parity OK: $FILE_A matches $FILE_B"
-  exit 0
+fail() {
+  echo "MISMATCH $1" >&2
+  FAILED=1
+}
+
+# Every top-level key must appear in both records -- a clip or the thumbnail entry present on
+# only one platform is itself a divergence, not something to silently skip.
+KEYS_A="$(printf '%s' "$MERGED_A" | jq -r 'keys[]' | sort)"
+KEYS_B="$(printf '%s' "$MERGED_B" | jq -r 'keys[]' | sort)"
+if [ "$KEYS_A" != "$KEYS_B" ]; then
+  echo "FATAL: top-level keys differ between the two records:" >&2
+  diff <(printf '%s\n' "$KEYS_A") <(printf '%s\n' "$KEYS_B") >&2 || true
+  exit 1
 fi
 
-echo "Parity mismatch between $FILE_A and $FILE_B:" >&2
-# Pretty-printed, key-sorted diff so any differing key is named on its own line, not buried in a
-# single compact-JSON blob.
-diff <(printf '%s' "$MERGED_A" | jq -S .) <(printf '%s' "$MERGED_B" | jq -S .) >&2 || true
+# Fields every platform must report byte-identically (corpus/README.md's `crossPlatform`
+# fields, minus durationMs which gets its own tolerance-based check below).
+EXACT_FIELDS="widthPx heightPx rotationDegrees sizeBytes videoCodec hasAudio isHdr"
 
-exit 1
+for clip in $KEYS_A; do
+  [ "$clip" = "thumbnail" ] && continue
+
+  SIDECAR="$CORPUS_DIR/$clip.expected.json"
+  if [ ! -f "$SIDECAR" ]; then
+    echo "FATAL: no corpus sidecar found for clip '$clip' at $SIDECAR" >&2
+    FAILED=1
+    continue
+  fi
+  TOLERANCE_MS=$(jq -r '.crossPlatform.durationToleranceMs' "$SIDECAR")
+
+  for field in $EXACT_FIELDS; do
+    VAL_A=$(printf '%s' "$MERGED_A" | jq -c --arg f "$field" '.[$ARGS.named.clip][$f]' --arg clip "$clip")
+    VAL_B=$(printf '%s' "$MERGED_B" | jq -c --arg f "$field" '.[$ARGS.named.clip][$f]' --arg clip "$clip")
+    if [ "$VAL_A" != "$VAL_B" ]; then
+      fail "$clip.$field: A=$VAL_A B=$VAL_B (must match exactly)"
+    fi
+  done
+
+  DUR_A=$(printf '%s' "$MERGED_A" | jq -r --arg clip "$clip" '.[$clip].durationMs')
+  DUR_B=$(printf '%s' "$MERGED_B" | jq -r --arg clip "$clip" '.[$clip].durationMs')
+  DIFF=$(( DUR_A > DUR_B ? DUR_A - DUR_B : DUR_B - DUR_A ))
+  if [ "$DIFF" -gt "$TOLERANCE_MS" ]; then
+    fail "$clip.durationMs: A=$DUR_A B=$DUR_B diff=${DIFF}ms exceeds sidecar durationToleranceMs=${TOLERANCE_MS}ms"
+  fi
+done
+
+# Thumbnail record: width/height exact; sampled patch RGB within the sidecar's documented
+# rgbTolerance per channel (portrait_rot90.expected.json is the sidecar carrying thumbnailProbe).
+if printf '%s' "$MERGED_A" | jq -e 'has("thumbnail")' >/dev/null; then
+  PROBE_SIDECAR="$CORPUS_DIR/portrait_rot90.expected.json"
+  if [ ! -f "$PROBE_SIDECAR" ]; then
+    echo "FATAL: no thumbnailProbe sidecar found at $PROBE_SIDECAR" >&2
+    exit 1
+  fi
+  RGB_TOLERANCE=$(jq -r '.thumbnailProbe.rgbTolerance' "$PROBE_SIDECAR")
+
+  for field in widthPx heightPx; do
+    VAL_A=$(printf '%s' "$MERGED_A" | jq -c --arg f "$field" '.thumbnail[$f]')
+    VAL_B=$(printf '%s' "$MERGED_B" | jq -c --arg f "$field" '.thumbnail[$f]')
+    if [ "$VAL_A" != "$VAL_B" ]; then
+      fail "thumbnail.$field: A=$VAL_A B=$VAL_B (must match exactly)"
+    fi
+  done
+
+  for i in 0 1 2; do
+    C_A=$(printf '%s' "$MERGED_A" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
+    C_B=$(printf '%s' "$MERGED_B" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
+    DIFF=$(( C_A > C_B ? C_A - C_B : C_B - C_A ))
+    if [ "$DIFF" -gt "$RGB_TOLERANCE" ]; then
+      fail "thumbnail.patchRgb[$i]: A=$C_A B=$C_B diff=$DIFF exceeds sidecar rgbTolerance=$RGB_TOLERANCE"
+    fi
+  done
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "Parity FAILED between $FILE_A and $FILE_B" >&2
+  exit 1
+fi
+
+echo "Parity OK: $FILE_A matches $FILE_B (exact fields identical; durationMs and thumbnail RGB within each clip's own sidecar tolerance)"

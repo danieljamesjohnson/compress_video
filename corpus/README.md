@@ -75,6 +75,30 @@ width/height for rotation 0/180 instead of 90/270.
   `frameRateToleranceFps`, 0.5fps). A platform that cannot report a tolerant field at all must
   report `null`, never `0` — `0` would silently look like a real (wrong) measurement.
 
+## CI's cross-platform parity gate reuses these same tolerances (01-07)
+
+`tool/check_parity.sh` diffs the ACTUAL `crossPlatform` values the Android emulator and the iOS
+simulator each observed for every clip (not just "both ran the same test file"). It applies
+exactly the tolerances documented above — every `crossPlatform` field except `durationMs` must be
+byte-identical between platforms; `durationMs` may differ by up to that clip's own sidecar
+`durationToleranceMs`; the thumbnail's sampled patch RGB may differ per channel by up to
+`thumbnailProbe.rgbTolerance` — read live from the sidecar files, never hardcoded in the script.
+
+**Observed real deltas (2026-09-21, CI run 35624754433, commit 06ec7b6):** `small_480p`'s
+`durationMs` came back `3026` on the Android emulator and `2992` on the iOS simulator — a 34ms
+difference, exactly one `durationToleranceMs` bucket at 30fps, i.e. the two platforms disagree by
+about one frame on this clip's rounded duration. Against this clip's own ffprobe-derived ground
+truth (`durationMs: 3000`), Apple's `2992` is 8ms off and Android's `3026` is 26ms off — Apple is
+closer to ground truth here, though both are within the clip's own `durationToleranceMs` (34ms)
+and neither fails its OWN platform's `_expectCrossPlatformMatches` assertion. The `portrait_rot90`
+thumbnail's sampled patch came back `[255, 255, 0]` (pure yellow) on Android and `[255, 242, 0]`
+on iOS — a 13-point green delta from JPEG re-encoding, well inside `rgbTolerance` (24). Both are
+legitimate platform differences the tolerances above exist to absorb, not bugs in either
+platform's `getMediaInfo`/`getThumbnail` implementation. `small_480p`'s duration delta (Android
+further from ffprobe truth than Apple) is flagged for Phase 3 (which owns CORE-07 exact
+cross-platform parity) to re-examine once the Apple compression engine lands, rather than fixed
+here.
+
 ## Thumbnail probe-patch contract
 
 `portrait_rot90.mp4` carries a flat 200x200 colour patch that changes to a new fully-saturated

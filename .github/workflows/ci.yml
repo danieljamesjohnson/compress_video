@@ -450,6 +450,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Self-test the parity gate against hand-written fixtures
+        # Proves check_parity.sh itself before trusting it on the real artifacts below: a
+        # within-tolerance fixture must pass and an out-of-tolerance one must fail and name the
+        # differing field.
+        run: bash tool/check_parity_test.sh
+
       - name: Download Android parity artifact
         uses: actions/download-artifact@v4
         with:

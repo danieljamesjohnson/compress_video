@@ -20,29 +20,17 @@ import 'package:integration_test/integration_test.dart';
 final SplayTreeMap<String, dynamic> _parityRecords =
     SplayTreeMap<String, dynamic>();
 
-/// Rounds [durationMs] into the sidecar's own tolerance bucket so a legitimate one-millisecond
-/// platform rounding difference never reads as a divergence, while a real mismatch still does.
-int _bucketDuration(int durationMs, int toleranceMs) {
-  if (toleranceMs <= 0) {
-    return durationMs;
-  }
-  return (durationMs / toleranceMs).round() * toleranceMs;
-}
-
 /// Records [info]'s `crossPlatform` field set for [clipName] into [_parityRecords], with keys
 /// in a fixed sorted order (via [SplayTreeMap]) so the two platforms' emitted lines are
-/// directly comparable as text.
-void _recordParity(
-  String clipName,
-  MediaInfo info,
-  Map<String, dynamic> sidecar,
-) {
-  final int toleranceMs =
-      (sidecar['crossPlatform'] as Map<String, dynamic>)['durationToleranceMs']
-          as int;
+/// directly comparable as text. `durationMs` is recorded RAW (not pre-bucketed): rounding a
+/// value into a fixed-width bucket before comparison is unsound at bucket boundaries (a 1ms
+/// real difference can still land in different buckets), so tool/check_parity.sh (01-07) does
+/// the tolerance-aware comparison itself, against the same sidecar `durationToleranceMs` this
+/// suite's own `_expectCrossPlatformMatches` already uses.
+void _recordParity(String clipName, MediaInfo info) {
   _parityRecords[clipName] =
       SplayTreeMap<String, dynamic>.from(<String, dynamic>{
-        'durationMs': _bucketDuration(info.durationMs, toleranceMs),
+        'durationMs': info.durationMs,
         'hasAudio': info.hasAudio,
         'heightPx': info.heightPx,
         'isHdr': info.isHdr,
@@ -178,7 +166,7 @@ void main() {
 
       _expectCrossPlatformMatches(info, sidecar);
       _expectTolerantWithinBounds(info, sidecar);
-      _recordParity(clipName, info, sidecar);
+      _recordParity(clipName, info);
     });
   }
 
