@@ -1,6 +1,6 @@
 # QUESTIONS — things only Dan can do
 
-## 1. Authorize danserver's SSH key on the MacBook Air (blocks all Apple builds)
+## 1. Authorize danserver's SSH key on the MacBook Air — RESOLVED 2026-09-21 (Dan added the key; Mac user is `danjohnson`; `ssh dans-macbook-air` works from danserver)
 
 `ssh dans-macbook-air` from danserver is refused: `Permission denied (publickey,password,keyboard-interactive)`.
 Agents need it to compile and test the iOS/macOS side (decision 2026-09-15: "SSH to dans-macbook-air").
@@ -85,3 +85,11 @@ minutes). 01-06's Apple Swift changes are code-complete and were validated as fa
 (see 01-06-SUMMARY.md), but the final fully-green confirmation of the last fix is blocked here.
 Re-run the `CI` workflow's latest `main` push (`gh run rerun <id> --failed` or a new push) once
 billing is resolved.
+
+## 7. CocoaPods (and Homebrew) are not installed on the MacBook Air
+
+Xcode 26.2, an iOS 26.2 simulator runtime and Flutter are present, but `pod` is not, and there is no
+Homebrew. Flutter's CocoaPods integration path (and any `flutter build ios` for an app that still
+uses CocoaPods) needs it. Agents cannot install it: `sudo gem install cocoapods` needs your password.
+Either run `sudo gem install cocoapods` on the Mac, or install Homebrew and `brew install cocoapods`.
+Until then, Phase 3 builds on the Mac use the Swift Package Manager path and CI covers CocoaPods.
