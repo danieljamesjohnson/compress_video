@@ -204,11 +204,13 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -partition-size 2048
           # Captured with `tee` (not swallowed behind a bare pipe) so the step still shows the
           # full test log AND still fails when a test fails: `set -o pipefail` makes the step's
-          # own exit status the `flutter test` exit status, not `tee`'s.
-          script: |
-            cd example
-            set -o pipefail
-            flutter test integration_test | tee /tmp/android_integration.log
+          # own exit status the `flutter test` exit status, not `tee`'s. Wrapped in a single
+          # `bash -c` invocation because this action's `script` executes each line as its own
+          # separate `sh -c` call (confirmed live: a bare multi-line block's `cd` never
+          # persisted to the next line and dash's `sh` rejected `set -o pipefail` outright) --
+          # one line, one bash subshell, is the only way `cd`/`set -o pipefail`/the pipe all
+          # apply to the same process.
+          script: bash -c 'cd example && set -o pipefail && flutter test integration_test | tee /tmp/android_integration.log'
 
       - name: Extract cross-platform parity records (Android)
         # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
