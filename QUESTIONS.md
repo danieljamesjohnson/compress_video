@@ -62,7 +62,7 @@ Not blocking until Phase 4 (Codecs, HDR and Hard Inputs).
 
 Phase 1 creates `github.com/danieljamesjohnson/compress_video` as **private** and wires GitHub Actions to it (Linux + macOS runners). Your account is on the free plan: private repos get 2,000 Actions minutes/month and macOS is billed at 10×, so the macOS job is path-filtered to Apple-relevant changes. Making the repo public (Settings → General → Change visibility) lifts the cap entirely and is the intended MIT end state. Your call on when.
 
-## 6. GitHub Actions billing block (blocks all further Apple/macOS CI verification) — 2026-09-15
+## 6. GitHub Actions billing block — RESOLVED 2026-09-21 (repo made public per #5; Actions jobs start again, macOS included)
 
 While driving 01-06 (Apple Probe/Thumbnails) to a green CI run, the `apple` job stopped starting
 entirely. `gh run view <id> --attempt 3` shows:
