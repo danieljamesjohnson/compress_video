@@ -103,6 +103,22 @@ for clip in $KEYS_A; do
 
   DUR_A=$(printf '%s' "$MERGED_A" | jq -r --arg clip "$clip" '.[$clip].durationMs')
   DUR_B=$(printf '%s' "$MERGED_B" | jq -r --arg clip "$clip" '.[$clip].durationMs')
+  # Guard against a missing/malformed durationMs field before the bash arithmetic below: `jq -r`
+  # returns the literal string "null" for an absent field, and feeding that straight into
+  # `$(( ))` fails with an opaque bash syntax error instead of this script's documented,
+  # debuggable MISMATCH -- undermining the debuggability every other failure mode here is
+  # deliberately designed around (see the `fail()` helper and its other call sites).
+  if [ "$DUR_A" = "null" ] || [ "$DUR_B" = "null" ]; then
+    fail "$clip.durationMs: A=$DUR_A B=$DUR_B (field missing on at least one platform)"
+    continue
+  fi
+  # Same guard for the sidecar's own durationToleranceMs: every committed sidecar currently
+  # carries this field, but a future refactor that renames or drops it should fail clean here,
+  # not with a bash `-gt` usage error below.
+  if [ "$TOLERANCE_MS" = "null" ] || [ -z "$TOLERANCE_MS" ]; then
+    fail "$clip.durationToleranceMs: sidecar $SIDECAR is missing crossPlatform.durationToleranceMs (A=$DUR_A B=$DUR_B)"
+    continue
+  fi
   DIFF=$(( DUR_A > DUR_B ? DUR_A - DUR_B : DUR_B - DUR_A ))
   if [ "$DIFF" -gt "$TOLERANCE_MS" ]; then
     fail "$clip.durationMs: A=$DUR_A B=$DUR_B diff=${DIFF}ms exceeds sidecar durationToleranceMs=${TOLERANCE_MS}ms"
@@ -127,14 +143,27 @@ if printf '%s' "$MERGED_A" | jq -e 'has("thumbnail")' >/dev/null; then
     fi
   done
 
-  for i in 0 1 2; do
-    C_A=$(printf '%s' "$MERGED_A" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
-    C_B=$(printf '%s' "$MERGED_B" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
-    DIFF=$(( C_A > C_B ? C_A - C_B : C_B - C_A ))
-    if [ "$DIFF" -gt "$RGB_TOLERANCE" ]; then
-      fail "thumbnail.patchRgb[$i]: A=$C_A B=$C_B diff=$DIFF exceeds sidecar rgbTolerance=$RGB_TOLERANCE"
-    fi
-  done
+  # Guard the sidecar's own rgbTolerance before the per-channel arithmetic loop below: an
+  # absent/malformed field must fail clean, not crash the whole loop with a bash `-gt` usage
+  # error on the first channel.
+  if [ "$RGB_TOLERANCE" = "null" ] || [ -z "$RGB_TOLERANCE" ]; then
+    fail "thumbnail.rgbTolerance: sidecar $PROBE_SIDECAR is missing thumbnailProbe.rgbTolerance"
+  else
+    for i in 0 1 2; do
+      C_A=$(printf '%s' "$MERGED_A" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
+      C_B=$(printf '%s' "$MERGED_B" | jq -r --argjson i "$i" '.thumbnail.patchRgb[$i]')
+      # Same missing-field guard as durationMs above: a "null" from jq must become a clean
+      # MISMATCH, never an opaque bash arithmetic error.
+      if [ "$C_A" = "null" ] || [ "$C_B" = "null" ]; then
+        fail "thumbnail.patchRgb[$i]: A=$C_A B=$C_B (field missing on at least one platform)"
+        continue
+      fi
+      DIFF=$(( C_A > C_B ? C_A - C_B : C_B - C_A ))
+      if [ "$DIFF" -gt "$RGB_TOLERANCE" ]; then
+        fail "thumbnail.patchRgb[$i]: A=$C_A B=$C_B diff=$DIFF exceeds sidecar rgbTolerance=$RGB_TOLERANCE"
+      fi
+    done
+  fi
 fi
 
 if [ "$FAILED" -ne 0 ]; then

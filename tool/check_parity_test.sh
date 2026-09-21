@@ -74,6 +74,51 @@ else
   echo "PASS: out-of-tolerance fixture correctly fails and names fixture_clip.durationMs"
 fi
 
+# Case 3 (WR-03): durationMs missing entirely on one platform. Must FAIL with a clean MISMATCH
+# naming the field as missing -- never a bash arithmetic syntax error from feeding jq's literal
+# "null" string into `$(( ))`.
+{
+  echo 'PARITY_JSON {"fixture_clip":{"hasAudio":true,"heightPx":200,"isHdr":false,"rotationDegrees":0,"sizeBytes":500,"videoCodec":"h264","widthPx":100}}'
+} > "$TMP/a_missing_duration.txt"
+{
+  echo 'PARITY_JSON {"fixture_clip":{"durationMs":1000,"hasAudio":true,"heightPx":200,"isHdr":false,"rotationDegrees":0,"sizeBytes":500,"videoCodec":"h264","widthPx":100}}'
+} > "$TMP/b_missing_duration.txt"
+
+if PARITY_CORPUS_DIR="$TMP/corpus" bash "$SCRIPT_DIR/check_parity.sh" "$TMP/a_missing_duration.txt" "$TMP/b_missing_duration.txt" > "$TMP/missing_duration.out" 2>&1; then
+  echo "SELF-TEST FAILED: expected the missing-durationMs fixture to FAIL. Output:" >&2
+  cat "$TMP/missing_duration.out" >&2
+  FAILED=1
+elif ! grep -q 'MISMATCH fixture_clip.durationMs.*field missing' "$TMP/missing_duration.out"; then
+  echo "SELF-TEST FAILED: missing-durationMs failure did not produce a clean MISMATCH naming the field as missing (got a bash arithmetic error instead?). Output:" >&2
+  cat "$TMP/missing_duration.out" >&2
+  FAILED=1
+else
+  echo "PASS: missing-durationMs fixture correctly fails cleanly and names fixture_clip.durationMs as missing"
+fi
+
+# Case 4 (IN-02/WR-03): thumbnail.patchRgb missing entirely on one platform. Must FAIL with a
+# clean MISMATCH naming each missing channel -- same guard, for the per-channel arithmetic loop.
+{
+  echo 'PARITY_JSON {"fixture_clip":{"durationMs":1000,"hasAudio":true,"heightPx":200,"isHdr":false,"rotationDegrees":0,"sizeBytes":500,"videoCodec":"h264","widthPx":100}}'
+  echo 'PARITY_JSON {"thumbnail":{"heightPx":10,"widthPx":10}}'
+} > "$TMP/a_missing_rgb.txt"
+{
+  echo 'PARITY_JSON {"fixture_clip":{"durationMs":1000,"hasAudio":true,"heightPx":200,"isHdr":false,"rotationDegrees":0,"sizeBytes":500,"videoCodec":"h264","widthPx":100}}'
+  echo 'PARITY_JSON {"thumbnail":{"heightPx":10,"patchRgb":[100,100,100],"widthPx":10}}'
+} > "$TMP/b_missing_rgb.txt"
+
+if PARITY_CORPUS_DIR="$TMP/corpus" bash "$SCRIPT_DIR/check_parity.sh" "$TMP/a_missing_rgb.txt" "$TMP/b_missing_rgb.txt" > "$TMP/missing_rgb.out" 2>&1; then
+  echo "SELF-TEST FAILED: expected the missing-patchRgb fixture to FAIL. Output:" >&2
+  cat "$TMP/missing_rgb.out" >&2
+  FAILED=1
+elif ! grep -q 'MISMATCH thumbnail.patchRgb\[0\].*field missing' "$TMP/missing_rgb.out"; then
+  echo "SELF-TEST FAILED: missing-patchRgb failure did not produce a clean MISMATCH naming the channel as missing (got a bash arithmetic error instead?). Output:" >&2
+  cat "$TMP/missing_rgb.out" >&2
+  FAILED=1
+else
+  echo "PASS: missing-patchRgb fixture correctly fails cleanly and names thumbnail.patchRgb[0] as missing"
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   echo "check_parity.sh self-test: FAILED" >&2
   exit 1
