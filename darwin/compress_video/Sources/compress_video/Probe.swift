@@ -80,7 +80,10 @@ final class Probe: ProbeHostApi {
         // separately bans forced casts. Rather than pick between an error and a banned
         // pattern, `videoCodec` gracefully degrades to `unknown` (via `normalizeCodec(nil)`)
         // on this pre-iOS-16/macOS-13 fallback path only -- the same "detector unavailable is
-        // safe, never a crash" policy `isHdr` already uses below.
+        // safe, never a crash" policy `isHdr` already uses below. This is a documented,
+        // accepted platform-version limitation: see `MediaInfo.videoCodec`'s dartdoc and the
+        // README's "Known limitation" note for the exact iOS 13-15/macOS 11-12 boundary this
+        // comment describes.
         formatDescriptions = []
       }
     } catch let error as CompressVideoError {

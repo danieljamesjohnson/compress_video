@@ -68,11 +68,18 @@ final String exactThumbPath = await compressVideo.getThumbnailFile(
 | `widthPx` / `heightPx` | pixels, **displayed** (rotation-corrected), never coded | always present |
 | `rotationDegrees` | unsigned clockwise degrees, as reported before the correction above | always present; `0` for an unrotated clip |
 | `sizeBytes` | bytes | always present |
-| `videoCodec` | normalised token (`h264`, `hevc`, `av1`, `vp9`, `unknown`) | `null` when the platform can't determine it |
+| `videoCodec` | normalised token (`h264`, `hevc`, `av1`, `vp9`, `unknown`) | `null` when the platform can't determine it; **always `unknown` on iOS 13–15 / macOS 11–12** — see note below |
 | `videoBitrateBps` | bits per second, platform-reported (tolerant, may vary slightly between platforms) | `null`, never `0` |
 | `frameRateFps` | frames per second, `double`, platform-reported (tolerant) | `null`, never `0` |
 | `hasAudio` | `bool` | always present |
 | `isHdr` | `bool` (PQ or HLG transfer characteristic) | `false` when undetermined — never an exception |
+
+> **Known limitation:** `videoCodec` is always `"unknown"` on iOS 13–15 and macOS 11–12. On
+> those OS versions the plugin falls back to the synchronous `AVAssetTrack.formatDescriptions`
+> API, whose untyped `[Any]` elements cannot be downcast to `CMFormatDescription` without either
+> a forced cast (outside this project's threat model) or a conditional cast the compiler flags
+> as "always succeeds" (an error under this build's warnings-as-errors). From iOS 16 / macOS 13
+> onward, the modern `async` loading API is used and reports the real codec normally.
 
 ### `getThumbnail` / `getThumbnailFile` semantics
 

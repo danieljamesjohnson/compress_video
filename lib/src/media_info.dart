@@ -43,6 +43,16 @@ class MediaInfo {
 
   /// Normalised video codec token (`h264`, `hevc`, `av1`, `vp9`, `unknown`), or `null` when
   /// the platform could not determine it.
+  ///
+  /// **Known platform-version limitation (iOS 13–15, macOS 11–12):** on these older Apple OS
+  /// versions this is always `"unknown"`, never the actual codec, because the synchronous
+  /// `AVAssetTrack.formatDescriptions` API the plugin falls back to on that range returns an
+  /// untyped `[Any]` whose elements cannot be downcast to `CMFormatDescription` without either
+  /// a forced cast (banned by this plugin's threat model) or a conditional cast the compiler
+  /// flags as "always succeeds" (an error under this project's warnings-as-errors build). From
+  /// iOS 16 / macOS 13 onward, the modern `async` `AVAssetTrack.load(.formatDescriptions)` API
+  /// is used instead and reports the real codec normally. See `Probe.swift`'s
+  /// `getMediaInfo` for the exact `#available` boundary.
   final String? videoCodec;
 
   /// Average video-track bitrate, in bits per second, or `null` when the platform could not
