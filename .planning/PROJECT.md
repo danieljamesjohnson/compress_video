@@ -32,7 +32,8 @@ file bigger, never returns null, and builds on today's Flutter toolchain**.
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ Media info and rotation-correct thumbnails through a typed Pigeon contract on Android, iOS and macOS, with CI on Linux + macOS runners and a cross-platform parity gate — Phase 1 (2026-09-21)
+- ✓ (Android only, pending Phase 2 human verification) one-call H.264/AAC compression with presets and explicit targets, never-larger, transmux fast path, upright output, audio modes, per-job progress/cancel, estimate, clearCache — Phase 2
 
 ### Active
 
@@ -116,7 +117,11 @@ file bigger, never returns null, and builds on today's Flutter toolchain**.
 | Default output: tone-mapped SDR H.264 + passthrough AAC; HEVC and keep-HDR opt-in | Maximum recipient compatibility; nobody asked for HEVC, everybody asked for smaller files | — Pending |
 | Ship a `video_compress`-shaped compatibility layer and migration table | Adoption story is "drop-in"; 1,200+ repos have the old verbs in their code | — Pending |
 | v1 platforms: Android + iOS + macOS; web/desktop later | Matches the incumbent's surface; macOS is nearly free once the AVFoundation code exists | — Pending |
-| Apple builds via SSH to `dans-macbook-air` | danserver is Linux; autonomous verification needs Xcode | — Pending (key not yet authorized) |
+| Apple builds via SSH to `dans-macbook-air` | danserver is Linux; autonomous verification needs Xcode | ✓ Key authorized 2026-09-21 (user `danjohnson`); no CocoaPods on the Mac yet |
+| GitHub repo public from day one | Free-plan Actions minutes were exhausted in one afternoon by the 10× macOS runner; public repos are uncapped and MIT is the intended licence | ✓ Made public 2026-09-21 |
+| Shared `darwin/` Swift tree (one podspec + one Package.swift) | One implementation for iOS and macOS; both CocoaPods and SPM install paths verified in CI | ✓ Phase 1 |
+| Never-larger applies to every delivered file, remux included; in-app muxer streamable output disabled | A remux padded a 395 KB `free` box into a 77 KB clip; the core promise is the file never grows | ✓ Phase 2 |
+| Cross-platform parity gate compares with the corpus sidecars' documented tolerances, not byte equality | Android and Apple legitimately differ by one frame of duration and by JPEG channel drift | ✓ Phase 1 (01-07) |
 
 ## Evolution
 
@@ -136,4 +141,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-15 after initialization*
+*Last updated: 2026-09-21 after Phase 1 completion*

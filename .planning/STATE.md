@@ -3,10 +3,10 @@ gsd_state_version: '1.0'
 status: executing
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 14
   completed_plans: 14
-  percent: 100
+  percent: 17
 ---
 
 # Project State
@@ -16,14 +16,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-15)
 
 **Core value:** One call turns a phone video into a smaller MP4 that plays everywhere, and it never makes the file bigger, never returns null, and builds on today's Flutter toolchain.
-**Current focus:** Phase 1 (Typed Contract, CI and Media Info) and Phase 2 (Android Compression on Media3) both 7/7 plans; both await phase-level verification
+**Current focus:** Phase 3 — Apple Compression to Parity (next to discuss/plan); Phase 2 awaits /gsd-verify-work 2
 
 ## Current Position
 
-Phase: 1 of 6 (Typed Contract, CI and Media Info) — 7/7 plans, ready for phase-level verification. Phase 2 of 6 (Android Compression on Media3) — 7/7 plans, ready for phase-level verification.
-Plan: 7 of 7 in Phase 1 (complete)
-Status: Phase 1 complete — 01-07 closed the phase: added the cross-platform parity gate (tool/check_parity.sh, a new `parity` CI job), audited and closed the last CI gap (no-hand-written-channel-map check), and signed off 01-VALIDATION.md (status: validated, nyquist_compliant: true). CI run 35631865999 is green end-to-end (android, apple, parity). Phase 2 verification_deferred_human (see table).
-Last activity: 2026-09-21 — 01-07 executed: parity gate added and made tolerance-aware after catching (and correctly absorbing) two real platform deltas; a real `sh`/pipefail bug in the emulator-runner script fixed; toolchain pins, README, CHANGELOG and lane notes reconciled with what CI actually resolved.
+Phase: 1 of 6 complete (verified 7/7); Phase 2 executed, verification deferred to human; Phase 3 not started
+Plan: 14 of 14 plans across Phases 1-2 complete
+Status: Phase 1 COMPLETE (01-VERIFICATION passed; CI run 35638310380 attempt 3 all green incl. parity gate). Autonomous run paused before Phase 3 — resume in a fresh session with /gsd-autonomous --from 3. Pending advisory hooks for Phase 1 and 2: /gsd-validate-phase 1, /gsd-secure-phase 1, /gsd-validate-phase 2, /gsd-secure-phase 2.
+Last activity: 2026-09-21 — Repo public, Actions unblocked, Mac SSH working; 01-06 confirmed, 01-07 parity gate shipped (tolerance-aware); Phase 1 code review clean after 4 fixes; Phase 1 verification passed
 
 Progress: [██████████] 100% (14/14 known plans; both Phase 1 and Phase 2 await phase-level verification via /gsd-verify-work)
 
@@ -120,5 +120,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-21
-Stopped at: Completed 01-07-PLAN.md — Phase 1 is fully complete (7/7 plans), CI green end-to-end (run 35631865999: android, apple, parity all success). Both Phase 1 and Phase 2 now await phase-level verification.
+Stopped at: Phase 1 complete 2026-09-21. Next: /gsd-autonomous --from 3 (fresh session), /gsd-verify-work 2 for Phase 2's six UAT items, then the advisory validate/secure hooks for Phases 1 and 2
 Resume file: None — ready for /gsd-verify-work 1, /gsd-verify-work 2, then /gsd-plan-phase 3 (Mac SSH now works: `ssh dans-macbook-air`)
