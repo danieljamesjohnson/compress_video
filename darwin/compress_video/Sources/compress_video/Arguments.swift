@@ -6,13 +6,13 @@ import Foundation
 /// No file API beyond `FileManager` itself is touched until this passes -- `Probe` and
 /// `Thumbnails` both call this first, on every request.
 enum Arguments {
-  /// Resolves `path` to its standardised absolute form and returns it, or throws a
-  /// `CompressVideoError` naming the specific rejection reason. Requires an existing,
-  /// readable, non-empty regular file.
+  /// Resolves `path` to its canonical absolute form (symlinks resolved, matching Android's
+  /// `canonicalFile`) and returns it, or throws a `CompressVideoError` naming the specific
+  /// rejection reason. Requires an existing, readable, non-empty regular file.
   ///
-  /// Standardising the path before use means a relative or traversing path cannot reach
-  /// outside what the caller's own process could already read -- the plugin runs inside the
-  /// host app's own sandbox, so this control cannot grant access the caller did not already
+  /// Canonicalising the path before use means a relative, traversing, or symlinked path cannot
+  /// reach outside what the caller's own process could already read -- the plugin runs inside
+  /// the host app's own sandbox, so this control cannot grant access the caller did not already
   /// have. It exists to turn a traversal attempt into a typed `CompressVideoError` instead of
   /// an unexpected native failure.
   static func requireReadableMediaFile(_ path: String) throws -> String {
@@ -64,10 +64,11 @@ enum Arguments {
     return standardizedPath
   }
 
-  /// Resolves `outputPath` to its standardised absolute form and requires its parent
+  /// Resolves `outputPath` to its canonical absolute form (symlinks resolved in whatever
+  /// prefix already exists, matching Android's `canonicalFile`) and requires its parent
   /// directory to already exist and be writable, throwing a `CompressVideoError` with reason
   /// `"io"` if either requirement fails -- before any bytes are written. This is the
-  /// traversal mitigation for a write destination: a standardised path cannot resolve outside
+  /// traversal mitigation for a write destination: a canonicalised path cannot resolve outside
   /// what the caller's own process could already write, and turning a bad destination into a
   /// typed error here means the caller never sees a partial file or an unexpected native
   /// failure (including on a sandboxed macOS host app, where an arbitrary destination may
@@ -157,10 +158,42 @@ enum Arguments {
     }
   }
 
-  /// Resolves `path` to a fully-qualified, standardised absolute filesystem path: relative
-  /// paths are resolved against the current directory, and redundant `.`/`..` components are
-  /// removed. Does not resolve symlinks -- this is standardisation, not canonicalisation.
+  /// Resolves `path` to a fully-qualified, canonical absolute filesystem path: relative paths
+  /// are resolved against the current directory, redundant `.`/`..` components are removed,
+  /// and any symlinks are resolved to their real target -- matching Android's
+  /// `File.canonicalFile` semantics used by `Arguments.kt`'s `requireReadableMediaFile`/
+  /// `requireWritableOutputParent`, and the cross-platform contract `CompressOptions
+  /// .outputPath` already documents ("the native side resolves `.`/`..` segments and symbolic
+  /// links before writing").
+  ///
+  /// `resolvingSymlinksInPath()` can only fully resolve components that already exist, which
+  /// matters for `outputPath`: it names a file that is about to be *created*, so its leaf
+  /// component never exists yet at validation time. Resolve symlinks in whatever prefix of the
+  /// path does exist and reattach the (possibly nonexistent) remaining suffix literally --
+  /// the same "canonicalise the existing prefix, append the rest" behaviour Java's
+  /// `File.canonicalFile` gives on the Kotlin side for a not-yet-existing output path -- rather
+  /// than silently skipping symlink resolution altogether for the entire path.
   private static func standardizedAbsolutePath(_ path: String) -> String {
-    URL(fileURLWithPath: path).standardizedFileURL.path
+    let standardizedURL = URL(fileURLWithPath: path).standardizedFileURL
+    let fileManager = FileManager.default
+
+    if fileManager.fileExists(atPath: standardizedURL.path) {
+      return standardizedURL.resolvingSymlinksInPath().path
+    }
+
+    // Walk up from the full path to the nearest existing ancestor, resolve symlinks in that
+    // ancestor, then reattach the nonexistent suffix components literally.
+    var existingAncestor = standardizedURL.deletingLastPathComponent()
+    var suffixComponents: [String] = [standardizedURL.lastPathComponent]
+    while !fileManager.fileExists(atPath: existingAncestor.path) && existingAncestor.path != "/" {
+      suffixComponents.append(existingAncestor.lastPathComponent)
+      existingAncestor = existingAncestor.deletingLastPathComponent()
+    }
+
+    var resolved = existingAncestor.resolvingSymlinksInPath()
+    for component in suffixComponents.reversed() {
+      resolved = resolved.appendingPathComponent(component)
+    }
+    return resolved.standardizedFileURL.path
   }
 }
