@@ -313,29 +313,23 @@ void main() {
       timeout: const Timeout(Duration(seconds: 20)),
     );
 
-    testWidgets(
-      'p720 scales the long side down to 1280',
-      (WidgetTester tester) async {
-        await expectPreset(tester, CompressPreset.p720, 720, 1280);
-      },
-      timeout: const Timeout(Duration(seconds: 20)),
-    );
+    testWidgets('p720 scales the long side down to 1280', (
+      WidgetTester tester,
+    ) async {
+      await expectPreset(tester, CompressPreset.p720, 720, 1280);
+    }, timeout: const Timeout(Duration(seconds: 20)));
 
-    testWidgets(
-      'p480 scales the long side down to 854',
-      (WidgetTester tester) async {
-        await expectPreset(tester, CompressPreset.p480, 480, 854);
-      },
-      timeout: const Timeout(Duration(seconds: 20)),
-    );
+    testWidgets('p480 scales the long side down to 854', (
+      WidgetTester tester,
+    ) async {
+      await expectPreset(tester, CompressPreset.p480, 480, 854);
+    }, timeout: const Timeout(Duration(seconds: 20)));
 
-    testWidgets(
-      'p360 scales the long side down to 640',
-      (WidgetTester tester) async {
-        await expectPreset(tester, CompressPreset.p360, 360, 640);
-      },
-      timeout: const Timeout(Duration(seconds: 20)),
-    );
+    testWidgets('p360 scales the long side down to 640', (
+      WidgetTester tester,
+    ) async {
+      await expectPreset(tester, CompressPreset.p360, 360, 640);
+    }, timeout: const Timeout(Duration(seconds: 20)));
 
     testWidgets(
       'an explicit maxLongSidePx of 960 produces an output whose displayed long side is '
@@ -484,23 +478,21 @@ void main() {
       'sizeguard_small_${DateTime.now().microsecondsSinceEpoch}.mp4',
     );
 
-    testWidgets(
-      'maxFps 60 on a 30fps source stays at 30, never upscaled',
-      (WidgetTester tester) async {
-        final String path = await copySmallClip();
-        final CompressJob job = compressVideo.compress(
-          path,
-          options: const CompressOptions(maxFps: 60),
-        );
-        final CompressResult result = await job.result;
-        final MediaInfo outputInfo = await compressVideo.getMediaInfo(
-          result.outputPath,
-        );
-        expect(outputInfo.frameRateFps, isNotNull);
-        expect(outputInfo.frameRateFps!, closeTo(30.0, 0.5));
-      },
-      timeout: const Timeout(Duration(seconds: 20)),
-    );
+    testWidgets('maxFps 60 on a 30fps source stays at 30, never upscaled', (
+      WidgetTester tester,
+    ) async {
+      final String path = await copySmallClip();
+      final CompressJob job = compressVideo.compress(
+        path,
+        options: const CompressOptions(maxFps: 60),
+      );
+      final CompressResult result = await job.result;
+      final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+        result.outputPath,
+      );
+      expect(outputInfo.frameRateFps, isNotNull);
+      expect(outputInfo.frameRateFps!, closeTo(30.0, 0.5));
+    }, timeout: const Timeout(Duration(seconds: 20)));
 
     testWidgets(
       'maxLongSidePx 4000 on an 854-long-side source stays at 854, never upscaled',

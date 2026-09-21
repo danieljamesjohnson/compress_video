@@ -69,44 +69,42 @@ void main() {
     CompressPreset.p1080,
   ];
 
-  testWidgets(
-    'measure every preset on the corpus',
-    (WidgetTester tester) async {
-      for (final String clip in clips) {
-        final int sourceBytes = await _sourceBytes(clip);
-        for (final CompressPreset preset in presets) {
-          final String path = await _copyAssetToTempFile(
-            'assets/corpus/$clip.mp4',
-            '${clip}_${preset.name}_${DateTime.now().microsecondsSinceEpoch}.mp4',
-          );
-          final CompressJob job = compressVideo.compress(
-            path,
-            options: CompressOptions(preset: preset),
-          );
-          final CompressResult result = await job.result;
-          final MediaInfo outputInfo = await compressVideo.getMediaInfo(
-            result.outputPath,
-          );
+  testWidgets('measure every preset on the corpus', (
+    WidgetTester tester,
+  ) async {
+    for (final String clip in clips) {
+      final int sourceBytes = await _sourceBytes(clip);
+      for (final CompressPreset preset in presets) {
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/$clip.mp4',
+          '${clip}_${preset.name}_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(preset: preset),
+        );
+        final CompressResult result = await job.result;
+        final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+          result.outputPath,
+        );
 
-          final double durationMinutes = result.durationMs / 1000.0 / 60.0;
-          final double mbPerMin = durationMinutes > 0
-              ? (result.outputBytes / 1000000.0) / durationMinutes
-              : double.nan;
+        final double durationMinutes = result.durationMs / 1000.0 / 60.0;
+        final double mbPerMin = durationMinutes > 0
+            ? (result.outputBytes / 1000000.0) / durationMinutes
+            : double.nan;
 
-          // ignore: avoid_print
-          print(
-            'MEASURE preset=${preset.name} clip=$clip '
-            'sourceBytes=$sourceBytes outputBytes=${result.outputBytes} '
-            'widthPx=${result.widthPx} heightPx=${result.heightPx} '
-            'frameRateFps=${outputInfo.frameRateFps} '
-            'videoBitrateBps=${outputInfo.videoBitrateBps} '
-            'elapsedMs=${result.elapsedMs} usedOriginal=${result.usedOriginal} '
-            'transmuxed=${result.transmuxed} '
-            'mbPerMin=${mbPerMin.toStringAsFixed(3)}',
-          );
-        }
+        // ignore: avoid_print
+        print(
+          'MEASURE preset=${preset.name} clip=$clip '
+          'sourceBytes=$sourceBytes outputBytes=${result.outputBytes} '
+          'widthPx=${result.widthPx} heightPx=${result.heightPx} '
+          'frameRateFps=${outputInfo.frameRateFps} '
+          'videoBitrateBps=${outputInfo.videoBitrateBps} '
+          'elapsedMs=${result.elapsedMs} usedOriginal=${result.usedOriginal} '
+          'transmuxed=${result.transmuxed} '
+          'mbPerMin=${mbPerMin.toStringAsFixed(3)}',
+        );
       }
-    },
-    timeout: const Timeout(Duration(minutes: 5)),
-  );
+    }
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }
