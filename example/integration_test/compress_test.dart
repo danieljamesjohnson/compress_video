@@ -750,17 +750,20 @@ void main() {
         // SizeGuardTest.kt's wouldTransmux_noAudioInputWithEverythingElseQualifying_qualifies
         // already proves the CONVERSION_PROCESS_NA/absent-audio-track branch qualifies this
         // clip for an attempted remux (D-10). What this integration case measures is what the
-        // CALLER actually receives: on this corpus/emulator, the attempted remux of this
-        // specific clip lands at exactly the input's own byte count (measured live: both
-        // 30,618 bytes), and CORE-05's equality-counts-as-larger reading (the same flagged
-        // assumption 02-04-PLAN.md carries forward for CORE-05) means the never-larger
-        // POST-check correctly wins and substitutes the original -- usedOriginal: true,
-        // transmuxed: false, describing the file actually returned, not the operation Media3
-        // was asked to attempt. This is a real coverage gap for the verifier: neither corpus
-        // clip in this phase demonstrates an observable transmuxed:true result specifically for
-        // the no-audio branch (small_480p.mp4's own transmux case, which does demonstrate
-        // transmuxed:true, has audio) -- flagged here rather than papered over with a
-        // different assertion.
+        // CALLER actually receives, which genuinely differs by platform/encoder and is NOT
+        // itself part of the contract: on the Android emulator, Media3's attempted remux of
+        // this specific clip lands at exactly the input's own byte count (measured live: both
+        // 30,618 bytes), so CORE-05's equality-counts-as-larger post-check correctly wins and
+        // substitutes the original (usedOriginal: true, transmuxed: false). On the iOS
+        // simulator, AVAssetExportSession's passthrough remux of the same clip lands strictly
+        // SMALLER than the input, so the post-check correctly keeps it (transmuxed: true,
+        // usedOriginal: false) -- both are legitimate outcomes of the same unconditional rule;
+        // neither is a bug, and this delta is expected to be a documented cross-platform
+        // tolerance in the PARITY_JSON records 03-08 adds for compression (D-16). What this
+        // case actually asserts, platform-independently, is the never-larger CONTRACT itself:
+        // the delivered file is never larger than the input, has no audio, is not the caller's
+        // own input path, and the two result flags describe exactly one of the two legitimate
+        // outcomes above -- never a third combination.
         final String path = await _copyAssetToTempFile(
           'assets/corpus/noaudio_720p.mp4',
           'transmux_noaudio_${DateTime.now().microsecondsSinceEpoch}.mp4',
@@ -768,10 +771,39 @@ void main() {
         final CompressJob job = compressVideo.compress(path);
         final CompressResult result = await job.result;
 
-        expect(result.usedOriginal, isTrue);
-        expect(result.transmuxed, isFalse);
-        expect(result.outputBytes, result.inputBytes);
+        expect(
+          result.outputBytes,
+          lessThanOrEqualTo(result.inputBytes),
+          reason: 'CORE-05 is unconditional: never larger than the input',
+        );
         expect(result.audioCodec, isNull);
+        expect(
+          result.outputPath,
+          isNot(equals(path)),
+          reason: "the plugin must never return the caller's own input path",
+        );
+
+        final bool substitutedOriginal =
+            result.usedOriginal &&
+            !result.transmuxed &&
+            result.outputBytes == result.inputBytes;
+        final bool keptSmallerRemux =
+            result.transmuxed &&
+            !result.usedOriginal &&
+            result.outputBytes < result.inputBytes;
+        expect(
+          substitutedOriginal || keptSmallerRemux,
+          isTrue,
+          reason:
+              'exactly one of two legitimate outcomes: the attempted remux '
+              'landed at exactly the input size and was substituted with the '
+              'original (usedOriginal, equal bytes -- observed on the Android '
+              'emulator), or the attempted remux landed strictly smaller and '
+              'was kept (transmuxed, smaller bytes -- observed on the iOS '
+              'simulator). Got usedOriginal=${result.usedOriginal}, '
+              'transmuxed=${result.transmuxed}, outputBytes=${result.outputBytes}, '
+              'inputBytes=${result.inputBytes}',
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
