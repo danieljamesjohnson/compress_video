@@ -48,7 +48,10 @@
     "security_asvs_level": 1,
     "security_block_on": "high",
     "use_worktrees": false,
-    "_auto_chain_active": false
+    "_auto_chain_active": false,
+    "build_command": "flutter analyze --fatal-infos --fatal-warnings",
+    "test_command": "flutter test",
+    "test_gate_timeout": 600
   },
   "ship": {
     "pr_body_sections": [
