@@ -657,12 +657,11 @@ final class CompressionEngine {
       return compressVideoError
     }
     let nsError = error as NSError
-    if nsError.domain == AVFoundationErrorDomain {
-      // `AVError.Code.init(rawValue:)` is non-failable (an NS_ERROR_ENUM-bridged raw-Int
-      // wrapper, not a Swift native enum) -- any AVFoundation-domain code round-trips into it,
-      // and `ErrorMapping.reasonForAVError` itself falls back to `"unknown"` for a code outside
-      // `knownAVErrorCodes`, so no further unwrapping is needed here.
-      let code = AVError.Code(rawValue: nsError.code)
+    // AVError.Code(rawValue:) IS failable (confirmed live in CI run 35764281991, correcting
+    // this file's own prior in-code claim otherwise) -- an out-of-range Int (any domain-correct
+    // but currently-unlisted code) falls through to the generic "io" branch below rather than
+    // crashing on a forced unwrap.
+    if nsError.domain == AVFoundationErrorDomain, let code = AVError.Code(rawValue: nsError.code) {
       return CompressVideoError(
         code: ErrorMapping.reasonForAVError(code),
         message: "AVFoundation error \(nsError.code): \(nsError.localizedDescription)",
