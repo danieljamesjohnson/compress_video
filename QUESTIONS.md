@@ -94,6 +94,21 @@ uses CocoaPods) needs it. Agents cannot install it: `sudo gem install cocoapods`
 Either run `sudo gem install cocoapods` on the Mac, or install Homebrew and `brew install cocoapods`.
 Until then, Phase 3 builds on the Mac use the Swift Package Manager path and CI covers CocoaPods.
 
+**Update 2026-09-22:** an agent tried the no-password route — `gem install --user-install cocoapods` into
+`~/.gem` — three times with progressively pinned versions (ffi 1.16.3 installs; then `securerandom`,
+then `zeitwerk` each demand Ruby ≥ 3.1/3.2). macOS 26's system Ruby is 2.6.10, so **no CocoaPods
+release resolvable today installs on the system Ruby, with or without sudo** — `sudo gem install
+cocoapods` would hit the same wall. What actually works: install Homebrew, then `brew install cocoapods`
+(Homebrew's formula bundles its own modern Ruby). Both steps need your admin password once. Why it
+matters: the example app's `ios/` and `macos/` projects carry committed Podfiles (that is how CI proves
+the CocoaPods install path), and Flutter runs `pod install` for them even with SPM enabled, so
+**`flutter build ios`/`flutter build macos` of the example cannot run on the Mac at all until `pod`
+exists** — which is why Phase 3's Apple verification is currently routed through the GitHub Actions
+macOS runner (30-40 min per attempt) instead of your Mac (minutes). The second Flutter SDK
+(`~/development/flutter-stable`, 3.47.5) is installed and ready; `~/flutter` is untouched.
+Leftover from the attempts, harmless and removable: `~/.gem/ruby/2.6.0/` (partial gems) and
+`~/development/cocoapods-install*.log`.
+
 ## 8. MacBook Air is offline on the tailnet (blocks 03-01 task 1)
 
 2026-09-22, executing 03-01-PLAN.md task 1 (Mac second-SDK bring-up + `tool/mac_sync.sh`/`mac_run.sh`):
