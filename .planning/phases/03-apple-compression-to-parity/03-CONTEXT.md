@@ -55,14 +55,14 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
 ## Implementation Decisions
 
 ### Apple engine architecture and Android parity
-- **Engine:** `AVAssetReader` + `AVAssetWriter` for every re-encode (H.264 via
+- **D-01:** **Engine:** `AVAssetReader` + `AVAssetWriter` for every re-encode (H.264 via
   `AVVideoCodecType.h264`, `AVVideoAverageBitRateKey` for the resolved bitrate,
   `AVVideoWidthKey`/`AVVideoHeightKey` for the resolved displayed target, AAC via
   `AVFormatIDKey: kAudioFormatMPEG4AAC`); `AVAssetExportSession` with
   `AVAssetExportPresetPassthrough` ONLY for the transmux path. This is PROJECT.md's locked
   decision; the export-session `progress` API (deprecated in iOS 27) is never used for a
   re-encode.
-- **One shared Swift core in `darwin/compress_video/Sources/compress_video/`**, `#if os(iOS)` /
+- **D-02:** **One shared Swift core in `darwin/compress_video/Sources/compress_video/`**, `#if os(iOS)` /
   `os(macOS)` only where AVFoundation genuinely differs (there should be almost none in the
   encode path). New files mirror the Android names one-to-one so a reader can diff engines:
   `SizeGuard.swift` (pure port of `SizeGuard.kt`, same rule numbering, same field names),
@@ -72,7 +72,7 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   `CompressVideoPlugin.swift`). `SizeGuard.swift` gets an XCTest twin of `SizeGuardTest.kt`
   with the SAME numeric cases so a divergence in the plan math fails on the Mac before it
   fails in the parity gate.
-- **Orientation (ORNT-01 parity):** read with `AVAssetReaderTrackOutput` in BGRA
+- **D-03:** **Orientation (ORNT-01 parity):** read with `AVAssetReaderTrackOutput` in BGRA
   (`kCVPixelFormatType_32BGRA`) so the system tone-maps HDR to SDR for free (Phase 4 keeps
   this default; keep-HDR is the opt-in). Do NOT bake rotation into pixels: set
   `AVAssetWriterInput.transform = sourceTrack.preferredTransform` and encode at the CODED
@@ -82,22 +82,22 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   from the writer's settings — same rule as Android (02-RESEARCH.md Pitfall 4). The
   existing `_expectUprightAndUnpadded` pixel assertions in `compress_test.dart` are the
   proof and must pass unchanged on the simulator.
-- **Frame-rate cap (CORE-08 parity):** drop frames in the reader loop by presentation
+- **D-04:** **Frame-rate cap (CORE-08 parity):** drop frames in the reader loop by presentation
   timestamp (keep a frame when `pts >= nextKeepTime`, advance by `1/effectiveFps`), matching
   `FrameDropEffect`'s decimation; never set `AVVideoExpectedSourceFrameRateKey` as the only
   mechanism. `effectiveFps = min(maxFps, input fps)`; never upscales.
-- **Transmux (CORE-06 parity):** when `SizeGuard.Plan.wouldTransmux` is true, run
+- **D-05:** **Transmux (CORE-06 parity):** when `SizeGuard.Plan.wouldTransmux` is true, run
   `AVAssetExportSession(preset: AVAssetExportPresetPassthrough)` with `outputFileType = .mp4`
   and `shouldOptimizeForNetworkUse = false` (Android's muxer runs with streamable output
   disabled for the same never-larger reason — do not let a `moov`-first rewrite pad a short
   remux). Progress for a transmux is reported as 0 → 100 at completion (Media3 also has no
   mid-transmux progress); `transmuxed: true` in the result.
-- **Never-larger (CORE-05 parity):** identical two-stage rule: pre-check via
+- **D-06:** **Never-larger (CORE-05 parity):** identical two-stage rule: pre-check via
   `SizeGuard.Plan.wouldUseOriginal` skips the encode; post-check is unconditional,
   `usedOriginal = outputBytes >= inputBytes`, on every path including transmux — copy the
   original into the plugin-owned output path and report it. `outputPath` never names the
   caller's input file.
-- **Audio:** passthrough = `AVAssetWriterInput(mediaType: .audio, outputSettings: nil,
+- **D-07:** **Audio:** passthrough = `AVAssetWriterInput(mediaType: .audio, outputSettings: nil,
   sourceFormatHint: sourceFormatDescription)` fed by an `AVAssetReaderTrackOutput` with
   `outputSettings: nil` (compressed samples), used only when the source track is AAC
   (`kAudioFormatMPEG4AAC`); otherwise fall back to an AAC re-encode and report
@@ -105,20 +105,20 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   with `AVEncoderBitRateKey` / `AVNumberOfChannelsKey`. `strip` adds no audio input.
   Source-side failures on 5.1/PCM must not crash (Phase 4 owns proper handling; throwing
   `unsupportedInput` is acceptable here).
-- **Progress and cancel (JOBS-01/02 parity):** derive progress from the writer loop — the
+- **D-08:** **Progress and cancel (JOBS-01/02 parity):** derive progress from the writer loop — the
   last appended video sample's presentation time over the output duration (trim-aware),
   clamped 0..99, forwarded through `CompressVideoFlutterApi.onProgress` on the main queue at
   most every 250 ms, with a single terminal `100` sent before the result reply (Phase 2's
   exact clamp rule). Cancel sets a flag the reader loop checks per sample, calls
   `AVAssetWriter.cancelWriting()` (or `exportSession.cancelExport()`), deletes the partial
   file, and completes with `cancelled`; cancelling a finished job is a no-op.
-- **Threading:** each job runs its reader/writer loop on its own serial `DispatchQueue`
+- **D-09:** **Threading:** each job runs its reader/writer loop on its own serial `DispatchQueue`
   (`requestMediaDataWhenReady(on:)` for both inputs); Pigeon replies and `onProgress` are
   dispatched to the main queue. `JobRegistry` (a main-queue-confined dictionary keyed by
   job id) holds the cancel closure and temp path, mirrors `liveTempFilePaths()` for
   `clearCache`, and `detachFromEngine` cancels every live job BEFORE tearing down
   registrations (T-02-25).
-- **Error mapping (CORE-04 parity):** `ErrorMapping.swift` maps `AVAssetReader`/`Writer`
+- **D-10:** **Error mapping (CORE-04 parity):** `ErrorMapping.swift` maps `AVAssetReader`/`Writer`
   `status == .failed` errors and `AVError` codes onto the same `CompressVideoErrorReason`
   names: missing file → `fileNotFound` (checked up front, symlinks resolved like 01-WR-01);
   `AVError.fileFormatNotRecognized` / no video track / unreadable → `unsupportedInput`;
@@ -128,13 +128,13 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   against 1.2× the predicted bytes → `outOfSpace`; everything else → `io` with the
   `NSError` domain/code folded into the message (the numeric-code-in-message rule from
   02-06). No path logs-and-swallows; every failure deletes the partial file.
-- **Estimate (INFO-03 parity):** `estimate()` resolves through the same
+- **D-11:** **Estimate (INFO-03 parity):** `estimate()` resolves through the same
   `SizeGuard.resolve` the job uses, over `Probe.swift`'s output, exactly as
   `Compression.estimate()` does on Android. The Dart-side ±75% emulator tolerance in
   `compress_output_test.dart` stays; the Apple hardware encoder's real accuracy is
   measured and recorded (a `doc/PRESETS.md` Apple section, generated by the same
   `tool/measure_presets.dart` on the simulator and on the macOS host).
-- **Output placement (CORE-09 parity):** `PluginFiles.swift` writes everything under
+- **D-12:** **Output placement (CORE-09 parity):** `PluginFiles.swift` writes everything under
   `<Caches>/compress_video/` (`FileManager.urls(for: .cachesDirectory)`), default name
   `<jobId>.mp4`, honours `outputPath` with the same parent-must-exist → `io` rule, sweeps
   with the same canonical-path containment and live-job exclusion, and the Phase 1
@@ -142,23 +142,23 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   Apple match).
 
 ### Trim exactness and the corpus
-- **New generated corpus clip `trim_source_10s.mp4`** (10 s, 30 fps, 1280×720, H.264 + AAC,
+- **D-13:** **New generated corpus clip `trim_source_10s.mp4`** (10 s, 30 fps, 1280×720, H.264 + AAC,
   burnt-in timecode, ~1 Mbps; added to `generate_corpus.sh`, `verify_corpus.sh --write`
   regenerates its sidecar; single-threaded x264 for byte reproducibility, as 01-02
   established). It exists because no current clip is long enough for the 2000→7000 ms
   criterion. Its sidecar gains a `trim` block: `{ "startMs": 2000, "endMs": 7000,
   "expectedDurationMs": 5000, "toleranceMs": 34 }` — one frame at 30 fps, read by the test,
   never hardcoded.
-- **CORE-07 on Apple:** trim via `AVAssetReader.timeRange` (start/end as `CMTime` with the
+- **D-14:** **CORE-07 on Apple:** trim via `AVAssetReader.timeRange` (start/end as `CMTime` with the
   track's own timescale) and re-time samples so the output starts at zero; the writer's
   `AVAssetWriterInput` receives samples with pts offset by `-start`. Audio and video use the
   same `timeRange` so A/V stay aligned. Passthrough audio is cut at the packet boundary
   (AAC priming means the audio track may be ≤ 1 packet longer than video — the duration
   assertion is on the VIDEO track / container duration, same as Android's re-probe).
-- **CORE-07 on Android:** already implemented via `ClippingConfiguration`; this phase adds
+- **D-15:** **CORE-07 on Android:** already implemented via `ClippingConfiguration`; this phase adds
   the same 2000→7000 assertion on `trim_source_10s.mp4` to `compress_test.dart` (runs on all
   three platforms) and emits a `PARITY_JSON` record for it.
-- **Parity gate widens to compression:** `compress_test.dart` (and the audio/output/jobs
+- **D-16:** **Parity gate widens to compression:** `compress_test.dart` (and the audio/output/jobs
   suites where a value is cross-platform) emit `PARITY_JSON` lines for the deterministic
   `CompressResult` fields (`widthPx`, `heightPx`, `videoCodec`, `audioCodec`,
   `transmuxed`, `usedOriginal`, `audioReencoded`, `durationMs` with the sidecar
@@ -166,43 +166,43 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   rules and its self-test grows matching cases. `outputBytes` and `elapsedMs` are
   platform-tolerant (different encoders) and are NOT compared byte-for-byte — record them
   as `tolerant` with a documented ±50% envelope on bytes so a 10× regression still fails.
-- **The `small_480p` 3026 ms vs 2992 ms delta (01-07 follow-up):** re-examine once the
+- **D-17:** **The `small_480p` 3026 ms vs 2992 ms delta (01-07 follow-up):** re-examine once the
   Apple engine lands — the plan should determine which platform's duration reading
   (Android `MediaMetadataRetriever` vs Apple `AVAsset.duration`) is the container's actual
   `mvhd`/edit-list duration and document it in `corpus/README.md`; do not "fix" a platform
   to match the other unless one is demonstrably misreading the file.
 
 ### Mac build workflow, packaging and CI
-- **Do not touch Dan's `~/flutter` (3.41.2).** Install a second SDK on the Mac at
+- **D-18:** **Do not touch Dan's `~/flutter` (3.41.2).** Install a second SDK on the Mac at
   `~/development/flutter-stable` (`git clone -b stable https://github.com/flutter/flutter.git`,
   then `flutter precache --ios --macos`), mirroring danserver's two-SDK convention, and
   put THAT on `PATH` in every remote command. Record the recipe in `.claude/CLAUDE.md` lane
   notes; the version must satisfy the pubspec floor (current stable is 3.47.x, matching CI).
-- **Source sync is push-from-danserver:** a committed `tool/mac_sync.sh` rsyncs the
+- **D-19:** **Source sync is push-from-danserver:** a committed `tool/mac_sync.sh` rsyncs the
   working tree (excluding `.git`, `build/`, `.dart_tool/`, `.planning/`, `**/Pods`) to
   `~/CodeProjects/compress-video` on the Mac over the existing SSH config, so uncommitted
   changes can be built without a push; `tool/mac_run.sh <suite|build>` wraps the remote
   `PATH` setup, simulator boot (`xcrun simctl boot` + `bootstatus -b`), and the
   `flutter test integration_test/<suite> -d <udid>` / `flutter build macos` invocations with
   the same perl-`alarm` bound CI uses. The Mac never needs the danserver git remote.
-- **Local Apple verification uses SPM** (`flutter config --enable-swift-package-manager` on
+- **D-20:** **Local Apple verification uses SPM** (`flutter config --enable-swift-package-manager` on
   the Mac's second SDK) because CocoaPods is absent (QUESTIONS.md #7); **CI proves CocoaPods**
   (its existing `--no-enable-swift-package-manager` builds) AND SPM (add the missing
   dedicated SPM build step the 01-CONTEXT CI design called for, if 01-06 did not land it).
   Both install paths must build the example for iOS and macOS in CI on every Apple-relevant
   push — that is BULD-02's proof.
-- **BULD-02 "fresh app" proof** is a CI step, not a manual check: `flutter create` a
+- **D-21:** **BULD-02 "fresh app" proof** is a CI step, not a manual check: `flutter create` a
   throwaway app in the runner's temp dir, add the plugin by path, `flutter build ios
   --simulator --no-codesign` and `flutter build macos --debug` under CocoaPods, then again
   under SPM. Four builds, one script (`tool/verify_fresh_app.sh`), runnable on the Mac too.
-- **CI `apple` job widens** to run every `integration_test/*.dart` suite on the simulator
+- **D-22:** **CI `apple` job widens** to run every `integration_test/*.dart` suite on the simulator
   (dropping the explicit two-suite allowlist and the "Phase 2 suites hang on iOS" comment),
   keeps the per-suite alarm + one retry, and adds a **macOS desktop integration run**
   (`flutter test integration_test -d macos`) so the shared core is exercised on both Apple
   platforms, not just built on macOS. The parity job compares Android vs iOS records;
   macOS records are compared against iOS in the same step (same shared core, so any delta
   is a real bug).
-- **Package hygiene:** the podspec and `Package.swift` pick up new Swift files
+- **D-23:** **Package hygiene:** the podspec and `Package.swift` pick up new Swift files
   automatically (glob / target directory); the `PrivacyInfo.xcprivacy` resource line stays
   commented unless the plan finds a required-reason API in use (file timestamps via
   `FileManager.attributesOfItem` ARE a required-reason API category — check and, if used,
@@ -210,24 +210,24 @@ Environment at discuss time (2026-09-22), verified live over `ssh dans-macbook-a
   resource in both manifests).
 
 ### Example app (BULD-04)
-- **Replace the Phase 2 manual-check screen** with a real, single-screen flow shared by all
+- **D-24:** **Replace the Phase 2 manual-check screen** with a real, single-screen flow shared by all
   three platforms: pick a video → options panel → Compress → live progress bar with Cancel →
   result card (bytes before/after with percentage saved, dimensions, codec, `transmuxed` /
   `usedOriginal` / `audioReencoded` badges, elapsed) → inline playback of the output.
-- **Picker:** `image_picker` (`pickVideo(source: gallery)`) on iOS/Android; on macOS it
+- **D-25:** **Picker:** `image_picker` (`pickVideo(source: gallery)`) on iOS/Android; on macOS it
   routes to `file_selector` automatically. Keep a "Use bundled corpus clip" fallback so the
   simulator/emulator integration runs and CI need no photo library. **Playback:**
   `video_player` (supports Android, iOS, macOS). Both are flutter.dev-maintained plugins —
   the lowest toolchain-rot risk available; no other new dependencies. Add the iOS
   `NSPhotoLibraryUsageDescription` and macOS `com.apple.security.files.user-selected.read-only`
   entitlements the picker needs.
-- **Options panel** exposes exactly the public `CompressOptions` surface: preset segmented
+- **D-26:** **Options panel** exposes exactly the public `CompressOptions` surface: preset segmented
   control (p360/p480/p720/p1080), optional explicit `maxLongSidePx` / `videoBitrateBps` /
   `targetSizeMb` fields (mutually visible, validated by the plugin's own synchronous
   `unsupportedInput` throw, shown as a snackbar), `maxFps`, audio mode (passthrough /
   re-encode 128 kbps stereo / strip), trim start/end ms, and an "estimate" line that calls
   `estimate()` live as options change. No hidden defaults that differ from the library's.
-- **The example is also the manual UAT vehicle:** 02-UAT.md #6 (compress screen on a real
+- **D-27:** **The example is also the manual UAT vehicle:** 02-UAT.md #6 (compress screen on a real
   display) is closed by running this app on the Mac desktop and the iOS simulator and
   recording a screenshot into `.planning/phases/03-*/` (agents can see the simulator via
   `xcrun simctl io <udid> screenshot`). Keep the app's Dart under `analysis_options.yaml`'s

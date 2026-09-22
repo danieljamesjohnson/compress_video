@@ -1,0 +1,1 @@
+No external API integration: the phase wraps Apple's on-device AVFoundation system frameworks (AVAssetReader, AVAssetWriter, AVAssetExportSession) behind the existing Pigeon contract, and the example app's only new dependencies are the first-party flutter.dev plugins `image_picker` and `video_player`; no third-party service, endpoint, SDK or hosted API is consumed.

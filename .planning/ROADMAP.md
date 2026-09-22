@@ -135,7 +135,42 @@ Plans:
   3. A fresh Flutter app adds the plugin and builds for iOS and macOS with CocoaPods and, separately, with Swift Package Manager. iOS and macOS use one shared Swift core.
   4. The example app runs on Android, iOS and macOS. In it, a user picks a video, sets options, watches live progress, can cancel, and plays the compressed result.
 
-**Plans**: TBD
+**Plans**: 9 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Mac build host (second Flutter SDK, `tool/mac_sync.sh`, `tool/mac_run.sh`, SPM builds of the current example), the 10-second trim fixture with its derived `trim` sidecar block, the filled validation contract and the coverage declaration
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-02-PLAN.md — Pure Swift ports: `SizeGuard`, `ErrorMapping` and `PluginFiles`, pinned by XCTest twins carrying the Kotlin suite's own numeric cases on both Apple platforms
+- [ ] 03-03-PLAN.md — Example app rewrite (BULD-04): pick, options, live estimate, compress, progress, cancel, result card, playback, with a widget suite covering all seven states on Linux
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-04-PLAN.md — The Apple engine tracer: one Dart call through `AVAssetReader`/`AVAssetWriter` to a smaller upright MP4, plus the job registry and the two platform-specific teardown paths
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 03-05-PLAN.md — Transmux fast path, the unconditional two-stage never-larger rule, and the three audio modes
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 03-06-PLAN.md — Per-job progress, cancellation with partial-file deletion ordered first, the wired error taxonomy and the free-space pre-check
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 03-07-PLAN.md — Trim within one frame on all three platforms (CORE-07), the shared-resolver estimate, output placement and bounded `clearCache()`, and the measured Apple preset tables
+
+**Wave 7** *(blocked on Waves 2 and 6 completion)*
+
+- [ ] 03-08-PLAN.md — `tool/verify_fresh_app.sh`, the widened CI `apple` job (every suite on the simulator and on macOS, both install paths) and compression records in the parity gate
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 03-09-PLAN.md — Phase sign-off: committed simulator and macOS screenshots closing 02-UAT.md #6, one observed green `apple` + `parity` CI run, and the cross-platform sameness wording
+
 **UI hint**: yes
 **Research**: Needed. Topics: AVAssetWriter output settings for 8-bit/HDR reader output, `sourceFormatHint`, deriving progress without the deprecated export-session `progress`, and differences between macOS and iOS.
 **Notes**: **Start with a Mac-readiness check.** Confirm that `ssh dans-macbook-air` works and that Xcode with iOS simulators, CocoaPods and Flutter are installed (QUESTIONS.md #1). If the check fails, build against the GitHub Actions macOS runner and record in STATE.md that device checks are outstanding. **Parallelizable with Phase 2 once the Mac is available.** The two phases share only the Phase 1 Pigeon contract.
@@ -198,7 +233,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
-| 3. Apple Compression to Parity | 0/TBD | Not started | - |
+| 3. Apple Compression to Parity | 0/9 | Planned | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
