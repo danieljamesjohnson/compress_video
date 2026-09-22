@@ -70,7 +70,7 @@ created: 2026-09-22
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
-**Row count note:** this table was seeded at plan time with 27 rows, from nine plans of three tasks each. Plan 03-01 task 3 re-counts the real total with `for f in .planning/phases/03-apple-compression-to-parity/03-0*-PLAN.md; do grep -cE '^[[:space:]]*<name>Task ' "$f"; done` and corrects this table to that number if they differ, recording both. Phase 1 and Phase 2 each shipped an off-by-one here because a plan's prose miscounted (01-01 undercounted, 02-01 overcounted), so the counted number is authoritative and the claimed one is not.
+**Row count note:** this table was seeded at plan time with 27 rows, from nine plans of three tasks each. Plan 03-01 task 3 re-counted the real total with `for f in .planning/phases/03-apple-compression-to-parity/03-0*-PLAN.md; do grep -cE '^[[:space:]]*<name>Task ' "$f"; done` — each of the nine plan files reports exactly 3, summing to **27**, which equals the seeded 27 exactly: no correction was needed this time. Unlike Phase 1 (01-01, undercounted) and Phase 2 (02-01, overcounted), this phase's plan-time task count was correct as authored. The table's own row count (`awk '/^| Task ID/,/^$/' ... | grep -c '^| 3-0'`) independently also measures 27, confirming the table and the plan files agree.
 
 ---
 
