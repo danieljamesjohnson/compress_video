@@ -741,12 +741,6 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(seconds: 20)),
-      // The Apple engine's transmux fast path (AVAssetExportSession) lands in 03-05; 03-04
-      // implements only the real-encode branch, so a transmux-eligible file on iOS/macOS
-      // currently falls through to a real encode and this case's `transmuxed: true`
-      // assertion cannot pass there yet. Android already has the fast path
-      // (TransformerEngine.kt), so it keeps running there.
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
@@ -827,9 +821,6 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(seconds: 30)),
-      // Same reason as the transmux case above -- this case needs transmuxed: true on the
-      // first job, which the Apple engine does not produce until 03-05.
-      skip: !Platform.isAndroid,
     );
   });
 

@@ -368,19 +368,21 @@ jobs:
 
       - name: Run corpus integration tests on the iOS simulator
         # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) plus
-        # compress_test.dart on a concrete simulator resolved above rather than a hard-coded
-        # device name. The Apple engine (AVAssetReader/AVAssetWriter) landed in 03-04-PLAN.md,
-        # so compress_test.dart's own platform guard is gone and it runs here now -- but
-        # compress_audio_test.dart, compress_jobs_test.dart and compress_output_test.dart stay
-        # excluded (and still skip themselves on non-Android platforms): they exercise audio
-        # re-encode/strip, cancel/progress-stream edge cases and estimate()/clearCache(), none
-        # of which 03-04 implements on Apple yet (03-05/03-07 land them). Bounded so a genuine
-        # hang fails fast and visibly. Each suite is bounded (15 min via perl alarm - GNU
-        # timeout is not on macOS runners; compress_test.dart's own groups run several real
-        # encodes in sequence, so it needs more headroom than the two lighter Phase 1 suites)
-        # because `flutter test ... -d <sim>` occasionally hangs at app launch with zero output
-        # on the hosted simulator (seen 2026-09-15 and 2026-09-21 on suites that pass on the
-        # very next run). A hang resets the simulator and retries that one suite once.
+        # compress_test.dart and compress_audio_test.dart on a concrete simulator resolved
+        # above rather than a hard-coded device name. The Apple engine (AVAssetReader/
+        # AVAssetWriter) landed in 03-04-PLAN.md; compress_test.dart's own platform guard is
+        # gone since that plan. 03-05-PLAN.md landed the transmux fast path and the three audio
+        # modes, so compress_audio_test.dart's whole-file platform guard is gone too and it now
+        # runs here. compress_jobs_test.dart and compress_output_test.dart stay excluded (and
+        # still skip themselves on non-Android platforms): they exercise cancel/progress-stream
+        # edge cases and estimate()/clearCache(), neither of which is implemented on Apple yet
+        # (03-06/03-07 land them). Bounded so a genuine hang fails fast and visibly. Each suite
+        # is bounded (15 min via perl alarm - GNU timeout is not on macOS runners;
+        # compress_test.dart's own groups run several real encodes in sequence, so it needs
+        # more headroom than the two lighter Phase 1 suites) because `flutter test ... -d <sim>`
+        # occasionally hangs at app launch with zero output on the hosted simulator (seen
+        # 2026-09-15 and 2026-09-21 on suites that pass on the very next run). A hang resets the
+        # simulator and retries that one suite once.
         working-directory: example
         timeout-minutes: 45
         run: |
@@ -392,7 +394,7 @@ jobs:
           # the full test log AND still fails when a test fails: `set -o pipefail` above makes
           # each `run_suite` call's exit status `flutter test`'s, not `tee`'s.
           run_suite() { perl -e 'alarm shift; exec @ARGV' 900 flutter test "$1" -d "$UDID" -r expanded | tee -a "$LOG"; }
-          for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart integration_test/compress_test.dart; do
+          for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart integration_test/compress_test.dart integration_test/compress_audio_test.dart; do
             if ! run_suite "$suite"; then
               echo "::warning::$suite hung or failed on the first attempt; resetting the simulator and retrying once"
               xcrun simctl shutdown "$UDID" || true

@@ -19,12 +19,18 @@ import Foundation
 /// answer while a job is running. `JobRegistry` access happens only via explicit `MainActor`
 /// hops.
 ///
-/// This plan implements the real-encode branch only (D-01's transmux fast path via
-/// `AVAssetExportSession` is out of scope here -- a later plan owns it); the never-larger
-/// PRE-check (`SizeGuard.Plan.wouldUseOriginal`) still applies, skipping the encode entirely
-/// when the resolver already knows it would not help. Audio is passthrough-or-strip only in
-/// this plan; a `reencode` request throws a typed `unsupportedInput` error until a later plan
-/// implements it.
+/// The transmux fast path (`AVAssetExportSession` with `AVAssetExportPresetPassthrough`, D-05)
+/// and a real encode both funnel through `finishJob`, the ONE never-larger POST-check site in
+/// this file (D-06/D-11): unconditional, on every produced temp file, comparing real measured
+/// bytes with a greater-than-or-equal comparison so an exactly-equal size still counts as "not
+/// smaller" -- matching Android's `TransformerEngine.finishSuccess` exactly. The never-larger
+/// PRE-check (`SizeGuard.Plan.wouldUseOriginal`) is a separate, earlier decision: it skips
+/// attempting anything at all when the resolver already knows encoding would not help.
+///
+/// Audio (D-07) is passthrough only for an AAC-compatible source track; anything else under a
+/// passthrough request falls back to an AAC re-encode rather than muxing an incompatible codec
+/// into the container, and reports `audioReencoded` from whichever branch actually ran, never
+/// from the request.
 final class CompressionEngine {
   /// Minimum wall-clock gap between two `onProgress` calls for the same job, mirroring
   /// Android's own poll interval (`TransformerEngine.PROGRESS_POLL_INTERVAL_MS`) even though
@@ -106,6 +112,14 @@ final class CompressionEngine {
     let inputAudioCodec = audioFormatDescription.map {
       Self.normalizedAudioCodec(fourCC: CMFormatDescriptionGetMediaSubType($0))
     }
+    // The source track's own channel count/sample rate, read once here for the audio-reencode
+    // fallback branch below (D-07: a passthrough request against a non-AAC source preserves the
+    // source's own channel count -- no channel change was asked for, only a codec change).
+    let sourceAudioStreamDescription = audioFormatDescription.flatMap {
+      CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee
+    }
+    let sourceAudioChannelCount = sourceAudioStreamDescription.map { Int($0.mChannelsPerFrame) }
+    let sourceAudioSampleRate = sourceAudioStreamDescription?.mSampleRate
 
     let plan = resolvePlan(inputInfo: inputInfo, request: request, audioCodec: inputAudioCodec)
 
@@ -119,14 +133,33 @@ final class CompressionEngine {
         transmuxed: false, usedOriginal: true, audioReencoded: false)
     }
 
-    if request.audioMode == .reencode {
-      throw CompressVideoError(
-        code: "unsupportedInput",
-        message: "Audio re-encode is not yet implemented on Apple platforms in this phase",
-        details: nil)
+    // Transmux (D-05): when the resolver says a remux would satisfy the request, attempt an
+    // AVAssetExportSession passthrough instead of building a reader/writer pipeline at all.
+    // `wouldTransmux` already implies an audio-passthrough request with no trim (SizeGuard's
+    // own predicate), so this branch and the audio-mode resolution below never compete for the
+    // same job. Routes through `finishJob`, the SAME completion function the real-encode branch
+    // uses below it -- see that function's own doc comment for why.
+    if plan.wouldTransmux {
+      return try await runTransmux(
+        jobId: jobId,
+        asset: asset,
+        inputURL: inputURL,
+        destinationURL: destinationURL,
+        inputBytes: inputBytes,
+        startedAt: startedAt,
+        onProgress: onProgress
+      )
     }
 
+    // Audio mode resolution (D-07): passthrough is attempted ONLY for an AAC-compatible source
+    // track -- anything else (a non-AAC source under a passthrough request) falls back to an
+    // AAC re-encode rather than muxing an incompatible codec into an MP4 container, exactly as
+    // an explicit `reencode` request does. `audioWillReencode` is decided once, here, before
+    // the reader/writer pipeline is built, and is what `finishJob` below reports as
+    // `audioReencoded` -- from the branch that actually ran, never from the request.
+    let sourceIsAAC = inputAudioCodec == "aac"
     let includeAudio = inputInfo.hasAudio && audioTrack != nil && request.audioMode != .strip
+    let audioWillReencode = includeAudio && (request.audioMode == .reencode || !sourceIsAAC)
 
     // Coded/displayed swap (D-03): SizeGuard's plan speaks in DISPLAYED dimensions (the same
     // space `inputInfo.widthPx`/`heightPx` are already in); both AVFoundation surfaces this
@@ -213,8 +246,15 @@ final class CompressionEngine {
 
     var audioReaderOutput: AVAssetReaderTrackOutput?
     if includeAudio, let audioTrack {
-      // outputSettings: nil -- passthrough, compressed samples (D-07).
-      let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+      // outputSettings: nil for passthrough (compressed samples, D-07); a plain linear-PCM
+      // decode request (native channel count/sample rate, no explicit downmix at the reader)
+      // for a re-encode -- the writer's own AAC outputSettings below (channel count, bitrate)
+      // is what actually drives any channel up/downmix, via AVAssetWriterInput's documented
+      // ability to mix appended PCM samples up or down to the channel count named in its own
+      // compression settings dictionary.
+      let readerSettings: [String: Any]? =
+        audioWillReencode ? [AVFormatIDKey: kAudioFormatLinearPCM] : nil
+      let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: readerSettings)
       output.alwaysCopiesSampleData = false
       reader.add(output)
       audioReaderOutput = output
@@ -227,8 +267,40 @@ final class CompressionEngine {
 
     var audioWriterInput: AVAssetWriterInput?
     if includeAudio {
-      let input = AVAssetWriterInput(
-        mediaType: .audio, outputSettings: nil, sourceFormatHint: audioFormatDescription)
+      let input: AVAssetWriterInput
+      if audioWillReencode {
+        // An explicit `reencode` request uses the caller's own channel count (validated
+        // non-nil, 1 or 2, by Arguments.requireValidCompressRequest before this engine is ever
+        // called); the AAC fallback for a non-AAC source under a passthrough request preserves
+        // the source's own channel count instead -- no channel change was asked for there, only
+        // a codec change (D-07).
+        let targetChannels =
+          request.audioMode == .reencode
+          ? Int(request.audioChannels!)
+          : (sourceAudioChannelCount ?? 2)
+        var aacOutputSettings: [String: Any] = [
+          AVFormatIDKey: kAudioFormatMPEG4AAC,
+          AVNumberOfChannelsKey: targetChannels,
+          // plan.audioBitrateBps is SizeGuard rule 5's already-clamped resolution (8,000 to
+          // 960,000bps, request-or-source-or-default) -- this branch trusts it rather than
+          // re-deriving or re-clamping the request's own raw bitrate.
+          AVEncoderBitRateKey: Int(plan.audioBitrateBps),
+        ]
+        if let sourceAudioSampleRate {
+          aacOutputSettings[AVSampleRateKey] = sourceAudioSampleRate
+        }
+        guard writer.canApply(outputSettings: aacOutputSettings, forMediaType: .audio) else {
+          throw CompressVideoError(
+            code: "encoderUnavailable",
+            message: "This device's AAC encoder does not support the requested output settings",
+            details: nil)
+        }
+        input = AVAssetWriterInput(mediaType: .audio, outputSettings: aacOutputSettings)
+      } else {
+        // outputSettings: nil -- passthrough, compressed samples (D-07).
+        input = AVAssetWriterInput(
+          mediaType: .audio, outputSettings: nil, sourceFormatHint: audioFormatDescription)
+      }
       input.expectsMediaDataInRealTime = false
       writer.add(input)
       audioWriterInput = input
@@ -327,7 +399,117 @@ final class CompressionEngine {
 
     onProgress(100.0)
 
-    // Never-larger POST-check (D-11): unconditional, on every produced file.
+    let result = try await finishJob(
+      tempURL: tempURL, inputURL: inputURL, destinationURL: destinationURL,
+      inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: false,
+      audioReencoded: audioWillReencode)
+    await MainActor.run { JobRegistry.remove(jobId: jobId) }
+    return result
+  }
+
+  /// Attempts a passthrough remux via `AVAssetExportSession` (D-05, 03-RESEARCH.md Pattern 4)
+  /// instead of building a reader/writer pipeline -- taken only when `SizeGuard.Plan
+  /// .wouldTransmux` is `true`. `shouldOptimizeForNetworkUse = false`: no moov-first rewrite
+  /// pads a short remux past its own input size, mirroring Android's own muxer
+  /// `setAttemptStreamableOutputEnabled(false)` fix for exactly this never-larger reason
+  /// (`.claude/CLAUDE.md` lane note). Progress is reported 0 then a terminal 100 at completion
+  /// (D-05) -- the deprecated `.progress` property is never polled for intermediate values.
+  ///
+  /// This project's deployment floor (iOS 13/macOS 11) is nine major versions below the modern
+  /// async `export(to:as:)` API's own floor (iOS 18/macOS 15) -- the deprecated
+  /// `exportAsynchronously`/`.status` pair below is the PRIMARY path for this project, not a
+  /// legacy fallback (03-RESEARCH.md Pitfall 4).
+  ///
+  /// Routes through `finishJob`, the SAME completion function the real-encode branch above
+  /// uses, so the never-larger post-check, move-into-place/substitution, re-probe and result
+  /// construction cannot diverge between the two branches.
+  private func runTransmux(
+    jobId: String,
+    asset: AVAsset,
+    inputURL: URL,
+    destinationURL: URL,
+    inputBytes: Int64,
+    startedAt: Date,
+    onProgress: @escaping (Double) -> Void
+  ) async throws -> CompressResultMessage {
+    guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
+    else {
+      throw CompressVideoError(
+        code: "unsupportedInput",
+        message: "This input cannot be exported with the passthrough preset",
+        details: nil)
+    }
+    let tempURL = PluginFiles.tempFileBeside(destinationURL)
+    // shouldOptimizeForNetworkUse is not deprecated and applies to both the modern and legacy
+    // export paths below; outputURL/outputFileType ARE deprecated properties of the legacy
+    // path only -- the modern export(to:as:) call takes its destination as parameters instead,
+    // so they are set inside the legacy branch, not unconditionally here.
+    session.shouldOptimizeForNetworkUse = false
+
+    onProgress(0.0)
+
+    await MainActor.run {
+      JobRegistry.register(jobId: jobId, cancel: { session.cancelExport() }, tempFile: tempURL)
+    }
+
+    do {
+      if #available(iOS 18, macOS 15, *) {
+        try await session.export(to: tempURL, as: .mp4)
+      } else {
+        session.outputURL = tempURL
+        session.outputFileType = .mp4
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+          session.exportAsynchronously { continuation.resume() }
+        }
+        if session.status != .completed {
+          throw session.error
+            ?? CompressVideoError(
+              code: "io", message: "The export session failed to finish", details: nil)
+        }
+      }
+    } catch {
+      await MainActor.run { JobRegistry.markTerminal(jobId: jobId) }
+      PluginFiles.quietDelete(tempURL)
+      await MainActor.run { JobRegistry.remove(jobId: jobId) }
+      if session.status == .cancelled {
+        throw CompressVideoError(code: "cancelled", message: "The compression job was cancelled", details: nil)
+      }
+      throw Self.mapToCompressVideoError(error)
+    }
+
+    await MainActor.run { JobRegistry.markTerminal(jobId: jobId) }
+    onProgress(100.0)
+
+    let result = try await finishJob(
+      tempURL: tempURL, inputURL: inputURL, destinationURL: destinationURL,
+      inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: true, audioReencoded: false)
+    await MainActor.run { JobRegistry.remove(jobId: jobId) }
+    return result
+  }
+
+  /// Runs the never-larger POST-check (D-06, D-11): unconditional, on every produced temp file,
+  /// whether it came from a real encode or an attempted transmux. Compares REAL measured bytes,
+  /// never the plan's prediction. `>=`, not `>`: equality counts as "not smaller", matching
+  /// Android's `TransformerEngine.finishSuccess` (`usedOriginal = tempBytes >= inputBytes`)
+  /// exactly -- do not "fix" this to a strict `>`. This is the ONE post-check site in this
+  /// file; both the real-encode branch above and `runTransmux` above it funnel through here so
+  /// the check, the move-into-place/substitution and the re-probe result construction can never
+  /// diverge between branches.
+  ///
+  /// A discarded transmux attempt was never transmuxed as far as the caller is concerned: the
+  /// file they actually receive is a copy of the original, not the remuxed temp file this
+  /// discarded -- `transmuxed` is therefore `attemptedTransmux && !usedOriginal`, describing the
+  /// file returned, not the operation attempted (mirrors `TransformerEngine.finishSuccess`'s own
+  /// documented reasoning).
+  private func finishJob(
+    tempURL: URL,
+    inputURL: URL,
+    destinationURL: URL,
+    inputBytes: Int64,
+    startedAt: Date,
+    attemptedTransmux: Bool,
+    audioReencoded: Bool
+  ) async throws -> CompressResultMessage {
     let tempBytes = (try? Self.fileSize(of: tempURL)) ?? Int64.max
     let usedOriginal = tempBytes >= inputBytes
     if usedOriginal {
@@ -336,11 +518,10 @@ final class CompressionEngine {
     } else {
       try PluginFiles.moveIntoPlace(tempFile: tempURL, destination: destinationURL)
     }
-    await MainActor.run { JobRegistry.remove(jobId: jobId) }
-
+    let transmuxed = attemptedTransmux && !usedOriginal
     return try await buildResult(
       destinationURL: destinationURL, inputBytes: inputBytes, startedAt: startedAt,
-      transmuxed: false, usedOriginal: usedOriginal, audioReencoded: false)
+      transmuxed: transmuxed, usedOriginal: usedOriginal, audioReencoded: audioReencoded)
   }
 
   /// Resolves `request` against `inputInfo` (plus the separately-read `audioCodec`, which
