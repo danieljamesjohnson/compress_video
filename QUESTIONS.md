@@ -93,3 +93,23 @@ Homebrew. Flutter's CocoaPods integration path (and any `flutter build ios` for 
 uses CocoaPods) needs it. Agents cannot install it: `sudo gem install cocoapods` needs your password.
 Either run `sudo gem install cocoapods` on the Mac, or install Homebrew and `brew install cocoapods`.
 Until then, Phase 3 builds on the Mac use the Swift Package Manager path and CI covers CocoaPods.
+
+## 8. MacBook Air is offline on the tailnet (blocks 03-01 task 1)
+
+2026-09-22, executing 03-01-PLAN.md task 1 (Mac second-SDK bring-up + `tool/mac_sync.sh`/`mac_run.sh`):
+`ssh dans-macbook-air true` and a fresh `ssh -o ConnectTimeout=8 -o BatchMode=yes dans-macbook-air`
+both time out ("Connection timed out" on port 22, tried twice, ~15 min apart). `tailscale status`
+confirms: `dans-macbook-air ... macOS active; relay "dfw"; offline, last seen 5m ago`. This is not
+the QUESTIONS.md #1 permission issue (that was resolved 2026-09-21 and SSH has worked since) — the
+machine itself is unreachable on the tailnet right now, most likely asleep (lid closed / idle) with
+no wake-on-LAN for Remote Login.
+
+**To unblock:** wake the MacBook Air (open the lid, or otherwise bring it out of sleep) so it
+rejoins the tailnet. No password or credential is needed once it's awake — SSH itself has worked
+reliably since #1 was resolved.
+
+Not urgent enough to interrupt you for — it doesn't block the rest of Phase 3 planning/execution,
+only the Mac-dependent parts of 03-01 task 1 (SDK install, `tool/mac_sync.sh`/`mac_run.sh` proof)
+and everything downstream that needs a live Mac. Tasks 2 and 3 of 03-01 completed and committed
+regardless; task 1 is carried forward as blocked until the Mac is reachable again — see
+03-01-SUMMARY.md.
