@@ -135,7 +135,7 @@ Plans:
   3. A fresh Flutter app adds the plugin and builds for iOS and macOS with CocoaPods and, separately, with Swift Package Manager. iOS and macOS use one shared Swift core.
   4. The example app runs on Android, iOS and macOS. In it, a user picks a video, sets options, watches live progress, can cancel, and plays the compressed result.
 
-**Plans**: 2/9 plans executed
+**Plans**: 3/9 plans executed
 
 Plans:
 **Wave 1**
@@ -149,7 +149,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-04-PLAN.md — The Apple engine tracer: one Dart call through `AVAssetReader`/`AVAssetWriter` to a smaller upright MP4, plus the job registry and the two platform-specific teardown paths
+- [x] 03-04-PLAN.md — The Apple engine tracer: one Dart call through `AVAssetReader`/`AVAssetWriter` to a smaller upright MP4, plus the job registry and the two platform-specific teardown paths
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
