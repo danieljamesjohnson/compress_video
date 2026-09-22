@@ -113,3 +113,13 @@ only the Mac-dependent parts of 03-01 task 1 (SDK install, `tool/mac_sync.sh`/`m
 and everything downstream that needs a live Mac. Tasks 2 and 3 of 03-01 completed and committed
 regardless; task 1 is carried forward as blocked until the Mac is reachable again — see
 03-01-SUMMARY.md.
+
+**Update 2026-09-22 09:38-09:50 CDT:** the Mac came back on the tailnet at 09:38 (SSH answered, Xcode
+26.2 responded, a `caffeinate -i -s -t 10800` was started to hold it awake and the second Flutter SDK
+clone was kicked off in the background at `~/development/flutter-stable`), then it dropped off again
+about 10 minutes later — `caffeinate -s` only prevents system sleep on AC power, so it is almost
+certainly on battery with the lid closed. **What unblocks Phase 3 for real: leave the MacBook Air open
+(or plug it into power with the lid closed and "Prevent automatic sleeping on power adapter" on) for
+the next couple of hours.** The SDK clone may be partial; the 03-01 continuation re-validates it and
+re-clones if needed. Until then the run continues with plans that need no Mac (03-03 done; 03-02 is
+using the GitHub Actions macOS runner as its XCTest verifier).
