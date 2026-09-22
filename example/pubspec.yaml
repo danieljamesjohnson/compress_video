@@ -29,6 +29,11 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # Example-app-only dependencies for BULD-04's real picker -> compress -> play flow.
+  # Versions verified live against pub.dev (publisher:flutter.dev) in 03-RESEARCH.md.
+  image_picker: ^1.2.3
+  video_player: ^2.14.0
+
 dev_dependencies:
   integration_test:
     sdk: flutter
