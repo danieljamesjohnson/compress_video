@@ -89,6 +89,20 @@ enum MediaMath {
     positionMs > durationMs ? durationMs : positionMs
   }
 
+  /// Rounds `valuePx` down to the nearest even integer, then floors the result at `16` --
+  /// mirrors Android's own `floorToEvenMin16`: the encoder's alignment requirement is that
+  /// both output dimensions be even, with `16` as this project's own minimum useful dimension.
+  /// `SizeGuard` uses this for both output dimensions so an odd or sub-minimum target is never
+  /// handed to the encoder.
+  ///
+  /// `16` is itself even, so flooring after the even-rounding step cannot reintroduce an odd
+  /// result.
+  static func floorToEvenMin16(_ valuePx: Double) -> Int {
+    let floored = Int(valuePx.rounded(.down))
+    let evened = floored % 2 != 0 ? floored - 1 : floored
+    return max(evened, 16)
+  }
+
   /// Derives unsigned clockwise rotation degrees (0, 90, 180 or 270) from a track's
   /// `preferredTransform` by taking the angle of the transform's `b`/`a` components and
   /// normalising it to the nearest quarter turn.

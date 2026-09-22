@@ -354,4 +354,628 @@ class RunnerTests: XCTestCase {
     }
   }
 
+  // MARK: - SizeGuard.resolve
+  //
+  // Numeric source of truth: android/src/test/kotlin/com/danjjohnson/compress_video/
+  // SizeGuardTest.kt. One Swift `func test...` per Kotlin `@Test`, same input values, same
+  // expected outputs, same Swift case count (41) as the Kotlin `@Test` count (41) -- proven by
+  // counting both, not asserted. A disagreement here is a port bug in SizeGuard.swift, never a
+  // reason to edit SizeGuard.kt or SizeGuardTest.kt (03-02-PLAN.md's prohibition).
+
+  private func sizeGuardDefaultInput(
+    displayedWidthPx: Int = 1080,
+    displayedHeightPx: Int = 1920,
+    rotationDegrees: Int = 90,
+    durationMs: Int64 = 4000,
+    sizeBytes: Int64 = 4_454_349,
+    videoCodec: String = "h264",
+    videoBitrateBps: Int64? = 8_764_164,
+    frameRateFps: Double? = 60.0,
+    hasAudio: Bool = true,
+    audioCodec: String? = "aac",
+    audioBitrateBps: Int64? = 128_000
+  ) -> SizeGuard.InputInfo {
+    SizeGuard.InputInfo(
+      displayedWidthPx: displayedWidthPx,
+      displayedHeightPx: displayedHeightPx,
+      rotationDegrees: rotationDegrees,
+      durationMs: durationMs,
+      sizeBytes: sizeBytes,
+      videoCodec: videoCodec,
+      videoBitrateBps: videoBitrateBps,
+      frameRateFps: frameRateFps,
+      hasAudio: hasAudio,
+      audioCodec: audioCodec,
+      audioBitrateBps: audioBitrateBps
+    )
+  }
+
+  private func sizeGuardDefaultOptions(
+    maxLongSidePx: Int64? = nil,
+    videoBitrateBps: Int64? = nil,
+    targetSizeMb: Double? = nil,
+    presetMaxLongSidePx: Int64 = 1280,
+    presetVideoBitrateBps: Int64 = 2_500_000,
+    maxFps: Int64 = 30,
+    audioStripped: Bool = false,
+    audioPassthroughRequested: Bool = true,
+    requestedAudioBitrateBps: Int64? = nil,
+    trimStartMs: Int64? = nil,
+    trimEndMs: Int64? = nil
+  ) -> SizeGuard.Options {
+    SizeGuard.Options(
+      maxLongSidePx: maxLongSidePx,
+      videoBitrateBps: videoBitrateBps,
+      targetSizeMb: targetSizeMb,
+      presetMaxLongSidePx: presetMaxLongSidePx,
+      presetVideoBitrateBps: presetVideoBitrateBps,
+      maxFps: maxFps,
+      audioStripped: audioStripped,
+      audioPassthroughRequested: audioPassthroughRequested,
+      requestedAudioBitrateBps: requestedAudioBitrateBps,
+      trimStartMs: trimStartMs,
+      trimEndMs: trimEndMs
+    )
+  }
+
+  /// A qualifying baseline for `SizeGuard.Plan.wouldTransmux`: input long side exactly equal
+  /// to the preset's own cap, frame rate exactly at the cap, H.264+AAC, and an input video
+  /// bitrate comfortably inside the 1.15x headroom of the resolved (== preset, since
+  /// longSideRatio/fpsRatio are both 1.0) 800,000bps target. Every transmux test below flips
+  /// exactly one field off this baseline.
+  private func sizeGuardTransmuxInput(
+    displayedWidthPx: Int = 640,
+    displayedHeightPx: Int = 360,
+    rotationDegrees: Int = 0,
+    durationMs: Int64 = 4000,
+    sizeBytes: Int64 = 5_000_000,
+    videoCodec: String = "h264",
+    videoBitrateBps: Int64? = 800_000,
+    frameRateFps: Double? = 30.0,
+    hasAudio: Bool = true,
+    audioCodec: String? = "aac",
+    audioBitrateBps: Int64? = 128_000
+  ) -> SizeGuard.InputInfo {
+    SizeGuard.InputInfo(
+      displayedWidthPx: displayedWidthPx,
+      displayedHeightPx: displayedHeightPx,
+      rotationDegrees: rotationDegrees,
+      durationMs: durationMs,
+      sizeBytes: sizeBytes,
+      videoCodec: videoCodec,
+      videoBitrateBps: videoBitrateBps,
+      frameRateFps: frameRateFps,
+      hasAudio: hasAudio,
+      audioCodec: audioCodec,
+      audioBitrateBps: audioBitrateBps
+    )
+  }
+
+  private func sizeGuardTransmuxOptions(
+    maxLongSidePx: Int64? = nil,
+    videoBitrateBps: Int64? = nil,
+    targetSizeMb: Double? = nil,
+    presetMaxLongSidePx: Int64 = 640,
+    presetVideoBitrateBps: Int64 = 800_000,
+    maxFps: Int64 = 30,
+    audioStripped: Bool = false,
+    audioPassthroughRequested: Bool = true,
+    requestedAudioBitrateBps: Int64? = nil,
+    trimStartMs: Int64? = nil,
+    trimEndMs: Int64? = nil
+  ) -> SizeGuard.Options {
+    SizeGuard.Options(
+      maxLongSidePx: maxLongSidePx,
+      videoBitrateBps: videoBitrateBps,
+      targetSizeMb: targetSizeMb,
+      presetMaxLongSidePx: presetMaxLongSidePx,
+      presetVideoBitrateBps: presetVideoBitrateBps,
+      maxFps: maxFps,
+      audioStripped: audioStripped,
+      audioPassthroughRequested: audioPassthroughRequested,
+      requestedAudioBitrateBps: requestedAudioBitrateBps,
+      trimStartMs: trimStartMs,
+      trimEndMs: trimEndMs
+    )
+  }
+
+  func testPresetAppliedToSourceLargerThanPresetLongSide_scalesDown() {
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: sizeGuardDefaultOptions())
+    XCTAssertEqual(plan.targetWidthPx, 720)
+    XCTAssertEqual(plan.targetHeightPx, 1280)
+    XCTAssertEqual(plan.videoBitrateBps, 2_500_000)
+  }
+
+  func testPresetAppliedToSourceExactlyEqualToPresetLongSide_noChangeAndBitrateScaleFactorExactlyOne()
+  {
+    let input = sizeGuardDefaultInput(
+      displayedWidthPx: 720, displayedHeightPx: 1280, frameRateFps: 30.0)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardDefaultOptions())
+    XCTAssertEqual(plan.targetWidthPx, 720)
+    XCTAssertEqual(plan.targetHeightPx, 1280)
+    XCTAssertEqual(plan.videoBitrateBps, 2_500_000)
+  }
+
+  func testPresetAppliedToSmallerSource_doesNotSpendTheFullPresetBitrate() {
+    let input = sizeGuardDefaultInput(
+      displayedWidthPx: 360, displayedHeightPx: 640, frameRateFps: 30.0)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardDefaultOptions())
+    // No upscale: the source is already below the preset's long side.
+    XCTAssertEqual(plan.targetWidthPx, 360)
+    XCTAssertEqual(plan.targetHeightPx, 640)
+    // Bitrate scales down by the square of (640 / 1280) = 0.25, not left at 2,500,000.
+    XCTAssertEqual(plan.videoBitrateBps, 625_000)
+    XCTAssertTrue(plan.videoBitrateBps < sizeGuardDefaultOptions().presetVideoBitrateBps)
+  }
+
+  func testExplicitLongSideOverridesThePreset_whileThePresetBitrateFormulaStillApplies() {
+    let input = sizeGuardDefaultInput(frameRateFps: 30.0)
+    let options = sizeGuardDefaultOptions(maxLongSidePx: 960)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.targetHeightPx, 960)
+    XCTAssertEqual(plan.targetWidthPx, 540)
+    // Scaled by (960 / 1280)^2 = 0.5625 against the preset's own 2,500,000 -- the override
+    // changed the target, not the preset's own reference bitrate.
+    XCTAssertEqual(plan.videoBitrateBps, 1_406_250)
+  }
+
+  func testExplicitBitrateOverridesThePreset_whileThePresetLongSideStillApplies() {
+    let input = sizeGuardDefaultInput(frameRateFps: 30.0)
+    let options = sizeGuardDefaultOptions(videoBitrateBps: 1_200_000)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.targetHeightPx, 1280)
+    XCTAssertEqual(plan.videoBitrateBps, 1_200_000)
+  }
+
+  func testTargetSizeMbProducesTheDocumentedFormulaBitrate() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 2.0)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    // (2.0 * 1e6 * 8 / 4.0) * 0.97 - 128000 = 3,880,000 - 128,000 = 3,752,000.
+    XCTAssertEqual(plan.videoBitrateBps, 3_752_000)
+    XCTAssertEqual(plan.audioBitrateBps, 128_000)
+  }
+
+  func testTargetSizeMbSoSmallThe200000FloorBinds() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 0.0001)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.videoBitrateBps, 200_000)
+  }
+
+  func testTargetSizeMbSoLargeTheInputBitrateCapBinds() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 100.0)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.videoBitrateBps, 8_764_164)
+  }
+
+  func testTargetSizeMbWithZeroDurationAndNoInputBitrate_fallsBackToFloorInsteadOfOverflowing() {
+    let input = sizeGuardDefaultInput(durationMs: 0, videoBitrateBps: nil)
+    let options = sizeGuardDefaultOptions(targetSizeMb: 2.0)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.videoBitrateBps, 200_000)
+  }
+
+  func testOddScalingCase_neitherOutputDimensionIsEverOdd() {
+    let input = sizeGuardDefaultInput(displayedWidthPx: 853, displayedHeightPx: 1517)
+    let options = sizeGuardDefaultOptions(maxLongSidePx: 641)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.targetWidthPx % 2, 0)
+    XCTAssertEqual(plan.targetHeightPx % 2, 0)
+    XCTAssertTrue(plan.targetHeightPx <= 641)
+    XCTAssertTrue(plan.targetWidthPx <= 641)
+  }
+
+  func testMaxLongSidePxOfExactly16_acceptedAndTheShortSideFloorsAt16() {
+    let input = sizeGuardDefaultInput(displayedWidthPx: 1920, displayedHeightPx: 100)
+    let options = sizeGuardDefaultOptions(maxLongSidePx: 16)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.targetWidthPx, 16)
+    // Naive scaling would give 100 * (16/1920) ~= 0.83, rounded down and evened to 0 -- the
+    // 16px floor prevents a zero or sub-minimum short side reaching the encoder.
+    XCTAssertEqual(plan.targetHeightPx, 16)
+  }
+
+  func testFps60InputAtMaxFps30_effectiveFpsIs30() {
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: sizeGuardDefaultOptions())
+    XCTAssertEqual(plan.effectiveFps, 30)
+  }
+
+  func testFps30InputAtMaxFps60_effectiveFpsIs30NotUpscaled() {
+    let input = sizeGuardDefaultInput(frameRateFps: 30.0)
+    let options = sizeGuardDefaultOptions(maxFps: 60)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.effectiveFps, 30)
+  }
+
+  func testFps29p97InputAtMaxFps30_effectiveFpsIs30_provingHalfUpRounding() {
+    let input = sizeGuardDefaultInput(frameRateFps: 29.97)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardDefaultOptions())
+    // A truncating (non-half-up) rounder would give 29, and min(30, 29) = 29 -- wrong.
+    XCTAssertEqual(plan.effectiveFps, 30)
+  }
+
+  func testUnknownInputFrameRate_fallsBackToMaxFpsUnchanged() {
+    let input = sizeGuardDefaultInput(frameRateFps: nil)
+    let options = sizeGuardDefaultOptions(maxFps: 24)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.effectiveFps, 24)
+  }
+
+  func testUnknownInputVideoBitrate_noCapApplied_computedBitrateStands() {
+    let input = sizeGuardDefaultInput(videoBitrateBps: nil, frameRateFps: 30.0)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardDefaultOptions())
+    XCTAssertEqual(plan.videoBitrateBps, 2_500_000)
+  }
+
+  func testStrippedAudio_bitrateZero_excludedFromTargetSizeSubtraction() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 2.0, audioStripped: true)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.audioBitrateBps, 0)
+    // No audio subtraction: (2.0 * 1e6 * 8 / 4.0) * 0.97 = 3,880,000, unlike the audio-present
+    // case (3,752,000) proven in testTargetSizeMbProducesTheDocumentedFormulaBitrate.
+    XCTAssertEqual(plan.videoBitrateBps, 3_880_000)
+  }
+
+  func testRequestedAudioBitrateInsideTheRange_passesThroughUnchanged() {
+    let options = sizeGuardDefaultOptions(requestedAudioBitrateBps: 64_000)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.audioBitrateBps, 64_000)
+  }
+
+  func testNoRequestedAudioBitrate_fallsBackToTheSourceSOwnAudioBitrate() {
+    // defaultInput's audioBitrateBps is 128000; requestedAudioBitrateBps is nil in
+    // sizeGuardDefaultOptions(), so rule 5's fallback chain (request, then source, then the
+    // 128,000bps project default) resolves to the source's own value here -- which happens to
+    // equal the same project default, so this case also overrides the source value to
+    // something else to prove the fallback is really reading the source, not coincidentally
+    // landing on the same default either way.
+    let input = sizeGuardDefaultInput(audioBitrateBps: 96_000)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardDefaultOptions())
+    XCTAssertEqual(plan.audioBitrateBps, 96_000)
+  }
+
+  func testRequestedAudioBitrateBelow8000_clampedUpToTheFloor() {
+    let options = sizeGuardDefaultOptions(requestedAudioBitrateBps: 100)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.audioBitrateBps, 8_000)
+  }
+
+  func testRequestedAudioBitrateAbove960000_clampedDownToTheCeiling() {
+    let options = sizeGuardDefaultOptions(requestedAudioBitrateBps: 2_000_000)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.audioBitrateBps, 960_000)
+  }
+
+  func testTrimmedRequest_usesTheTrimmedDurationForTargetSizeBitrateAndPredictedBytes() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 1.0, trimStartMs: 1000, trimEndMs: 3000)
+    let plan = SizeGuard.resolve(input: sizeGuardDefaultInput(), options: options)
+    XCTAssertEqual(plan.outputDurationMs, 2000)
+    // (1.0 * 1e6 * 8 / 2.0) * 0.97 - 128000 = 3,880,000 - 128,000 = 3,752,000.
+    XCTAssertEqual(plan.videoBitrateBps, 3_752_000)
+    // ((3,752,000 + 128,000) * 2.0 / 8) * 1.03 = 970,000 * 1.03 = 999,100.
+    XCTAssertEqual(plan.predictedOutputBytes, 999_100)
+  }
+
+  func testResolve_isPure_twoDifferentOptionsAgainstTheSameInputDoNotContaminateEachOther() {
+    let input = sizeGuardDefaultInput()
+    let p360 = sizeGuardDefaultOptions(presetMaxLongSidePx: 640, presetVideoBitrateBps: 800_000)
+    let p720 = sizeGuardDefaultOptions()
+
+    let p360Plan = SizeGuard.resolve(input: input, options: p360)
+    let p720Plan = SizeGuard.resolve(input: input, options: p720)
+
+    XCTAssertEqual(p360Plan.targetHeightPx, 640)
+    XCTAssertEqual(p360Plan.videoBitrateBps, 800_000)
+    XCTAssertEqual(p720Plan.targetHeightPx, 1280)
+    XCTAssertEqual(p720Plan.videoBitrateBps, 2_500_000)
+  }
+
+  // --- wouldUseOriginal ---
+  //
+  // sizeGuardDefaultInput()/sizeGuardDefaultOptions() (1080x1920, preset cap 1280) never
+  // qualifies for transmux -- the preset's own long side is below the input's -- so these
+  // cases isolate the never-larger predicate from the transmux one. targetSizeMb=1.0 against
+  // the default 4-second/128kbps-audio baseline resolves to a known, exact
+  // predictedOutputBytes of 999,100 (same arithmetic as
+  // testTargetSizeMbProducesTheDocumentedFormulaBitrate, halved for a 1.0MB target instead of
+  // 2.0MB), so sizeBytes is placed directly at, above, and below that boundary rather than
+  // re-deriving the bitrate math per case.
+
+  func testWouldUseOriginal_predictedOutputAboveInputSize_setsTheFlag() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 1.0)
+    let input = sizeGuardDefaultInput(sizeBytes: 999_099)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(plan.predictedOutputBytes, 999_100)
+    XCTAssertTrue(plan.wouldUseOriginal)
+  }
+
+  func testWouldUseOriginal_predictedOutputExactlyEqualToInputSize_setsTheFlag() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 1.0)
+    let input = sizeGuardDefaultInput(sizeBytes: 999_100)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertTrue(plan.wouldUseOriginal, "equality counts as 'would not help'")
+  }
+
+  func testWouldUseOriginal_predictedOutputOneByteBelowInputSize_doesNotSetTheFlag() {
+    let options = sizeGuardDefaultOptions(targetSizeMb: 1.0)
+    let input = sizeGuardDefaultInput(sizeBytes: 999_101)
+    let plan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertFalse(plan.wouldUseOriginal)
+  }
+
+  func testWouldUseOriginal_neverSetWhenThePlanIsARemux() {
+    // The qualifying transmux baseline predicts output bytes exactly equal to the input's own
+    // size (a remux copies the same samples) -- which would trip the equality rule above if
+    // wouldTransmux did not take precedence. It must not.
+    let plan = SizeGuard.resolve(
+      input: sizeGuardTransmuxInput(), options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+    XCTAssertEqual(plan.predictedOutputBytes, sizeGuardTransmuxInput().sizeBytes)
+    XCTAssertFalse(plan.wouldUseOriginal)
+  }
+
+  // --- wouldTransmux ---
+  //
+  // sizeGuardTransmuxInput()/sizeGuardTransmuxOptions() is a baseline every one of the seven
+  // conditions satisfies. Each case below flips exactly one field off that baseline.
+
+  func testWouldTransmux_qualifyingBaseline_isTrue() {
+    let plan = SizeGuard.resolve(
+      input: sizeGuardTransmuxInput(), options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_nonH264VideoCodec_disqualifies() {
+    let input = sizeGuardTransmuxInput(videoCodec: "hevc")
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_nonAacAudioCodec_disqualifies() {
+    let input = sizeGuardTransmuxInput(audioCodec: "opus")
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_forcedAudioReencode_disqualifies() {
+    let options = sizeGuardTransmuxOptions(audioPassthroughRequested: false)
+    let plan = SizeGuard.resolve(input: sizeGuardTransmuxInput(), options: options)
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_audioStrip_disqualifies() {
+    let options = sizeGuardTransmuxOptions(audioStripped: true, audioPassthroughRequested: false)
+    let plan = SizeGuard.resolve(input: sizeGuardTransmuxInput(), options: options)
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_trimRequested_disqualifies() {
+    let options = sizeGuardTransmuxOptions(trimStartMs: 500)
+    let plan = SizeGuard.resolve(input: sizeGuardTransmuxInput(), options: options)
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_longSideOnePixelAboveTheTarget_disqualifies() {
+    let input = sizeGuardTransmuxInput(displayedWidthPx: 641)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_frameRateOneAboveTheCap_disqualifies() {
+    let input = sizeGuardTransmuxInput(frameRateFps: 31.0)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_bitrateExactlyAt1point15TimesTheTarget_qualifies() {
+    // Resolved video bitrate stays 800,000 (min against a raised input bitrate that is still
+    // above the preset-scaled value), so 920,000 is exactly the 1.15x boundary.
+    let input = sizeGuardTransmuxInput(videoBitrateBps: 920_000)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertEqual(plan.videoBitrateBps, 800_000)
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_bitrateOneBpsAboveTheHeadroom_disqualifies() {
+    let input = sizeGuardTransmuxInput(videoBitrateBps: 920_001)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertEqual(plan.videoBitrateBps, 800_000)
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_unknownInputBitrate_disqualifies() {
+    let input = sizeGuardTransmuxInput(videoBitrateBps: nil)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_noAudioInputWithEverythingElseQualifying_qualifies() {
+    let input = sizeGuardTransmuxInput(hasAudio: false, audioCodec: nil)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  // --- estimate()/compress() can never disagree ---
+  //
+  // Both paths resolve through the identical SizeGuard.resolve call -- there is no other
+  // resolution path either could take. These tests express that guarantee directly at this
+  // level: resolve has no shared mutable state, so calling it twice for the identical
+  // InputInfo/Options a real estimate-then-compress call pair would build can never produce two
+  // different Plans.
+
+  func testResolve_calledTwiceForIdenticalScalingInputsAndOptions_producesEqualPlans() {
+    let input = sizeGuardDefaultInput()
+    let options = sizeGuardDefaultOptions()
+    let estimatePlan = SizeGuard.resolve(input: input, options: options)
+    let compressPlan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(estimatePlan, compressPlan)
+  }
+
+  func testResolve_calledTwiceForIdenticalTransmuxQualifyingInputsAndOptions_producesEqualPlans() {
+    let input = sizeGuardTransmuxInput()
+    let options = sizeGuardTransmuxOptions()
+    let estimatePlan = SizeGuard.resolve(input: input, options: options)
+    let compressPlan = SizeGuard.resolve(input: input, options: options)
+    XCTAssertEqual(estimatePlan, compressPlan)
+    XCTAssertTrue(estimatePlan.wouldTransmux)
+  }
+
+  // MARK: - ErrorMapping
+  //
+  // One case per AVError.Code ErrorMapping.swift maps, mirroring Android's
+  // ErrorMappingTest.kt's table-driven style. `.decoderNotFound`/`.encoderNotFound`/
+  // `.decoderTemporarilyUnavailable`/`.encoderTemporarilyUnavailable` are the R-03-verified
+  // real case names (03-RESEARCH.md Pitfall 6) -- NOT the CONTEXT.md-prose
+  // `.decoderNotAvailable`/`.encoderNotAvailable`, which do not exist.
+
+  func testKnownAVErrorCodesHasExactlyElevenEntries() {
+    // Fails the whole suite if a code is ever added to knownAVErrorCodes without a
+    // corresponding case below -- mirrors ErrorMappingTest.kt's own acceptance criterion.
+    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 11)
+  }
+
+  func testReasonForAVErrorDecoderNotFoundMapsToDecoderUnavailable() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.decoderNotFound), "decoderUnavailable")
+  }
+
+  func testReasonForAVErrorDecoderTemporarilyUnavailableMapsToDecoderUnavailable() {
+    XCTAssertEqual(
+      ErrorMapping.reasonForAVError(.decoderTemporarilyUnavailable), "decoderUnavailable")
+  }
+
+  func testReasonForAVErrorEncoderNotFoundMapsToEncoderUnavailable() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.encoderNotFound), "encoderUnavailable")
+  }
+
+  func testReasonForAVErrorEncoderTemporarilyUnavailableMapsToEncoderUnavailable() {
+    XCTAssertEqual(
+      ErrorMapping.reasonForAVError(.encoderTemporarilyUnavailable), "encoderUnavailable")
+  }
+
+  func testReasonForAVErrorDiskFullMapsToOutOfSpace() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.diskFull), "outOfSpace")
+  }
+
+  func testReasonForAVErrorFileFormatNotRecognizedMapsToUnsupportedInput() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.fileFormatNotRecognized), "unsupportedInput")
+  }
+
+  func testReasonForAVErrorFileFailedToParseMapsToUnsupportedInput() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.fileFailedToParse), "unsupportedInput")
+  }
+
+  func testReasonForAVErrorDecodeFailedMapsToUnsupportedInput() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.decodeFailed), "unsupportedInput")
+  }
+
+  func testReasonForAVErrorExportFailedMapsToIo() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.exportFailed), "io")
+  }
+
+  func testReasonForAVErrorSessionNotRunningMapsToIo() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.sessionNotRunning), "io")
+  }
+
+  func testReasonForAVErrorOutOfMemoryMapsToIo() {
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.outOfMemory), "io")
+  }
+
+  func testReasonForAVErrorUnmappedCodeMapsToUnknown() {
+    // .unknown is a real AVError.Code case deliberately NOT in knownAVErrorCodes -- an
+    // unrecognised code must fall through to "unknown", not crash or silently mismap.
+    XCTAssertEqual(ErrorMapping.reasonForAVError(.unknown), "unknown")
+  }
+
+  func testReasonForNSErrorUnrelatedMessageMapsToIo() {
+    let error = NSError(
+      domain: "CompressVideoTestDomain", code: 42,
+      userInfo: [NSLocalizedDescriptionKey: "some unrelated failure"])
+    XCTAssertEqual(ErrorMapping.reasonForNSError(error), "io")
+  }
+
+  func testReasonForNSErrorNoSpaceMessageMapsToOutOfSpace() {
+    let error = NSError(
+      domain: "CompressVideoTestDomain", code: 28,
+      userInfo: [NSLocalizedDescriptionKey: "write failed: no space left on device"])
+    XCTAssertEqual(ErrorMapping.reasonForNSError(error), "outOfSpace")
+  }
+
+  func testMessageForNSErrorFoldsInDomainAndNumericCode() {
+    let error = NSError(
+      domain: "CompressVideoTestDomain", code: 1234,
+      userInfo: [NSLocalizedDescriptionKey: "boom"])
+    let message = ErrorMapping.messageForNSError(error)
+    XCTAssertTrue(message.contains("1234"))
+    XCTAssertTrue(message.contains("CompressVideoTestDomain"))
+  }
+
+  // MARK: - PluginFiles.sweep
+
+  private func makeTempCacheDirForSweepTest() -> URL {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "compress_video_pluginfiles_test_\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  func testSweepDeletesAPlainFileInsideTheCacheDirectory() {
+    let cacheDir = makeTempCacheDirForSweepTest()
+    defer { try? FileManager.default.removeItem(at: cacheDir) }
+    let filePath = cacheDir.appendingPathComponent("stale.mp4")
+    FileManager.default.createFile(atPath: filePath.path, contents: Data([1, 2, 3]))
+
+    let deletedCount = PluginFiles.sweep(cacheDir: cacheDir, skipResolvedPaths: [])
+
+    XCTAssertEqual(deletedCount, 1)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: filePath.path))
+  }
+
+  func testSweepDoesNotRecurseIntoASubdirectory() {
+    let cacheDir = makeTempCacheDirForSweepTest()
+    defer { try? FileManager.default.removeItem(at: cacheDir) }
+    let subDir = cacheDir.appendingPathComponent("nested", isDirectory: true)
+    try? FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
+    let nestedFile = subDir.appendingPathComponent("survivor.mp4")
+    FileManager.default.createFile(atPath: nestedFile.path, contents: Data([4, 5, 6]))
+
+    let deletedCount = PluginFiles.sweep(cacheDir: cacheDir, skipResolvedPaths: [])
+
+    // A non-empty subdirectory is skipped outright (never walked into to decide) -- proven by
+    // both: nothing was counted as deleted, and the nested file is still there.
+    XCTAssertEqual(deletedCount, 0)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: nestedFile.path))
+  }
+
+  func testSweepDoesNotDeleteAFileNamedInTheExclusionSet() {
+    let cacheDir = makeTempCacheDirForSweepTest()
+    defer { try? FileManager.default.removeItem(at: cacheDir) }
+    let livePath = cacheDir.appendingPathComponent("live-job.mp4")
+    FileManager.default.createFile(atPath: livePath.path, contents: Data([1]))
+    let resolvedLivePath = livePath.resolvingSymlinksInPath().path
+
+    let deletedCount = PluginFiles.sweep(
+      cacheDir: cacheDir, skipResolvedPaths: [resolvedLivePath])
+
+    XCTAssertEqual(deletedCount, 0)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: livePath.path))
+  }
+
+  func testSweepDoesNotDeleteTheTargetOfASymlinkPointingOutsideTheCacheDirectory() {
+    let cacheDir = makeTempCacheDirForSweepTest()
+    defer { try? FileManager.default.removeItem(at: cacheDir) }
+    let outsideDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "compress_video_pluginfiles_test_outside_\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: outsideDir) }
+    let outsideFile = outsideDir.appendingPathComponent("do-not-delete.mp4")
+    FileManager.default.createFile(atPath: outsideFile.path, contents: Data([7, 8, 9]))
+
+    let symlinkPath = cacheDir.appendingPathComponent("escape-link.mp4")
+    try? FileManager.default.createSymbolicLink(at: symlinkPath, withDestinationURL: outsideFile)
+
+    let deletedCount = PluginFiles.sweep(cacheDir: cacheDir, skipResolvedPaths: [])
+
+    XCTAssertEqual(deletedCount, 0)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path))
+  }
+
 }
