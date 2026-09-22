@@ -5,8 +5,8 @@ progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 23
-  completed_plans: 14
-  percent: 17
+  completed_plans: 15
+  percent: 18
 ---
 
 # Project State
@@ -16,23 +16,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-15)
 
 **Core value:** One call turns a phone video into a smaller MP4 that plays everywhere, and it never makes the file bigger, never returns null, and builds on today's Flutter toolchain.
-**Current focus:** Phase 3 — Apple Compression to Parity (03-01 executing: 2/3 tasks done, task 1 blocked on the Mac being offline — QUESTIONS.md #8); Phase 2 awaits /gsd-verify-work 2
+**Current focus:** Phase 3 — Apple Compression to Parity (03-03 complete — example app rewrite + widget suite; 03-01 still partial: 2/3 tasks done, task 1 blocked on the Mac being offline — QUESTIONS.md #8; 03-02 not started); Phase 2 awaits /gsd-verify-work 2
 
 ## Current Position
 
-Phase: 1 of 6 complete (verified 7/7); Phase 2 executed, verification deferred to human; Phase 3 executing (03-01: 2/3 tasks committed, task 1 blocked)
-Plan: 14 of 23 known plans fully complete (Phases 1-2: 14/14; Phase 3: 03-01 partial — tasks 2 and 3 committed, task 1 blocked on Mac connectivity, plan not yet summarized as complete)
-Status: Phase 3 03-01-PLAN.md execution started 2026-09-22. Task 1 (Mac second-SDK bring-up, `tool/mac_sync.sh`/`tool/mac_run.sh`) is BLOCKED: its `<precondition>` (`ssh dans-macbook-air true` exits 0) is unmet — the Mac is offline on the tailnet (`tailscale status`: "offline, last seen 5m ago"), confirmed by two separate SSH attempts ~15 min apart, both "Connection timed out". Per the executor's precondition protocol this is never auto-approved; recorded as QUESTIONS.md #8 and carried forward, not pushed as a notification (not something Dan can act on remotely in the next five minutes). Tasks 2 (trim_source_10s.mp4 corpus fixture + trim sidecar block) and 3 (validation contract row-count reconciliation) completed, verified and committed independently — see 03-01-SUMMARY.md. Resume by re-running /gsd-execute-phase 3 once the Mac is reachable again (`ssh dans-macbook-air true` exits 0).
-Last activity: 2026-09-22 — 03-01-PLAN.md tasks 2 and 3 executed and committed; task 1 blocked on Mac offline, recorded in QUESTIONS.md #8
+Phase: 1 of 6 complete (verified 7/7); Phase 2 executed, verification deferred to human; Phase 3 executing (03-03 complete; 03-01: 2/3 tasks committed, task 1 blocked; 03-02 not started)
+Plan: 15 of 23 known plans fully complete (Phases 1-2: 14/14; Phase 3: 03-03 complete — 1/9; 03-01 partial — tasks 2 and 3 committed, task 1 blocked on Mac connectivity, plan not yet summarized as complete)
+Status: Phase 3 03-03-PLAN.md (BULD-04 example app rewrite) executed out of wave order 2026-09-22, since everything it consumes from 03-01 was already committed and its own verification is Linux + Android-emulator only. All 3 tasks completed and committed: the tracer (bundled clip -> compress -> played result, verified live on emulator-5554 with screenshots), the remaining six screen states + real picker + full options panel + responsive layout, and 19 widget tests (all seven states, both 600/599 breakpoints, both UI-SPEC backstops) green on Linux with no device. Root-caused and fixed a real `WidgetTester.runAsync()`/`FakeAsync` zone-binding hazard along the way (documented in 03-03-SUMMARY.md and in the test file's header comment). 03-01's task 1 (Mac second-SDK bring-up) remains BLOCKED: its `<precondition>` (`ssh dans-macbook-air true` exits 0) is unmet — the Mac is offline on the tailnet, confirmed twice; QUESTIONS.md #8 still open. 03-02 (Swift SizeGuard/ErrorMapping/PluginFiles ports) has not been started.
+Last activity: 2026-09-22 — 03-03-PLAN.md executed and committed in full (3/3 tasks); 03-01 task 1 still blocked on Mac offline, recorded in QUESTIONS.md #8
 
-Progress: [██████░░░░] 61% (14/23 known plans fully complete; Phase 3 03-01 partially executed — 2/3 tasks; Phase 2 awaits /gsd-verify-work 2)
+Progress: [██████░░░░] 65% (15/23 known plans fully complete; Phase 3: 03-03 done, 03-01 partial, 03-02 not started; Phase 2 awaits /gsd-verify-work 2)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
-- Average duration: 70 min
-- Total execution time: 16.1 hours
+- Total plans completed: 15
+- Average duration: 71 min
+- Total execution time: 17.6 hours
 
 **By Phase:**
 
@@ -42,8 +42,9 @@ Progress: [██████░░░░] 61% (14/23 known plans fully complete
 | 2 | 7 | 527 min | 75 min |
 
 **Recent Trend:**
-- Last 5 plans: ~75 min, ~48 min, ~100 min, 166 min, ~120 min
-- Trend: 02-07 (estimate/clearCache/APK build proof, closing the phase) took ~100 min across three tasks with heavy real-emulator verification (four preset accuracy runs, a 15-case new integration suite, a full-suite re-run, and a live APK build/inspect/zipalign cycle) — slower than 02-06 but proportionate to closing out the phase's last three requirements with real measurements rather than assumed numbers
+- Last 5 plans: ~48 min, ~100 min, 166 min, ~120 min, 92 min
+- Trend: 03-03 (example app rewrite + widget suite, BULD-04) took 92 min across three tasks; most of the time went into diagnosing and fixing a real `WidgetTester.runAsync()`/`FakeAsync` zone-binding hazard in the new widget test suite (real dart:io work started outside `runAsync()` never completes) rather than into the app code itself, which was straightforward given 03-UI-SPEC.md's already-locked contract
+- 02-07 (estimate/clearCache/APK build proof, closing the phase) took ~100 min across three tasks with heavy real-emulator verification (four preset accuracy runs, a 15-case new integration suite, a full-suite re-run, and a live APK build/inspect/zipalign cycle) — slower than 02-06 but proportionate to closing out the phase's last three requirements with real measurements rather than assumed numbers
 - 01-06: 166 min, almost entirely CI wall-clock across 8 macOS-runner attempts; code-complete with two real platform-quirk fixes found via live CI, confirmed green 2026-09-21 once the GitHub Actions billing block cleared
 - 01-07: ~120 min, almost entirely CI wall-clock across 4 pushed CI attempts on the two-runner pipeline: a real `sh`/pipefail bug in the Android emulator-runner script, two transient platform flakes (Phase 2's concurrent-job codec exhaustion on the emulator, and the documented iOS-simulator-hang pattern), then a real design bug in the parity gate itself (exact-match instead of tolerance-aware) that surfaced two legitimate, now-documented cross-platform deltas
 
@@ -84,6 +85,7 @@ Recent decisions affecting current work:
 - [02-06]: Progress polling clamps into 0..99 (not 0..100) so a single explicit terminal `onProgress(100.0)` call is the only source of 100 — Media3 can report progress already at 100 for several poll ticks before `onCompleted` fires. `CompressJob._run` now closes the progress stream BEFORE completing `result` on every terminal path (was: complete-then-close in one `finally`, which never actually guaranteed the ordering since `Completer.complete` schedules listeners onto a later microtask) — this is a real behavior change; fixed `compress_test.dart`'s pre-existing `await job.result; await subscription.asFuture()` pattern, which would otherwise hang forever under the new ordering. `JobRegistry.LiveJob` now holds a `cancelTransformer: () -> Unit` callback instead of a raw `androidx.media3.transformer.Transformer` reference, since `Transformer`'s own static initializer cannot run (construct OR mock) in a plain JVM unit test — this is what makes `CompressVideoPluginTest`'s new detach cases possible at all. `CompressVideoPlugin.onDetachedFromEngine` now cancels every live job BEFORE clearing host API registrations (was reversed, contradicting T-02-25). `ErrorMapping.kt` extracts the full 22-code mapping into a pure, JVM-testable object; `TransformerEngine.mapExportException` now always folds the numeric `ExportException.errorCode` into the failure message text, since `CompressVideoException.platformDetail` is only populated Dart-side for the `unknown` reason. Compressing `truncated_mdat.mp4` observed `errorCode=2000` (`ERROR_CODE_IO_UNSPECIFIED`), agreeing with the mapping. See 02-06-SUMMARY.md Deviations.
 - [02-07]: `Compression.estimate()` resolves through `TransformerEngine.resolvePlan` -- the identical `SizeGuard.Plan` resolution `startCompress` uses -- so a prediction and the real job can never disagree about which path (transmux/never-larger/encode) would run; proven on the emulator for all three fixture cases. `Compression.clearCache()` sweeps a new `PluginFiles.sweep`: bounded to one directory, resolving each candidate's canonical path and refusing anything that escapes the canonical cache directory, skipping every file a live job (`JobRegistry.liveTempFilePaths`) still owns. `Thumbnails.kt` now uses the shared `PluginFiles.cacheSubDir` instead of its own copy. Measured live that the emulator's software CBR encoder cannot hold `estimate()`'s ±15% designed tolerance across all four presets (7.9-67.0% divergence, not monotonic with resolution) -- the same class of finding as `targetSizeMb` (02-03/02-04); documented an honest ±75% emulator tolerance rather than a fabricated pass, and extended QUESTIONS.md #3. `tool/verify_apk_native_libs.sh` (allowlist enumeration + zipalign 16 KB check, teeth verified by narrowing the allowlist) is wired into CI; `doc/TOOLCHAIN.md`'s media3 pin reconciled to the actual 1.11.1 build pin (closing a 02-04-flagged item). INFO-03, CORE-09, BULD-01 now checked complete — Phase 2's all 14 requirements are done. See 02-07-SUMMARY.md Deviations.
 - [03-01]: `corpus/verify_corpus.sh`'s new `trim` sidecar block derives `toleranceMs` as one frame at the clip's own measured frame rate, rounded UP (ceiling) to the next whole millisecond — not nearest-rounding, which would give 33 at 30fps, not the required 34 — matching the fixed 34ms `durationToleranceMs` convention every existing 30fps clip in this corpus already carries. Task 1 (Mac second-SDK bring-up, `tool/mac_sync.sh`/`tool/mac_run.sh`) did not run: its `<precondition>` was unmet (Mac offline on the tailnet). See Blockers/Concerns and QUESTIONS.md #8.
+- [03-03]: `image_picker_platform_interface`/`plugin_platform_interface` added as `dev_dependencies` (never `dependencies:`) so `main_screen_test.dart` can fake `ImagePickerPlatform.instance` with `MockPlatformInterfaceMixin` — both were already transitive deps of `image_picker`, so this is test-only infra, not a new production dependency. Root-caused a real Flutter widget-testing hazard: `AutomatedTestWidgetsFlutterBinding` runs the whole test body in a `FakeAsync` zone, and an async callback's continuations stay bound to whichever zone was active when it *started*, not to whichever zone later code awaits it in — a `tester.tap()` issued outside `WidgetTester.runAsync()` starts real `dart:io` work in the fake zone, where it never completes regardless of how many `pump()` calls follow or how long a *separate* later `runAsync()` waits. Every pick in the test file now does the tap, the fake-picker completion, and a bounded real wait together inside one `runAsync()` block, using a tiny 1-byte file rather than the 4.45MB bundled corpus asset. Also: `flutter test`'s default 800x600 surface was too short for the fully-populated screen, leaving `Compress video` off-screen for `tester.tap()` — `pumpMainScreen()` now sizes the test viewport generously (800x2400 by default, explicit smaller sizes for the two breakpoint tests and the 200-char-filename backstop). See 03-03-SUMMARY.md Deviations.
 
 ### Pending Todos
 
@@ -96,6 +98,7 @@ Recent decisions affecting current work:
 - [02-06]: The pre-flight free-space check (StatFs against 1.2x predicted output) has no functional trigger test — there is no practical way to make the shared danserver emulator's filesystem genuinely run out of space in an automated test; a future plan could add a Robolectric-based unit test around a small extracted comparison function if tighter proof is wanted. CORE-04's flagged assumption (A1: `DECODER_INIT_FAILED`/`DECODING_FORMAT_UNSUPPORTED` split; A2: the ENOSPC message match) remains unresolved — the one real failure observed (`truncated_mdat.mp4` → `ERROR_CODE_IO_UNSPECIFIED`) did not exercise either ambiguous branch; no corpus fixture reliably produces a genuine decoder-unavailable or decoding-format-unsupported failure.
 - [02-07]: Five items carried forward unresolved, all recorded in `.planning/WINDOWS.md`: `estimate()`'s ±15%-vs-±75% accuracy gap on the emulator's software encoder (QUESTIONS.md #3, needs a physical-device re-run); `clearCache()`'s symlink-escape mitigation (T-02-26) has no dedicated symlink-based integration test; the new CI native-lib/alignment step has not been exercised by a live GitHub Actions run (no push this session); BULD-01's debug-vs-release APK representativeness assumption (02-RESEARCH.md's own flagged open item); and the optional example-app manual UI check (tap Compress/Cancel) was inconclusive on the danserver headless emulator (native splash persisted, no Dart exception, activity confirmed foregrounded) — the underlying API is proven end-to-end by automated tests regardless.
 - [03-01]: Task 1 (Mac second-SDK bring-up, `tool/mac_sync.sh`, `tool/mac_run.sh`, SPM build proof) is BLOCKED on the Mac being reachable — see Blockers/Concerns below. When resumed: re-run the precondition check first (`ssh dans-macbook-air true`), then execute task 1 exactly as PLAN.md specifies. No code for task 1 exists yet (nothing was written or committed for it — precondition-unmet tasks are never partial-committed).
+- [03-03]: iOS simulator and macOS desktop runs of the example app (screenshots closing 02-UAT.md #6) remain outstanding — deferred to 03-09, which owns this once the Mac is reachable (QUESTIONS.md #8) and the Apple compression engine exists (03-02/03-04 onward). BULD-04 is otherwise fully implemented and proven end-to-end on Android.
 
 ### Blockers/Concerns
 
@@ -122,5 +125,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-22
-Stopped at: 03-01-PLAN.md tasks 2 and 3 committed; task 1 blocked on the Mac being offline (QUESTIONS.md #8). Resume by re-checking `ssh dans-macbook-air true` and, once it succeeds, executing task 1 exactly as written. Still pending after this run: /gsd-verify-work 2 (six UAT items), advisory /gsd-validate-phase and /gsd-secure-phase for Phases 1 and 2.
+Stopped at: 03-03-PLAN.md fully executed and committed (3/3 tasks). 03-01 still has task 1 blocked on the Mac being offline (QUESTIONS.md #8); 03-02 (Swift SizeGuard/ErrorMapping/PluginFiles ports) not started. Resume by re-checking `ssh dans-macbook-air true` and, once it succeeds, executing 03-01 task 1 exactly as written, or by starting 03-02 (no Mac dependency for its own Linux-side work, but its XCTest verification needs the Mac). Still pending after this run: /gsd-verify-work 2 (six UAT items), advisory /gsd-validate-phase and /gsd-secure-phase for Phases 1 and 2.
 Resume file: .planning/phases/03-apple-compression-to-parity/03-01-PLAN.md (if interrupted: /gsd-execute-phase 3)
