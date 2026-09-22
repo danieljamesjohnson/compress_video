@@ -158,6 +158,124 @@ enum Arguments {
     }
   }
 
+  /// Returns `"unsupportedInput"` if `maxFps` is not positive, or `nil` if it is valid.
+  static func validateMaxFps(_ maxFps: Int64) -> String? {
+    maxFps <= 0 ? "unsupportedInput" : nil
+  }
+
+  /// Returns `"unsupportedInput"` if `maxLongSidePx` is given and below `16`, or `nil` if it
+  /// is valid (including `16` itself, and including `nil`, meaning "use the preset's own
+  /// value").
+  static func validateMaxLongSidePx(_ maxLongSidePx: Int64?) -> String? {
+    if let maxLongSidePx, maxLongSidePx < 16 {
+      return "unsupportedInput"
+    }
+    return nil
+  }
+
+  /// Returns `"unsupportedInput"` if `videoBitrateBps` is given and not positive, or `nil` if
+  /// it is valid (including `nil`, meaning "resolve it from the preset or targetSizeMb").
+  static func validateVideoBitrateBps(_ videoBitrateBps: Int64?) -> String? {
+    if let videoBitrateBps, videoBitrateBps <= 0 {
+      return "unsupportedInput"
+    }
+    return nil
+  }
+
+  /// Returns `"unsupportedInput"` if `targetSizeMb` is given and is not a finite, positive
+  /// number, or `nil` if it is valid (including `nil`, meaning "no target size requested").
+  static func validateTargetSizeMb(_ targetSizeMb: Double?) -> String? {
+    if let targetSizeMb, !targetSizeMb.isFinite || targetSizeMb <= 0 {
+      return "unsupportedInput"
+    }
+    return nil
+  }
+
+  /// Returns `"unsupportedInput"` if `targetSizeMb` and `videoBitrateBps` are both given --
+  /// contradictory targets for the same output size -- or `nil` otherwise.
+  static func validateSizeTargetsNotContradictory(
+    targetSizeMb: Double?,
+    videoBitrateBps: Int64?
+  ) -> String? {
+    (targetSizeMb != nil && videoBitrateBps != nil) ? "unsupportedInput" : nil
+  }
+
+  /// Returns `"unsupportedInput"` if `trimStartMs` is negative, or if `trimEndMs` is given
+  /// and not strictly greater than `trimStartMs` (defaulting to `0` when `trimStartMs` is
+  /// `nil`), or `nil` if the trim range is valid.
+  static func validateTrimRange(trimStartMs: Int64?, trimEndMs: Int64?) -> String? {
+    if let trimStartMs, trimStartMs < 0 {
+      return "unsupportedInput"
+    }
+    if let trimEndMs, trimEndMs <= (trimStartMs ?? 0) {
+      return "unsupportedInput"
+    }
+    return nil
+  }
+
+  /// Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` -- the only
+  /// accepted value in this phase; HEVC opt-in is Phase 4 -- or `nil` if it is valid.
+  static func validateVideoCodec(_ videoCodec: String) -> String? {
+    videoCodec != "h264" ? "unsupportedInput" : nil
+  }
+
+  /// Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` -- the
+  /// only accepted value in this phase; keep-HDR opt-in is Phase 4 -- or `nil` if it is valid.
+  static func validateHdrMode(_ hdrMode: String) -> String? {
+    hdrMode != "toneMapToSdr" ? "unsupportedInput" : nil
+  }
+
+  /// Returns `"unsupportedInput"` when `audioMode` is `.reencode` and either
+  /// `audioBitrateBps` is not positive or `audioChannels` is outside `1` to `2` inclusive, or
+  /// `nil` if the combination is valid (including any other `audioMode`, where these two
+  /// fields are not required to be set at all).
+  static func validateAudioReencode(
+    audioMode: AudioModeMessage,
+    audioBitrateBps: Int64?,
+    audioChannels: Int64?
+  ) -> String? {
+    guard audioMode == .reencode else { return nil }
+    if audioBitrateBps == nil || audioBitrateBps! <= 0 {
+      return "unsupportedInput"
+    }
+    if audioChannels == nil || audioChannels! < 1 || audioChannels! > 2 {
+      return "unsupportedInput"
+    }
+    return nil
+  }
+
+  /// Runs every compress-request argument check, in the same order as Android's
+  /// `Arguments.kt`'s `requireValidCompressRequest`, and throws a `CompressVideoError` naming
+  /// the first violated reason -- or returns normally if `request` is entirely valid.
+  ///
+  /// Mirrors the Dart-side checks deliberately: the Dart side gives a fast local failure
+  /// without crossing the channel, while this is the authority for any caller that reaches the
+  /// generated host API another way.
+  static func requireValidCompressRequest(_ request: CompressRequestMessage) throws {
+    let violatedReason =
+      validateMaxFps(request.maxFps)
+      ?? validateMaxLongSidePx(request.maxLongSidePx)
+      ?? validateVideoBitrateBps(request.videoBitrateBps)
+      ?? validateTargetSizeMb(request.targetSizeMb)
+      ?? validateSizeTargetsNotContradictory(
+        targetSizeMb: request.targetSizeMb, videoBitrateBps: request.videoBitrateBps)
+      ?? validateTrimRange(trimStartMs: request.trimStartMs, trimEndMs: request.trimEndMs)
+      ?? validateOutputPath(request.outputPath)
+      ?? validateVideoCodec(request.videoCodec)
+      ?? validateHdrMode(request.hdrMode)
+      ?? validateAudioReencode(
+        audioMode: request.audioMode,
+        audioBitrateBps: request.audioBitrateBps,
+        audioChannels: request.audioChannels)
+    if let violatedReason {
+      throw CompressVideoError(
+        code: violatedReason,
+        message: "Invalid compress request argument",
+        details: nil
+      )
+    }
+  }
+
   /// Resolves `path` to a fully-qualified, canonical absolute filesystem path: relative paths
   /// are resolved against the current directory, redundant `.`/`..` components are removed,
   /// and any symlinks are resolved to their real target -- matching Android's

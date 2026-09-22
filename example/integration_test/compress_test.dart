@@ -180,18 +180,10 @@ Future<void> _expectUprightAndUnpadded(
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  // Compression is implemented on Android only until Phase 3 lands the Apple engine
-  // (AVAssetReader/AVAssetWriter). On iOS/macOS these suites would talk to a host API no
-  // Swift code implements yet; register one skipped placeholder and stop so the run stays
-  // honest and finite. Phase 3 removes this guard.
-  if (!Platform.isAndroid) {
-    test(
-      'compression suites are Android-only until Phase 3',
-      () {},
-      skip: 'Apple compression engine lands in Phase 3 (CORE-01/CORE-07).',
-    );
-    return;
-  }
+  // The Apple engine (AVAssetReader/AVAssetWriter) landed in Phase 3 (03-04-PLAN.md); this
+  // suite now runs on all three platforms. Transmux, audio re-encode/strip and trim-exactness
+  // are not yet implemented on Apple -- see 03-04-SUMMARY.md for exactly which cases below
+  // pass on iOS/macOS today and which remain for 03-05/03-07.
 
   const CompressVideo compressVideo = CompressVideo();
 

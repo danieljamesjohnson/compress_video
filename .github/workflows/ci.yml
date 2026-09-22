@@ -367,18 +367,22 @@ jobs:
           xcrun simctl bootstatus "${{ steps.ios_sim.outputs.udid }}" -b
 
       - name: Run corpus integration tests on the iOS simulator
-        # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) on a
-        # concrete simulator resolved above rather than a hard-coded device name. The Phase 2
-        # compress_*_test.dart suites are Android-only until Phase 3 lands the Apple engine:
-        # on iOS they hang the runner (20-minute timeout observed on 2026-09-21), so they are
-        # listed explicitly here AND skip themselves on non-Android platforms. Phase 3 must
-        # widen this to the whole directory. Bounded so a genuine hang fails fast and visibly.
-        # Each suite is bounded (9 min via perl alarm - GNU timeout is not on macOS runners)
+        # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) plus
+        # compress_test.dart on a concrete simulator resolved above rather than a hard-coded
+        # device name. The Apple engine (AVAssetReader/AVAssetWriter) landed in 03-04-PLAN.md,
+        # so compress_test.dart's own platform guard is gone and it runs here now -- but
+        # compress_audio_test.dart, compress_jobs_test.dart and compress_output_test.dart stay
+        # excluded (and still skip themselves on non-Android platforms): they exercise audio
+        # re-encode/strip, cancel/progress-stream edge cases and estimate()/clearCache(), none
+        # of which 03-04 implements on Apple yet (03-05/03-07 land them). Bounded so a genuine
+        # hang fails fast and visibly. Each suite is bounded (15 min via perl alarm - GNU
+        # timeout is not on macOS runners; compress_test.dart's own groups run several real
+        # encodes in sequence, so it needs more headroom than the two lighter Phase 1 suites)
         # because `flutter test ... -d <sim>` occasionally hangs at app launch with zero output
         # on the hosted simulator (seen 2026-09-15 and 2026-09-21 on suites that pass on the
         # very next run). A hang resets the simulator and retries that one suite once.
         working-directory: example
-        timeout-minutes: 30
+        timeout-minutes: 45
         run: |
           set -o pipefail
           UDID="${{ steps.ios_sim.outputs.udid }}"
@@ -387,8 +391,8 @@ jobs:
           # Captured with `tee -a` (not swallowed behind a bare pipe) so the step still shows
           # the full test log AND still fails when a test fails: `set -o pipefail` above makes
           # each `run_suite` call's exit status `flutter test`'s, not `tee`'s.
-          run_suite() { perl -e 'alarm shift; exec @ARGV' 540 flutter test "$1" -d "$UDID" -r expanded | tee -a "$LOG"; }
-          for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart; do
+          run_suite() { perl -e 'alarm shift; exec @ARGV' 900 flutter test "$1" -d "$UDID" -r expanded | tee -a "$LOG"; }
+          for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart integration_test/compress_test.dart; do
             if ! run_suite "$suite"; then
               echo "::warning::$suite hung or failed on the first attempt; resetting the simulator and retrying once"
               xcrun simctl shutdown "$UDID" || true

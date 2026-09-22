@@ -978,4 +978,108 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path))
   }
 
+  // MARK: - JobRegistry
+
+  private func makeTempFileURLForJobRegistryTest() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent(
+      "compress_video_jobregistry_test_\(UUID().uuidString).mp4")
+  }
+
+  func testJobRegistryRegisterThenFindReturnsTheJob() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    let tempFile = makeTempFileURLForJobRegistryTest()
+    JobRegistry.register(jobId: jobId, cancel: {}, tempFile: tempFile)
+    defer { JobRegistry.remove(jobId: jobId) }
+
+    let found = JobRegistry.find(jobId: jobId)
+    XCTAssertNotNil(found)
+    XCTAssertEqual(found?.tempFile, tempFile)
+  }
+
+  func testJobRegistryFindReturnsNilForAnUnknownJobId() {
+    XCTAssertNil(JobRegistry.find(jobId: "jobregistry-unknown-\(UUID().uuidString)"))
+  }
+
+  func testJobRegistryCancelInvokesTheClosureExactlyOnce() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    var invocationCount = 0
+    JobRegistry.register(
+      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+
+    JobRegistry.cancel(jobId: jobId)
+
+    XCTAssertEqual(invocationCount, 1)
+  }
+
+  func testJobRegistryASecondCancelOfTheSameIdInvokesNothingAndDoesNotThrow() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    var invocationCount = 0
+    JobRegistry.register(
+      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+
+    JobRegistry.cancel(jobId: jobId)
+    JobRegistry.cancel(jobId: jobId)
+
+    XCTAssertEqual(invocationCount, 1)
+  }
+
+  func testJobRegistryCancelOfAnUnknownIdIsASilentNoOp() {
+    // Must not throw or crash -- there is nothing further to assert beyond "this line runs".
+    JobRegistry.cancel(jobId: "jobregistry-unknown-\(UUID().uuidString)")
+  }
+
+  func testJobRegistryCancelAfterTheJobIsMarkedTerminalDoesNothing() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    var invocationCount = 0
+    JobRegistry.register(
+      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+    defer { JobRegistry.remove(jobId: jobId) }
+
+    JobRegistry.markTerminal(jobId: jobId)
+    JobRegistry.cancel(jobId: jobId)
+
+    XCTAssertEqual(invocationCount, 0)
+    XCTAssertNotNil(
+      JobRegistry.find(jobId: jobId),
+      "an already-terminal job must remain registered until its own compress() call removes it, "
+        + "not be forgotten by a no-op cancel()")
+  }
+
+  func testJobRegistryCancelAllInvokesEveryRegisteredClosureAndEmptiesTheRegistry() {
+    let jobIdA = "jobregistry-\(UUID().uuidString)"
+    let jobIdB = "jobregistry-\(UUID().uuidString)"
+    var invokedA = false
+    var invokedB = false
+    JobRegistry.register(
+      jobId: jobIdA, cancel: { invokedA = true }, tempFile: makeTempFileURLForJobRegistryTest())
+    JobRegistry.register(
+      jobId: jobIdB, cancel: { invokedB = true }, tempFile: makeTempFileURLForJobRegistryTest())
+
+    JobRegistry.cancelAll()
+
+    XCTAssertTrue(invokedA)
+    XCTAssertTrue(invokedB)
+    XCTAssertNil(JobRegistry.find(jobId: jobIdA))
+    XCTAssertNil(JobRegistry.find(jobId: jobIdB))
+  }
+
+  func testJobRegistryLiveTempFilePathsContainsExactlyTheLiveJobsPaths() {
+    let jobIdA = "jobregistry-\(UUID().uuidString)"
+    let jobIdB = "jobregistry-\(UUID().uuidString)"
+    let tempFileA = makeTempFileURLForJobRegistryTest()
+    let tempFileB = makeTempFileURLForJobRegistryTest()
+    JobRegistry.register(jobId: jobIdA, cancel: {}, tempFile: tempFileA)
+    JobRegistry.register(jobId: jobIdB, cancel: {}, tempFile: tempFileB)
+    defer {
+      JobRegistry.remove(jobId: jobIdA)
+      JobRegistry.remove(jobId: jobIdB)
+    }
+
+    let livePaths = JobRegistry.liveTempFilePaths()
+
+    XCTAssertEqual(
+      livePaths,
+      Set([tempFileA.resolvingSymlinksInPath().path, tempFileB.resolvingSymlinksInPath().path]))
+  }
+
 }
