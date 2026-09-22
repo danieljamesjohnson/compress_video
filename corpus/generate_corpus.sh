@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate the corpus: five structurally phone-like (or deliberately damaged) clips.
+# Generate the corpus: six structurally phone-like (or deliberately damaged) clips.
 #
 #   portrait_rot90.mp4          - 1920x1080 coded, 90-degree clockwise tkhd
 #                                  display matrix (as an iPhone writes portrait
@@ -20,6 +20,11 @@
 #                                  moov atom (and therefore duration) survives,
 #                                  but decoding the media data fails on a real
 #                                  platform codec (Phase 2).
+#   trim_source_10s.mp4          - 1280x720 coded, 30fps, H.264 + AAC stereo,
+#                                  no rotation matrix, ~1Mbps, 10s, burnt-in ms
+#                                  timecode, explicit 30-frame GOP. Exists
+#                                  because no other clip is long enough to
+#                                  express a 2000->7000ms trim (Phase 3, D-13).
 #
 # `ffmpeg -metadata:s:v:0 rotate=90` is a verified no-op on the installed
 # ffmpeg 6.1.1-3ubuntu5 (see 01-RESEARCH.md Common Pitfalls #1/#2), so the
@@ -301,4 +306,64 @@ if [ "$TRUNCATED_HAS_VIDEO" != "video" ]; then
 fi
 echo "OK: $TRUNCATED (truncated to 60% of ${SRC_SIZE} bytes = $(stat -c%s "$TRUNCATED") bytes, duration ${TRUNCATED_DURATION}s still readable)"
 
-echo "All five corpus clips generated and self-verified."
+# ---------------------------------------------------------------------------
+# Clip F: trim_source_10s.mp4
+# ---------------------------------------------------------------------------
+# Every other clip in this corpus is 3-4s; the phase 3 trim criterion
+# (2000ms -> 7000ms) is unsatisfiable against any of them. This clip is 10s,
+# 1280x720 coded, 30fps, H.264 + AAC stereo at 128kbps/48kHz, ~1Mbps, no
+# rotation matrix, with the same burnt-in millisecond timecode style as the
+# portrait clips (so a trimmed output's first frame is checkable by eye and
+# by pixel probe) and an explicit 30-frame GOP (-g 30) so the keyframe
+# structure a trim reader has to seek within is a stated property of the
+# fixture, not an ffmpeg default that could silently change later.
+echo "Generating trim_source_10s.mp4..."
+
+TRIM=trim_source_10s.mp4
+TRIM_TMP=trim_source_10s.tmp.mp4
+TRIM_MAX_BYTES=2000000
+TRIM_GOP=30
+
+ffmpeg -y -loglevel error \
+  -f lavfi -i "testsrc=size=1280x720:rate=30:duration=10" \
+  -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=10" \
+  -filter_complex "[0:v]drawtext=fontfile=${FONT}:text='%{eif\:t*1000\:d}ms':fontcolor=white:fontsize=48:x=10:y=10:box=1:boxcolor=black[v]" \
+  -map "[v]" -map 1:a \
+  -c:v libx264 -pix_fmt yuv420p -preset veryfast -b:v 1M -maxrate 1M -bufsize 2M -g "$TRIM_GOP" \
+  -threads 1 -x264-params threads=1:sliced_threads=0 \
+  -c:a aac -b:a 128k -ac 2 -ar 48000 \
+  -movflags +faststart \
+  -shortest \
+  "$TRIM_TMP"
+
+mv "$TRIM_TMP" "$TRIM"
+
+TRIM_JSON=$(probe_json "$TRIM")
+TRIM_V_COUNT=$(echo "$TRIM_JSON" | jq '[.streams[] | select(.codec_type=="video")] | length')
+TRIM_A_COUNT=$(echo "$TRIM_JSON" | jq '[.streams[] | select(.codec_type=="audio")] | length')
+if [ "$TRIM_V_COUNT" != "1" ] || [ "$TRIM_A_COUNT" != "1" ]; then
+  fail "$TRIM" "expected exactly 1 video + 1 audio stream, got ${TRIM_V_COUNT} video + ${TRIM_A_COUNT} audio"
+fi
+TRIM_SIDE_DATA=$(echo "$TRIM_JSON" | jq '[.streams[] | select(.codec_type=="video") | .side_data_list[]?] | length')
+if [ "$TRIM_SIDE_DATA" != "0" ]; then
+  fail "$TRIM" "expected no side data (no display matrix), found ${TRIM_SIDE_DATA} entries"
+fi
+TRIM_CODED_W=$(echo "$TRIM_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .width')
+TRIM_CODED_H=$(echo "$TRIM_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .height')
+if [ "$TRIM_CODED_W" != "1280" ] || [ "$TRIM_CODED_H" != "720" ]; then
+  fail "$TRIM" "expected coded dimensions 1280x720, got ${TRIM_CODED_W}x${TRIM_CODED_H}"
+fi
+TRIM_FPS_RAW=$(echo "$TRIM_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .avg_frame_rate')
+if [ "$TRIM_FPS_RAW" != "30/1" ]; then
+  fail "$TRIM" "expected avg_frame_rate 30/1, got ${TRIM_FPS_RAW}"
+fi
+TRIM_DURATION_S=$(echo "$TRIM_JSON" | jq -r '.format.duration')
+TRIM_DURATION_MS=$(awk -v d="$TRIM_DURATION_S" 'BEGIN{printf "%.0f", d*1000}')
+TRIM_DURATION_DIFF=$(( TRIM_DURATION_MS - 10000 )); TRIM_DURATION_DIFF=${TRIM_DURATION_DIFF#-}
+if [ "$TRIM_DURATION_DIFF" -gt 34 ]; then
+  fail "$TRIM" "expected duration within 34ms of 10000ms, got ${TRIM_DURATION_MS}ms"
+fi
+assert_size "$TRIM" "$TRIM_MAX_BYTES"
+echo "OK: $TRIM (coded ${TRIM_CODED_W}x${TRIM_CODED_H}, ${TRIM_FPS_RAW}fps, GOP ${TRIM_GOP}, duration ${TRIM_DURATION_MS}ms, $(stat -c%s "$TRIM") bytes)"
+
+echo "All six corpus clips generated and self-verified."

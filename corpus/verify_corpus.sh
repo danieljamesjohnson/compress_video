@@ -59,6 +59,13 @@ EDGE_INSET_PX=4
 EDGE_RGB_TOLERANCE=48
 # The deliberately damaged clip: no sidecar, checked separately below.
 DAMAGED_CLIP=truncated_mdat.mp4
+# The one clip long enough to express a trim range (Phase 3, D-13). Its
+# sidecar gains a `trim` block on top of the standard crossPlatform/tolerant
+# blocks every other clip in CLIPS already gets.
+TRIM_CLIP=trim_source_10s.mp4
+TRIM_START_MS=2000
+TRIM_END_MS=7000
+TRIM_MIN_INSIDE_MS=500
 
 is_patch_clip() {
   local needle="$1" c
@@ -245,6 +252,35 @@ derive_sidecar() {
     result=$(jq -n --argjson base "$result" --argjson edgeProbe "$edge_probe" '$base + {edgeProbe:$edgeProbe}')
   fi
 
+  if [ "$clip" = "$TRIM_CLIP" ]; then
+    if [ "$TRIM_END_MS" -le "$TRIM_START_MS" ]; then
+      fail "trim range for $clip: endMs ($TRIM_END_MS) must be strictly greater than startMs ($TRIM_START_MS)"
+    fi
+    local inside_ms=$(( duration_ms - TRIM_END_MS ))
+    if [ "$inside_ms" -lt "$TRIM_MIN_INSIDE_MS" ]; then
+      fail "trim range for $clip: endMs ($TRIM_END_MS) leaves only ${inside_ms}ms inside the clip's measured duration (${duration_ms}ms) - must be at least ${TRIM_MIN_INSIDE_MS}ms"
+    fi
+
+    local expected_duration_ms=$(( TRIM_END_MS - TRIM_START_MS ))
+    # One frame at the clip's own measured frame rate, rounded UP to the next
+    # whole millisecond (ceiling) - matches the fixed 34ms durationToleranceMs
+    # convention every other 30fps clip in this corpus already carries above,
+    # so this value tracks the fixture if it is ever regenerated at a
+    # different frame rate rather than staying a hand-picked literal.
+    local tolerance_ms
+    tolerance_ms=$(awk -v fps="$frame_rate_fps" 'BEGIN{v=1000/fps; c=int(v); if (v>c) c+=1; print c}')
+
+    local trim_block
+    trim_block=$(jq -n \
+      --argjson startMs "$TRIM_START_MS" \
+      --argjson endMs "$TRIM_END_MS" \
+      --argjson expectedDurationMs "$expected_duration_ms" \
+      --argjson toleranceMs "$tolerance_ms" \
+      '{startMs:$startMs, endMs:$endMs, expectedDurationMs:$expectedDurationMs, toleranceMs:$toleranceMs}')
+
+    result=$(jq -n --argjson base "$result" --argjson trim "$trim_block" '$base + {trim:$trim}')
+  fi
+
   echo "$result"
 }
 
@@ -270,7 +306,7 @@ check_damaged_clip() {
   echo "CHECK: $clip still probes as video (duration ${duration}s), no sidecar by design"
 }
 
-CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4)
+CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4)
 STATUS=0
 
 for clip in "${CLIPS[@]}"; do

@@ -1,6 +1,6 @@
 # Corpus
 
-Five ffmpeg-generated clips that mirror real phone video structurally (four healthy, one
+Six ffmpeg-generated clips that mirror real phone video structurally (five healthy, one
 deliberately damaged), plus a machine-derived `*.expected.json` sidecar per healthy clip. The
 same sidecar is asserted against by one integration test file run on both the Android emulator
 and the iOS simulator, so "media info is correct" is a single cross-platform assertion instead
@@ -23,7 +23,8 @@ in the meantime, and the generation script stays committed so they are always re
 | `noaudio_720p.mp4` | 1280x720, H.264, no audio stream, no display matrix. |
 | `portrait_hibitrate_1080p60.mp4` | 1920x1080 coded, 60fps, high-entropy (`mandelbrot` source) H.264 at ~8.7Mbps + AAC stereo, ~4s, 90° clockwise `tkhd` display matrix, same colour-patch schedule as `portrait_rot90.mp4` plus a 24px pure-white border. Proves genuine compression, the 30fps frame-rate cap, upright output and no letterboxing all in one fixture (Phase 2). |
 | `truncated_mdat.mp4` | 854x480, H.264 + AAC, faststart-encoded then truncated to 60% of its byte length. `moov` (and duration) survive; the media data does not — drives a real platform-codec decode failure (Phase 2). |
-| `*.expected.json` | Ground-truth sidecar per healthy clip, in platform-facing units (see below). `truncated_mdat.mp4` has none — see below. |
+| `trim_source_10s.mp4` | 1280x720 coded, 30fps, H.264 + AAC stereo (128kbps/48kHz), no display matrix, ~1Mbps, 10s, burnt-in ms timecode, explicit 30-frame GOP. The only clip long enough to express a 2000ms→7000ms trim (Phase 3, D-13) — see "Why `trim_source_10s.mp4` exists" below. |
+| `*.expected.json` | Ground-truth sidecar per healthy clip, in platform-facing units (see below). `truncated_mdat.mp4` has none — see below. `trim_source_10s.expected.json` additionally carries a `trim` block (see "The `trim` sidecar block" below). |
 
 ## Regenerating
 
@@ -177,3 +178,30 @@ and fails there. It is never fed to a "does the output match ground truth" sidec
 `verify_corpus.sh` only asserts it still probes as a video file with a readable duration. Do not
 add a `.expected.json` for it — a sidecar implies "this clip's ground truth is derivable",
 which is exactly the property this fixture does not have.
+
+## Why `trim_source_10s.mp4` exists
+
+Every other clip in this corpus is 3-4 seconds long (`portrait_rot90.mp4`/`portrait_hibitrate_1080p60.mp4`
+~4s, `small_480p.mp4`/`noaudio_720p.mp4`/`truncated_mdat.mp4` 2-3s). Phase 3 (Apple compression
+parity) needs to prove an exact 2000ms→7000ms trim on all three platforms, and a 5-second output
+range cannot be carved out of a clip that is itself only 3-4 seconds long. `trim_source_10s.mp4`
+is a dedicated 10-second, 30fps, 1280x720 H.264 + AAC clip with a 30-frame (exactly one second)
+GOP — stated explicitly here, and in the generator, rather than left as an ffmpeg default, because
+it is the keyframe structure a trim's `AVAssetReader.timeRange` / Media3 `ClippingConfiguration`
+has to seek within. It carries the same burnt-in millisecond timecode style as the portrait clips
+so a trimmed output's first frame is checkable by eye, but no colour-patch schedule and no
+rotation matrix — this fixture proves duration exactness, not orientation or thumbnails, which
+the existing clips already cover.
+
+## The `trim` sidecar block
+
+`trim_source_10s.expected.json` alone carries a fourth top-level block, `trim`, on top of the
+standard `crossPlatform`/`tolerant` blocks every healthy clip gets: `startMs` (2000), `endMs`
+(7000), `expectedDurationMs` (`endMs - startMs`, derived rather than a second literal), and
+`toleranceMs` (one frame at the clip's own measured frame rate, rounded UP to the next whole
+millisecond — `34` at this clip's 30fps, matching the fixed 34ms `durationToleranceMs` convention
+every other 30fps clip in this corpus already carries). Every trim assertion in Phase 3 reads
+these four values from the sidecar; none of them is ever hardcoded in a test. `verify_corpus.sh`
+also refuses to derive this block if `endMs` is not strictly greater than `startMs`, or if `endMs`
+lands within 500ms of the clip's own measured duration — a trim range that runs off (or nearly
+off) the end of the source would make the duration assertion prove nothing.
