@@ -31,7 +31,7 @@ final class Compression: CompressHostApi {
     try Arguments.requireValidCompressRequest(request)
 
     let standardizedPath = try Arguments.requireReadableMediaFile(path)
-    let inputInfo = try await Probe().getMediaInfo(standardizedPath)
+    let inputInfo = try await Probe().getMediaInfo(path: standardizedPath)
 
     let cacheDir = try PluginFiles.cacheSubDir()
     let destinationURL: URL

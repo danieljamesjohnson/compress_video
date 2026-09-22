@@ -380,7 +380,7 @@ final class CompressionEngine {
     destinationURL: URL, inputBytes: Int64, startedAt: Date, transmuxed: Bool, usedOriginal: Bool,
     audioReencoded: Bool
   ) async throws -> CompressResultMessage {
-    let outputInfo = try await Probe().getMediaInfo(destinationURL.path)
+    let outputInfo = try await Probe().getMediaInfo(path: destinationURL.path)
     let outputBytes = (try? Self.fileSize(of: destinationURL)) ?? 0
     let audioCodec: String?
     if outputInfo.hasAudio {
@@ -657,7 +657,12 @@ final class CompressionEngine {
       return compressVideoError
     }
     let nsError = error as NSError
-    if nsError.domain == AVFoundationErrorDomain, let code = AVError.Code(rawValue: nsError.code) {
+    if nsError.domain == AVFoundationErrorDomain {
+      // `AVError.Code.init(rawValue:)` is non-failable (an NS_ERROR_ENUM-bridged raw-Int
+      // wrapper, not a Swift native enum) -- any AVFoundation-domain code round-trips into it,
+      // and `ErrorMapping.reasonForAVError` itself falls back to `"unknown"` for a code outside
+      // `knownAVErrorCodes`, so no further unwrapping is needed here.
+      let code = AVError.Code(rawValue: nsError.code)
       return CompressVideoError(
         code: ErrorMapping.reasonForAVError(code),
         message: "AVFoundation error \(nsError.code): \(nsError.localizedDescription)",
