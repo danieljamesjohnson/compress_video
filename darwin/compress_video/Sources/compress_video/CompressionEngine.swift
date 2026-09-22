@@ -157,14 +157,18 @@ final class CompressionEngine {
       videoReaderSettings[kCVPixelBufferHeightKey as String] = codedTargetHeight
     }
 
-    // The resolved bitrate is set both as the writer input's own top-level average-bit-rate
-    // key and inside the compression-properties dictionary (03-RESEARCH.md Code Examples) --
-    // belt-and-suspenders so the resolved number unambiguously reaches the encoder.
+    // AVFoundation only accepts AVVideoAverageBitRateKey INSIDE
+    // AVVideoCompressionPropertiesKey -- it is not a recognised top-level video output settings
+    // key. An earlier revision of this code also set it at the top level as
+    // "belt-and-suspenders"; that extra, unrecognised key made every H.264 request fail
+    // `writer.canApply(outputSettings:forMediaType:)` below (CI run 35765529347, diagnosed
+    // 2026-09-22: 21/22 compress_test.dart cases threw `encoderUnavailable`, the one pass being
+    // the transmux case that never touches AVAssetWriter). Do NOT re-add a top-level
+    // AVVideoAverageBitRateKey -- keep it only inside AVVideoCompressionPropertiesKey below.
     let videoOutputSettings: [String: Any] = [
       AVVideoCodecKey: AVVideoCodecType.h264,
       AVVideoWidthKey: codedTargetWidth,
       AVVideoHeightKey: codedTargetHeight,
-      AVVideoAverageBitRateKey: plan.videoBitrateBps,
       AVVideoCompressionPropertiesKey: [
         AVVideoAverageBitRateKey: plan.videoBitrateBps,
         AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
