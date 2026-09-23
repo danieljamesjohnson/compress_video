@@ -100,7 +100,12 @@ run_attempt() {
   local attempt_log="$2"
   : > "$attempt_log"
   set -m
-  flutter test "$suite" -d "$UDID" -r expanded > "$attempt_log" 2>&1 &
+  # --timeout 120s: these suites run real encodes, and `flutter test`'s 20 s default per-test
+  # timeout is a slow-runner lottery -- CI run 35865459091 lost compress_test.dart's first
+  # encode ("p720 scales the long side down to 1280", ~10 s on a normal runner) to it on a
+  # runner whose Xcode build also took twice its usual time. Tests that declare their own
+  # `timeout:` (compress_jobs_test.dart) keep it; this only raises the default.
+  flutter test "$suite" -d "$UDID" -r expanded --timeout 120s > "$attempt_log" 2>&1 &
   local pid=$!
   set +m
   local phase=build
