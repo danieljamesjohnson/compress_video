@@ -381,23 +381,27 @@ jobs:
         # Bounded so a genuine hang fails fast and visibly, and so a genuine test FAILURE is
         # told apart from a launch HANG: `flutter test ... -d <sim>` occasionally never gets
         # past app launch on the hosted simulator (zero test-progress output beyond the
-        # initial "loading <suite>" line, and no further progress until the alarm fires). This
-        # is not a one-off: every Apple run since 03-04 landed has hung at least once at
-        # "Xcode build done" (runs 35765529347, 35776724779, twice in a row in 35799608545 --
-        # both `media_info_test.dart` and `thumbnail_test.dart` hung on their FIRST attempt in
-        # the same run, and `media_info_test.dart` then hung on the retry too, burning both
-        # 900s alarms before the step's own 45-minute timeout ended it with zero suites having
-        # actually run). A suite whose attempt produced real test-progress output (more than
-        # just the "loading" line) before failing is a genuine failure and exits immediately,
-        # with no further retry -- only a true launch hang (no progress output at all) gets
-        # retried, up to two extra attempts (three total), each preceded by a fresh
-        # shutdown+boot+bootstatus cycle. The very first attempt of the very first suite also
-        # gets a fresh boot below, rather than relying on whatever state `xcodebuild test`
-        # above left the simulator in. The per-attempt alarm is 600s, not 900s: every healthy
-        # suite finishes in well under 3 minutes on this runner, so a hang never recovers no
-        # matter how long the alarm allows it to sit -- a shorter alarm only shortens how long
-        # a hang burns the step's own timeout-minutes budget, which is sized below for 4
-        # suites x up to 3 attempts x 600s plus the fresh-boot overhead.
+        # initial "loading <suite>" line). This is not a one-off -- every Apple run since 03-04
+        # landed has hung at least once at "Xcode build done" (35765529347, 35776724779,
+        # 35799608545, 35807149965, twice in the same run in both 35809012150 and
+        # 35812499597's second attempt) -- but a flat per-attempt alarm scales badly: a 600s
+        # alarm plus a full Xcode rebuild on each retry cost ~13 minutes PER HANG, and
+        # 35812499597 burned its entire 60-minute step timeout on repeated hangs across two
+        # suites without `compress_audio_test.dart` ever completing a single attempt. A launch
+        # WATCHDOG replaces the flat alarm below: each attempt is watched for real test-progress
+        # output (the same "00:0X +N:" pattern used to tell a hang from a genuine failure)
+        # appearing within 150s of launch -- most of a hang's cost was always the dead time
+        # sitting in `xcodebuild`/app-launch limbo, not the alarm duration itself, so killing at
+        # 150s instead of 900s/600s turns a ~13-minute wasted attempt into a ~3-minute one. Once
+        # real output appears, the suite gets up to 600s more to finish (unchanged budget for an
+        # actually-running suite). A suite whose attempt produced real output before failing is
+        # a genuine failure and exits immediately, with no further retry; only a true launch
+        # hang (no progress within 150s) gets retried, up to four extra attempts (five total) --
+        # cheap retries afford more of them than the old three-attempt budget could. Every
+        # suite, including the first, starts from a fresh shutdown+boot+bootstatus cycle rather
+        # than whatever state a prior step or attempt left the simulator in. `timeout-minutes: 60`
+        # is unchanged -- it is the outer backstop, now expected to be reached only if the
+        # watchdog itself is somehow defeated, not the routine cost of one or two hangs.
         working-directory: example
         timeout-minutes: 60
         run: |
@@ -405,62 +409,82 @@ jobs:
           UDID="${{ steps.ios_sim.outputs.udid }}"
           LOG=/tmp/apple_integration.log
           : > "$LOG"
-          # Captured with `tee -a` (not swallowed behind a bare pipe) so the step still shows
-          # the full test log live AND still fails when a test fails (`set -o pipefail` above
-          # makes the pipeline's exit status `flutter test`'s, not `tee`'s), while a SECOND copy
-          # goes to a per-attempt scratch file so the hang-vs-failure check below can inspect
-          # just this one attempt's own output.
-          run_attempt() {
-            local suite="$1"
-            local attempt_log="$2"
-            : > "$attempt_log"
-            perl -e 'alarm shift; exec @ARGV' 600 flutter test "$suite" -d "$UDID" -r expanded | tee -a "$LOG" | tee "$attempt_log"
-          }
           reset_simulator() {
             xcrun simctl shutdown "$UDID" || true
             xcrun simctl boot "$UDID" || true
             xcrun simctl bootstatus "$UDID" -b || true
           }
-          # Start every suite from a known-fresh boot, not whatever state xcodebuild's own test
-          # action left the simulator in above. `|| true` on every call to reset_simulator
-          # below: GitHub Actions runs this `run:` block as `bash -e {0}` even without an
-          # explicit `set -e` (confirmed live in CI run 35807149965 -- the alarm-killed
-          # `run_attempt` pipeline exited 142 under `-e`+pipefail and `-e` aborted the WHOLE
-          # script before the retry bookkeeping below ever ran, exactly like the boot commands
-          # inside this function would if left unguarded). A command is only exempt from `-e`
-          # when it is the tested half of an `if`/`while`/`&&`/`||`, so every bare call that can
-          # legitimately fail is deliberately wrapped in `|| true` or `|| status=$?` rather than
-          # left bare.
+          # Runs one attempt of $1, writing raw output to $2. Returns 0 (passed), a genuine
+          # `flutter test` exit code (failed with real output), or 99 (killed by the launch
+          # watchdog -- no test-progress output within 150s of launch). `set -m` gives the
+          # background `flutter test` its own process group so `kill -- -$pid` below can kill
+          # the whole tree (the Flutter tool spawns child processes; killing only $pid would
+          # leave them running against the simulator). Always called as `run_attempt ... ||
+          # status=$?` at the call site, never bare: GitHub Actions runs this `run:` block as
+          # `bash -e {0}` even with no explicit `set -e` (confirmed live in CI run 35807149965),
+          # and a bare failing command anywhere in this script -- inside this function or at a
+          # call site -- would abort the whole step before the retry bookkeeping below ever
+          # runs. A command is only exempt from `-e` when it is the tested half of an
+          # `if`/`while`/`&&`/`||`, hence the `|| true` on every other command here that can
+          # legitimately fail.
+          run_attempt() {
+            local suite="$1"
+            local attempt_log="$2"
+            : > "$attempt_log"
+            set -m
+            flutter test "$suite" -d "$UDID" -r expanded > "$attempt_log" 2>&1 &
+            local pid=$!
+            set +m
+            local elapsed=0
+            local saw_output=0
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 5
+              elapsed=$((elapsed + 5))
+              if [ "$saw_output" -eq 0 ]; then
+                # More than one line, not merely "a match": `flutter test`'s own FIRST line is
+                # always "00:00 +0: loading <suite>", which itself matches a bare progress-line
+                # grep -- an existence check alone would flip saw_output the instant that one
+                # line appears (which it reliably does, hang or not), permanently granting every
+                # attempt the longer 600s post-launch budget and defeating the whole point of
+                # this watchdog. A genuine launch requires a SECOND line beyond it.
+                line_count=$(wc -l < "$attempt_log" 2>/dev/null || echo 0)
+                if [ "$line_count" -gt 1 ]; then
+                  saw_output=1
+                  elapsed=0
+                elif [ "$elapsed" -ge 150 ]; then
+                  kill -- -"$pid" 2>/dev/null || true
+                  wait "$pid" 2>/dev/null || true
+                  return 99
+                fi
+              elif [ "$elapsed" -ge 600 ]; then
+                kill -- -"$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                return 99
+              fi
+            done
+            wait "$pid"
+          }
           reset_simulator || true
           for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart integration_test/compress_test.dart integration_test/compress_audio_test.dart; do
             attempt=1
             while :; do
               attempt_log=$(mktemp)
               status=0
-              # `|| status=$?`, not a bare call: `run_attempt` legitimately exits non-zero on
-              # both an alarm-killed hang and a genuine test failure, and a bare failing
-              # command here would trip `-e` and kill the whole script before the hang-vs-
-              # failure check and retry bookkeeping below ever run (CI run 35807149965).
               run_attempt "$suite" "$attempt_log" || status=$?
-              # Real per-test progress lines look like "00:0X +N: <name>" -- the FIRST line of
-              # every attempt, hang or not, is "00:00 +0: loading <suite>", so more than one
-              # such line means the suite actually started running tests before failing (a
-              # genuine failure); exactly one (or zero, if it failed before even that) means
-              # the simulator never got past app launch (a hang).
-              progress=$(grep -cE '^[0-9]+:[0-9]+ \+[0-9]+' "$attempt_log" || true)
+              cat "$attempt_log" | tee -a "$LOG"
               rm -f "$attempt_log"
               if [ "$status" -eq 0 ]; then
                 break
               fi
-              if [ "$progress" -gt 1 ]; then
-                echo "::error::$suite produced real test output on attempt $attempt before failing -- a genuine failure, not a launch hang; failing fast with no further retry"
+              if [ "$status" -ne 99 ]; then
+                echo "::error::$suite failed with real test output on attempt $attempt (exit $status) -- a genuine failure, not a launch hang; failing fast with no further retry"
                 exit "$status"
               fi
-              if [ "$attempt" -ge 3 ]; then
-                echo "::error::$suite hung at launch (no test output) on all $attempt attempts"
-                exit "$status"
+              if [ "$attempt" -ge 5 ]; then
+                echo "::error::$suite hung at launch (no test output within 150s) on all $attempt attempts"
+                exit 1
               fi
-              echo "::warning::$suite hung at launch on attempt $attempt (no test output past app launch); resetting the simulator and retrying"
+              echo "::warning::$suite hung at launch on attempt $attempt (no test output within 150s); resetting the simulator and retrying"
               reset_simulator || true
               attempt=$((attempt + 1))
             done
