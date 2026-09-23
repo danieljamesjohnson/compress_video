@@ -419,17 +419,29 @@ jobs:
           reset_simulator() {
             xcrun simctl shutdown "$UDID" || true
             xcrun simctl boot "$UDID" || true
-            xcrun simctl bootstatus "$UDID" -b
+            xcrun simctl bootstatus "$UDID" -b || true
           }
           # Start every suite from a known-fresh boot, not whatever state xcodebuild's own test
-          # action left the simulator in above.
-          reset_simulator
+          # action left the simulator in above. `|| true` on every call to reset_simulator
+          # below: GitHub Actions runs this `run:` block as `bash -e {0}` even without an
+          # explicit `set -e` (confirmed live in CI run 35807149965 -- the alarm-killed
+          # `run_attempt` pipeline exited 142 under `-e`+pipefail and `-e` aborted the WHOLE
+          # script before the retry bookkeeping below ever ran, exactly like the boot commands
+          # inside this function would if left unguarded). A command is only exempt from `-e`
+          # when it is the tested half of an `if`/`while`/`&&`/`||`, so every bare call that can
+          # legitimately fail is deliberately wrapped in `|| true` or `|| status=$?` rather than
+          # left bare.
+          reset_simulator || true
           for suite in integration_test/media_info_test.dart integration_test/thumbnail_test.dart integration_test/compress_test.dart integration_test/compress_audio_test.dart; do
             attempt=1
             while :; do
               attempt_log=$(mktemp)
-              run_attempt "$suite" "$attempt_log"
-              status=$?
+              status=0
+              # `|| status=$?`, not a bare call: `run_attempt` legitimately exits non-zero on
+              # both an alarm-killed hang and a genuine test failure, and a bare failing
+              # command here would trip `-e` and kill the whole script before the hang-vs-
+              # failure check and retry bookkeeping below ever run (CI run 35807149965).
+              run_attempt "$suite" "$attempt_log" || status=$?
               # Real per-test progress lines look like "00:0X +N: <name>" -- the FIRST line of
               # every attempt, hang or not, is "00:00 +0: loading <suite>", so more than one
               # such line means the suite actually started running tests before failing (a
@@ -449,7 +461,7 @@ jobs:
                 exit "$status"
               fi
               echo "::warning::$suite hung at launch on attempt $attempt (no test output past app launch); resetting the simulator and retrying"
-              reset_simulator
+              reset_simulator || true
               attempt=$((attempt + 1))
             done
           done
