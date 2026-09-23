@@ -3,7 +3,7 @@ quick_id: 260923-9lc
 slug: fix-apple-ci-simulator-suite-watchdog-so
 status: complete
 date: 2026-09-23
-commit: 42975c5, befad90
+commit: 42975c5, befad90, 702f1f0
 ---
 
 # Summary: Fix Apple CI simulator suite watchdog so launch hangs fail fast
@@ -44,9 +44,17 @@ commit: 42975c5, befad90
   missing from the log: the Flutter tool overwrote them in the attempt log it still held
   open, and kill_tree waited unbounded on a tool that takes minutes to exit on SIGTERM.
   Follow-up `befad90`: SIGKILL after 10 s, reason + phase timings reported in the ::warning
-  line on stdout; self-test gains a SIGTERM-ignoring fake. Verifying in run 35865459091.
+  line on stdout; self-test gains a SIGTERM-ignoring fake.
+- CI run 35865459091 (befad90): zero launch hangs across three attempts, so the SIGKILL path
+  went unexercised, but compress_test.dart failed for a different reason: the `flutter test`
+  20 s default per-test timeout hit "p720 scales the long side down to 1280" (~10 s on the
+  green run) on a runner whose Xcode build also took 188 s instead of the usual 50-110 s; the
+  second failure was the timed-out test's SemanticsHandle assertion leaking into the next
+  case. Follow-up `702f1f0`: `--timeout 120s` on both the Apple script's and the Android
+  emulator's `flutter test` invocations. Verifying in run 35869222604.
 
 ## Commits
 
 - `42975c5` ci: phase-aware watchdog for the iOS simulator suites, hangs now cost ~2 min not ~12
 - `befad90` ci: bound the watchdog kill with SIGKILL, report why and how long on stdout
+- `702f1f0` ci: raise the integration suites' default per-test timeout to 120 s
