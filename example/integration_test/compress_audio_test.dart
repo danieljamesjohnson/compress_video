@@ -83,6 +83,82 @@ _BoxRange? _findBox(Uint8List bytes, String fourCc, int start, int end) {
   return null;
 }
 
+/// Reads an MPEG-4 "expandable" descriptor length (ISO/IEC 14496-1) starting at [offset]:
+/// each length byte's high bit signals another byte follows, and the low 7 bits accumulate
+/// into the value. Returns the decoded length and the offset of the descriptor's first
+/// content byte.
+({int length, int contentStart}) _readDescriptorLength(
+  Uint8List bytes,
+  int offset,
+) {
+  int value = 0;
+  int pos = offset;
+  while (pos < bytes.length) {
+    final int b = bytes[pos];
+    pos++;
+    value = (value << 7) | (b & 0x7F);
+    if (b & 0x80 == 0) break;
+  }
+  return (length: value, contentStart: pos);
+}
+
+/// Reads the AAC channel configuration (1=mono, 2=stereo, ...) from an `esds` box's nested
+/// DecoderSpecificInfo (tag 5) `AudioSpecificConfig`, walking the ES_Descriptor(3) ->
+/// DecoderConfigDescriptor(4) -> DecoderSpecificInfo(5) tree. This is the AUTHORITATIVE
+/// channel count for an AAC track (see the call site's own comment for why the `mp4a` sample
+/// entry's own `channelcount` field is not trustworthy on Apple). Returns `null` if the box
+/// is missing, malformed, or reports an extended (non-standard) sampling-frequency index this
+/// minimal parser does not decode -- none of this plugin's own requested rates
+/// (`SizeGuard`'s legal AAC rate table) ever produce one.
+int? _readEsdsChannelConfig(Uint8List bytes, _BoxRange esds) {
+  // esds (FullBox): version+flags(4), then one ES_Descriptor.
+  int offset = esds.start + 8 + 4;
+
+  int? walkToTag(int tagWanted) {
+    while (offset + 2 <= esds.end) {
+      final int tag = bytes[offset];
+      final ({int length, int contentStart}) header = _readDescriptorLength(
+        bytes,
+        offset + 1,
+      );
+      final int contentEnd = header.contentStart + header.length;
+      if (contentEnd > esds.end || contentEnd < header.contentStart) {
+        return null;
+      }
+      if (tag == tagWanted) {
+        offset = header.contentStart;
+        return contentEnd;
+      }
+      offset = contentEnd;
+    }
+    return null;
+  }
+
+  // ES_DescrTag = 3.
+  if (walkToTag(3) == null) return null;
+  // ES_Descriptor content: ES_ID(2) + flags(1) -- the optional stream-dependence/URL/OCR
+  // fields the flags byte can introduce are never set on what this plugin's own muxers
+  // (AVAssetWriter, Media3) produce.
+  offset += 2 + 1;
+
+  // DecoderConfigDescrTag = 4.
+  if (walkToTag(4) == null) return null;
+  // DecoderConfigDescriptor content before its nested DecoderSpecificInfo: objectTypeIndication
+  // (1) + streamType/upStream/reserved (1) + bufferSizeDB (3) + maxBitrate (4) + avgBitrate (4).
+  offset += 1 + 1 + 3 + 4 + 4;
+
+  // DecSpecificInfoTag = 5 -- its content IS the raw AudioSpecificConfig.
+  if (walkToTag(5) == null || offset + 2 > bytes.length) return null;
+
+  // AudioSpecificConfig: audioObjectType(5 bits), samplingFrequencyIndex(4 bits),
+  // channelConfiguration(4 bits), ...
+  final int byte0 = bytes[offset];
+  final int byte1 = bytes[offset + 1];
+  final int samplingFrequencyIndex = ((byte0 & 0x07) << 1) | (byte1 >> 7);
+  if (samplingFrequencyIndex == 0xF) return null;
+  return (byte1 >> 3) & 0x0F;
+}
+
 /// The audio track's structural facts read directly from the produced MP4's own bytes.
 class _Mp4AudioTrackInfo {
   const _Mp4AudioTrackInfo({
@@ -162,7 +238,28 @@ Future<_Mp4AudioTrackInfo?> _readMp4AudioTrackInfo(String path) async {
             if (entryType != 'mp4a' || channelCountOffset + 2 > stsd.end) {
               return null;
             }
-            final int channelCount = _u16(bytes, channelCountOffset);
+            // The `mp4a` AudioSampleEntry's own `channelcount` field is NOT authoritative on
+            // Apple: its muxer writes 2 there regardless of the stream's real channel
+            // configuration (measured live, CI run 35821995638 -- a genuinely-mono AAC stream
+            // still reported channelcount 2). The AUTHORITATIVE value is the AudioSpecificConfig
+            // channel configuration nested inside the `esds` box (present on both platforms'
+            // output, so this stays cross-platform and does not weaken the assertion) --
+            // preferred here, falling back to the sample-entry field only when `esds` is
+            // missing or unparseable.
+            final _BoxRange? mp4aEntry = _findBox(
+              bytes,
+              'mp4a',
+              firstEntryStart,
+              stsd.end,
+            );
+            final _BoxRange? esds = mp4aEntry == null
+                ? null
+                : _findBox(bytes, 'esds', mp4aEntry.start + 36, mp4aEntry.end);
+            final int? esdsChannelConfig = esds == null
+                ? null
+                : _readEsdsChannelConfig(bytes, esds);
+            final int channelCount =
+                esdsChannelConfig ?? _u16(bytes, channelCountOffset);
 
             // stsz (FullBox): version+flags(4) + sample_size(4) + sample_count(4). A nonzero
             // sample_size means every sample is that exact size (no per-sample array follows);

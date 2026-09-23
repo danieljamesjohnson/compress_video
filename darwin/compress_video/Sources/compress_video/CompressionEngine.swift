@@ -295,11 +295,17 @@ final class CompressionEngine {
           AVNumberOfChannelsKey: targetChannels,
           AVSampleRateKey: Self.normalizedAacSampleRate(sourceAudioSampleRate),
           AVEncoderBitRateKey: Int(targetBitrate),
-          // An explicit channel layout, not just a channel COUNT -- AAC-LC's encoder needs
-          // this to avoid ambiguity. Never combined with AVEncoderAudioQualityKey or any other
+          // Without an explicit strategy, the AAC-LC encoder was measured (CI run 35821995638)
+          // to silently ignore AVEncoderBitRateKey and settle on its own ~24,182bps default
+          // regardless of the requested value -- constant is what the requested bitrate is
+          // actually FOR. Never combined with AVEncoderAudioQualityKey or any other
           // quality-strategy key -- the two are mutually exclusive and their combination is a
           // separate, documented cause of the same -11861 error; this dictionary carries only
-          // an explicit bitrate strategy.
+          // this one, explicit bitrate strategy.
+          AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_Constant,
+          // An explicit channel layout, not just a channel COUNT -- AAC-LC's encoder needs
+          // this to avoid ambiguity and to genuinely downmix rather than silently keep the
+          // source's own channel count.
           AVChannelLayoutKey: Self.audioChannelLayoutData(channelCount: targetChannels),
         ]
         guard writer.canApply(outputSettings: aacOutputSettings, forMediaType: .audio) else {
