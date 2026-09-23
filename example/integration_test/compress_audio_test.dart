@@ -250,27 +250,50 @@ void main() {
     timeout: const Timeout(Duration(seconds: 20)),
   );
 
-  testWidgets(
-    'AudioOptions.strip produces an output with no audio track at all: audioCodec '
-    'null, audioReencoded false',
-    (WidgetTester tester) async {
-      final String path = await copySmallClip();
-      final CompressJob job = compressVideo.compress(
-        path,
-        options: const CompressOptions(audio: AudioStrip()),
-      );
-      final CompressResult result = await job.result;
+  testWidgets('AudioOptions.strip removes the audio track, or -- if the never-larger check '
+      'substitutes the original wholesale -- returns exactly the original file, never a '
+      'hybrid of the two', (WidgetTester tester) async {
+    // small_480p.mp4's own bitrate (129,866bps, corpus/small_480p.expected.json) is so close
+    // to the default p720 preset's resolved target for this input (SizeGuard rule 6 clamps
+    // the scaled preset bitrate down to the input's own, exactly like the already-proven
+    // Never-larger p360 case above) that a real encode of it -- even with audio removed --
+    // can land at or above the input's own byte count on an encoder whose real-world rate
+    // control doesn't hit the target as precisely as Android's Media3 CBR mode (02-04's own
+    // fix for exactly this class of overshoot). CORE-05 is unconditional (D-06): when that
+    // happens, the never-larger POST-check substitutes the ORIGINAL file wholesale -- audio
+    // included, since the caller receives a byte-for-byte copy of their own input, not a
+    // partial strip (mirrors TransformerEngine.finishSuccess's own documented reasoning:
+    // CORE-05 describes the file the caller receives, not the code path that produced it).
+    // Observed live: green on the Android emulator (Media3 shrinks this fixture even
+    // stripped), and a legitimate substitution on the iOS simulator (CI run 35809012150).
+    // What this case actually asserts, on every platform, is that stripping is honoured
+    // whenever an attempt is made, and that a substitution is never a hybrid -- exactly one
+    // of the two legitimate outcomes below, never a stripped copy with some-but-not-all of
+    // the original's audio, and never a kept encode that still carries audio.
+    final String path = await copySmallClip();
+    final CompressJob job = compressVideo.compress(
+      path,
+      options: const CompressOptions(audio: AudioStrip()),
+    );
+    final CompressResult result = await job.result;
 
+    expect(result.audioReencoded, isFalse);
+    expect(
+      result.outputBytes,
+      lessThanOrEqualTo(result.inputBytes),
+      reason: 'CORE-05 is unconditional: never larger than the input',
+    );
+
+    if (result.usedOriginal) {
+      expect(result.outputBytes, result.inputBytes);
+    } else {
       expect(result.audioCodec, isNull);
-      expect(result.audioReencoded, isFalse);
-
       final MediaInfo outputInfo = await compressVideo.getMediaInfo(
         result.outputPath,
       );
       expect(outputInfo.hasAudio, isFalse);
-    },
-    timeout: const Timeout(Duration(seconds: 20)),
-  );
+    }
+  }, timeout: const Timeout(Duration(seconds: 20)));
 
   testWidgets(
     'AudioOptions.reencode at 64000bps/2 channels reports audioReencoded true and '

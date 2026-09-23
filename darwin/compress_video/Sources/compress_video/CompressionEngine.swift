@@ -278,17 +278,30 @@ final class CompressionEngine {
           request.audioMode == .reencode
           ? Int(request.audioChannels!)
           : (sourceAudioChannelCount ?? 2)
-        var aacOutputSettings: [String: Any] = [
+        // iOS/macOS's built-in AAC-LC encoder rejects (-11861 AVError.unsupportedOutputSettings
+        // / "Cannot Encode Media", confirmed live in CI run 35809012150) a bitrate far below its
+        // own practical per-channel minimum, even though writer.canApply(...) below -- a
+        // coarser, static compatibility check -- accepted the dictionary shape. SizeGuard's
+        // shared 8,000-960,000bps range mirrors Android's own measured c2.android.aac.encoder
+        // floor and is too low for Apple's encoder, so an ADDITIONAL platform-specific floor is
+        // applied here on top of SizeGuard's resolution (plan.audioBitrateBps), never by
+        // changing the shared cross-platform port. The same CI run also measured the requested
+        // bitrate going un-honoured (e.g. 64,000bps requested, ~24,182bps measured) whenever no
+        // AVSampleRateKey/AVChannelLayoutKey was supplied -- both are now always set below.
+        let targetBitrate = max(
+          plan.audioBitrateBps, Self.appleAacMinBitratePerChannelBps * Int64(targetChannels))
+        let aacOutputSettings: [String: Any] = [
           AVFormatIDKey: kAudioFormatMPEG4AAC,
           AVNumberOfChannelsKey: targetChannels,
-          // plan.audioBitrateBps is SizeGuard rule 5's already-clamped resolution (8,000 to
-          // 960,000bps, request-or-source-or-default) -- this branch trusts it rather than
-          // re-deriving or re-clamping the request's own raw bitrate.
-          AVEncoderBitRateKey: Int(plan.audioBitrateBps),
+          AVSampleRateKey: Self.normalizedAacSampleRate(sourceAudioSampleRate),
+          AVEncoderBitRateKey: Int(targetBitrate),
+          // An explicit channel layout, not just a channel COUNT -- AAC-LC's encoder needs
+          // this to avoid ambiguity. Never combined with AVEncoderAudioQualityKey or any other
+          // quality-strategy key -- the two are mutually exclusive and their combination is a
+          // separate, documented cause of the same -11861 error; this dictionary carries only
+          // an explicit bitrate strategy.
+          AVChannelLayoutKey: Self.audioChannelLayoutData(channelCount: targetChannels),
         ]
-        if let sourceAudioSampleRate {
-          aacOutputSettings[AVSampleRateKey] = sourceAudioSampleRate
-        }
         guard writer.canApply(outputSettings: aacOutputSettings, forMediaType: .audio) else {
           throw CompressVideoError(
             code: "encoderUnavailable",
@@ -832,6 +845,39 @@ final class CompressionEngine {
   /// documented limitation as the Kotlin original).
   private static func normalizedAudioCodec(fourCC: FourCharCode) -> String {
     fourCC == kAudioFormatMPEG4AAC ? "aac" : "unknown"
+  }
+
+  /// Apple's built-in AAC-LC encoder's own practical per-channel minimum bitrate -- an
+  /// ADDITIONAL floor applied on top of SizeGuard's shared, Android-derived 8,000bps floor
+  /// (see the call site's comment). Not independently re-verified beyond the one failure this
+  /// floor was sized to fix (CI run 35809012150's 1000bps/2-channel case); a lower value that
+  /// still succeeds on real hardware may exist.
+  private static let appleAacMinBitratePerChannelBps: Int64 = 32000
+
+  /// Sample rates AAC-LC actually supports (ISO/IEC 14496-3 Table 1.16, the standard AAC
+  /// sampling-frequency table). `AVSampleRateKey` must be one of these -- an arbitrary value
+  /// read from a source track (which can legitimately report something else, or nothing at
+  /// all) is normalised to the nearest common default (44,100 Hz) rather than passed through.
+  private static let aacLegalSampleRates: Set<Double> = [
+    8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000,
+  ]
+
+  /// Returns `rate` unchanged when it is one of `aacLegalSampleRates`, else the standard
+  /// 44,100 Hz default.
+  private static func normalizedAacSampleRate(_ rate: Double?) -> Double {
+    guard let rate, Self.aacLegalSampleRates.contains(rate) else { return 44100 }
+    return rate
+  }
+
+  /// Builds the `AVChannelLayoutKey` value for `channelCount` (1 or 2) -- an explicit channel
+  /// LAYOUT, not just a channel count, which AAC-LC's encoder needs to avoid ambiguity
+  /// (confirmed necessary live in CI run 35809012150: the requested bitrate went un-honoured
+  /// without one, even though `writer.canApply(...)` accepted the dictionary either way).
+  private static func audioChannelLayoutData(channelCount: Int) -> Data {
+    var layout = AudioChannelLayout()
+    layout.mChannelLayoutTag =
+      channelCount == 1 ? kAudioChannelLayoutTag_Mono : kAudioChannelLayoutTag_Stereo
+    return withUnsafeBytes(of: &layout) { Data($0) }
   }
 
   /// Maps a thrown error to a `CompressVideoError`, via `ErrorMapping` for an `AVError`- or

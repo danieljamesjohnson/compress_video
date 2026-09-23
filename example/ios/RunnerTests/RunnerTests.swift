@@ -827,10 +827,10 @@ class RunnerTests: XCTestCase {
   // real case names (03-RESEARCH.md Pitfall 6) -- NOT the CONTEXT.md-prose
   // `.decoderNotAvailable`/`.encoderNotAvailable`, which do not exist.
 
-  func testKnownAVErrorCodesHasExactlyElevenEntries() {
+  func testKnownAVErrorCodesHasExactlyTwelveEntries() {
     // Fails the whole suite if a code is ever added to knownAVErrorCodes without a
     // corresponding case below -- mirrors ErrorMappingTest.kt's own acceptance criterion.
-    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 11)
+    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 12)
   }
 
   func testReasonForAVErrorDecoderNotFoundMapsToDecoderUnavailable() {
@@ -877,6 +877,13 @@ class RunnerTests: XCTestCase {
 
   func testReasonForAVErrorOutOfMemoryMapsToIo() {
     XCTAssertEqual(ErrorMapping.reasonForAVError(.outOfMemory), "io")
+  }
+
+  func testReasonForAVErrorUnsupportedOutputSettingsMapsToEncoderUnavailable() {
+    // -11861, confirmed live in CI run 35809012150: the writer's own encoder session rejected
+    // an audio output-settings dictionary that had already passed writer.canApply(...).
+    XCTAssertEqual(
+      ErrorMapping.reasonForAVError(.unsupportedOutputSettings), "encoderUnavailable")
   }
 
   func testReasonForAVErrorUnmappedCodeMapsToUnknown() {

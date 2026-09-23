@@ -34,6 +34,7 @@ enum ErrorMapping {
     .exportFailed,
     .sessionNotRunning,
     .outOfMemory,
+    .unsupportedOutputSettings,
   ]
 
   /// Maps `code` to a `CompressVideoErrorReason` name string (for example
@@ -46,6 +47,13 @@ enum ErrorMapping {
     case .decoderNotFound, .decoderTemporarilyUnavailable:
       return "decoderUnavailable"
     case .encoderNotFound, .encoderTemporarilyUnavailable:
+      return "encoderUnavailable"
+    case .unsupportedOutputSettings:
+      // -11861: the writer's own encoder session rejected an output-settings dictionary
+      // canApply(outputSettings:forMediaType:) accepted as generally shaped -- confirmed live
+      // in CI run 35809012150 (a too-low AAC bitrate reached the writer despite passing the
+      // earlier static check). Treated as encoder-unavailable, the same bucket a device that
+      // cannot support the requested settings at all falls into.
       return "encoderUnavailable"
     case .diskFull:
       return "outOfSpace"
