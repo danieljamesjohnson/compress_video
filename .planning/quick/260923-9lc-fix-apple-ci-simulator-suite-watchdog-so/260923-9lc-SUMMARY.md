@@ -51,7 +51,13 @@ commit: 42975c5, befad90, 702f1f0
   green run) on a runner whose Xcode build also took 188 s instead of the usual 50-110 s; the
   second failure was the timed-out test's SemanticsHandle assertion leaking into the next
   case. Follow-up `702f1f0`: `--timeout 120s` on both the Apple script's and the Android
-  emulator's `flutter test` invocations. Verifying in run 35869222604.
+  emulator's `flutter test` invocations.
+- CI run 35869222604 (702f1f0): fully green, parity included. Simulator step 20 min total with
+  one hang -- and the new warning line now says why: "no test output within 150s of the build
+  finishing (phase launch, 150s into it; build took 221s, kill took 1s)". So hangs come in two
+  shapes: the log-reader error (killed on sight) and a silent launch (150 s budget); a silent
+  hang on a cold first build costs ~5-6 min, a warm one ~3-4 min. compress_test.dart 22/22,
+  compress_audio_test.dart 7/7 again.
 
 ## Commits
 
