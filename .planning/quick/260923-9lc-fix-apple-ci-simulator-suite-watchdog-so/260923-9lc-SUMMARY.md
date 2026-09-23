@@ -3,7 +3,7 @@ quick_id: 260923-9lc
 slug: fix-apple-ci-simulator-suite-watchdog-so
 status: complete
 date: 2026-09-23
-commit: 42975c5
+commit: 42975c5, befad90
 ---
 
 # Summary: Fix Apple CI simulator suite watchdog so launch hangs fail fast
@@ -35,9 +35,18 @@ commit: 42975c5
 
 - `bash -n` on both scripts; workflow YAML re-parsed with PyYAML.
 - `bash tool/run_ios_integration_suites_test.sh` -> "all checks passed".
-- Real proof is the next CI run on `github` after this push (hangs should appear as
-  ~2-minute warnings and the step should finish well inside 60 minutes).
+- CI run 35857609478 (first run with the script): fully green, parity included -- the first
+  green run since 35787878946. The simulator step absorbed 5 launch hangs across 10 attempts
+  (media_info x2, thumbnail x1, compress_audio x2) in 47 minutes; compress_audio_test.dart
+  ran and passed 7/7 for the first time on CI (so the 03-05 AAC re-encode fix in 8a44a04 is
+  now proven on the simulator).
+- But each hang still cost 3-4.5 min after its build, and the "watchdog:" reason lines were
+  missing from the log: the Flutter tool overwrote them in the attempt log it still held
+  open, and kill_tree waited unbounded on a tool that takes minutes to exit on SIGTERM.
+  Follow-up `befad90`: SIGKILL after 10 s, reason + phase timings reported in the ::warning
+  line on stdout; self-test gains a SIGTERM-ignoring fake. Verifying in run 35865459091.
 
-## Commit
+## Commits
 
 - `42975c5` ci: phase-aware watchdog for the iOS simulator suites, hangs now cost ~2 min not ~12
+- `befad90` ci: bound the watchdog kill with SIGKILL, report why and how long on stdout
