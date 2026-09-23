@@ -65,10 +65,29 @@ progress_lines() {
   grep -E '^[0-9]+:[0-9]{2} \+[0-9]+' "$1" 2>/dev/null | grep -vc ': loading ' || true
 }
 
+# Takes down the whole `flutter test` process group. SIGTERM first, but bounded: the
+# Flutter tool runs shutdown hooks on SIGTERM and CI run 35857609478 showed a killed
+# attempt still costing 3-4.5 minutes after its build finished, so anything still alive
+# after 10 s gets SIGKILL. Never wait unbounded on a process this watchdog has given up on.
 kill_tree() {
-  kill -- -"$1" 2>/dev/null || true
-  wait "$1" 2>/dev/null || true
+  local pid="$1" i
+  kill -TERM -- -"$pid" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL -- -"$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
 }
+
+# Set by run_attempt when the watchdog kills an attempt: why, and how long each phase took.
+# Reported on this script's own stdout (in the ::warning line) rather than appended to the
+# attempt log, because the still-running Flutter tool holds that file open without O_APPEND
+# and can overwrite anything appended behind its own write offset -- run 35857609478 lost
+# every such line that way.
+WATCHDOG_NOTE=""
 
 # Runs one attempt of suite $1, writing raw output to $2. Returns 0 (passed), the genuine
 # `flutter test` exit code (failed with real output), or 99 (killed by the watchdog: the
@@ -86,14 +105,24 @@ run_attempt() {
   set +m
   local phase=build
   local elapsed=0
+  local started build_done=0
+  started=$(date +%s)
+  WATCHDOG_NOTE=""
+  # $1 = reason. Kills the attempt and records the reason plus phase timings for the caller.
+  give_up() {
+    local kill_started build_secs='?'
+    kill_started=$(date +%s)
+    kill_tree "$pid"
+    [ "$build_done" -gt 0 ] && build_secs=$((build_done - started))
+    WATCHDOG_NOTE="watchdog: $1 (phase $phase, ${elapsed}s into it; build took ${build_secs}s, kill took $(( $(date +%s) - kill_started ))s)"
+  }
   while kill -0 "$pid" 2>/dev/null; do
     sleep "$POLL"
     elapsed=$((elapsed + POLL))
     # A dead log reader is definitive: the tool has already given up on this launch and
     # will sit there forever. Do not wait for any budget.
     if grep -qE 'Error waiting for a debug connection|^No tests ran\.' "$attempt_log"; then
-      echo "watchdog: launch failed (log reader died) after ${elapsed}s in phase $phase" >> "$attempt_log"
-      kill_tree "$pid"
+      give_up "launch failed (log reader died)"
       return 99
     fi
     case "$phase" in
@@ -101,10 +130,10 @@ run_attempt() {
         if grep -q '^Xcode build done\.' "$attempt_log"; then
           phase=launch
           elapsed=0
+          build_done=$(date +%s)
         elif [ "$elapsed" -ge "$BUILD_BUDGET" ]; then
-          echo "watchdog: no 'Xcode build done.' within ${BUILD_BUDGET}s" >> "$attempt_log"
-          kill_tree "$pid"
-          return 99
+              give_up "no 'Xcode build done.' within ${BUILD_BUDGET}s"
+              return 99
         fi
         ;;
       launch)
@@ -112,16 +141,14 @@ run_attempt() {
           phase=run
           elapsed=0
         elif [ "$elapsed" -ge "$LAUNCH_BUDGET" ]; then
-          echo "watchdog: no test output within ${LAUNCH_BUDGET}s of the build finishing" >> "$attempt_log"
-          kill_tree "$pid"
-          return 99
+              give_up "no test output within ${LAUNCH_BUDGET}s of the build finishing"
+              return 99
         fi
         ;;
       run)
         if [ "$elapsed" -ge "$RUN_BUDGET" ]; then
-          echo "watchdog: suite still running ${RUN_BUDGET}s after its first test line" >> "$attempt_log"
-          kill_tree "$pid"
-          return 99
+              give_up "suite still running ${RUN_BUDGET}s after its first test line"
+              return 99
         fi
         ;;
     esac
@@ -146,10 +173,10 @@ for suite in "${SUITES[@]}"; do
       exit "$status"
     fi
     if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
-      echo "::error::$suite hung at launch on all $attempt attempts"
+      echo "::error::$suite hung at launch on all $attempt attempts (last: $WATCHDOG_NOTE)"
       exit 1
     fi
-    echo "::warning::$suite hung at launch on attempt $attempt (see the watchdog line above); resetting the simulator and retrying"
+    echo "::warning::$suite hung at launch on attempt $attempt -- $WATCHDOG_NOTE; resetting the simulator and retrying"
     reset_simulator || true
     attempt=$((attempt + 1))
   done

@@ -36,6 +36,13 @@ case "$mode" in
   silent)
     echo "Xcode build done.                                           95.9s"
     sleep 1000 ;;
+  stubborn)
+    # Ignores SIGTERM like a Flutter tool stuck in its shutdown hooks; only SIGKILL ends it.
+    trap '' TERM
+    echo "Xcode build done.                                           95.9s"
+    echo "No tests ran."
+    echo "Error waiting for a debug connection: The log reader failed unexpectedly"
+    while :; do sleep 1; done ;;
   pass)
     echo "Xcode build done.                                           95.9s"
     echo "00:00 +0: getMediaInfo matches the corpus sidecar for portrait_rot90"
@@ -89,6 +96,7 @@ run_case "clean pass" 0 'All tests passed' 6 pass
 run_case "log reader died once, then passed" 0 'hung at launch on attempt 1 .*retrying' 10 logreader pass
 run_case "silent launch hang on every attempt" 1 'hung at launch on all 3 attempts' 20 silent silent silent
 run_case "build never finishes, then passes" 0 "no 'Xcode build done.' within 3s" 12 nobuild pass
+run_case "log reader died and the tool ignores SIGTERM: SIGKILL bounds the attempt" 0 'log reader died.*kill took 1[0-9]s' 20 stubborn pass
 run_case "genuine failure fails fast with no retry" 1 'genuine failure, not a launch hang' 6 realfail pass
 # A retry must never be attempted after a genuine failure: the second `pass` above is a
 # trap, and the counter proves only one flutter call was made.
@@ -97,8 +105,9 @@ run_case "genuine failure fails fast with no retry" 1 'genuine failure, not a la
 SUITES=(integration_test/media_info_test.dart integration_test/thumbnail_test.dart)
 run_case "two suites, hang in the middle" 0 'All tests passed' 14 pass logreader pass
 grep -c '^PARITY_JSON ' "$WORK/combined.log" | grep -qx 2 || { echo "FAIL  combined log should carry both suites' PARITY_JSON lines"; failures=$((failures + 1)); }
-# The combined log must not carry the dead attempt's error as if it were a result line.
-grep -q 'watchdog: launch failed (log reader died)' "$WORK/combined.log" || { echo "FAIL  watchdog reason missing from combined log"; failures=$((failures + 1)); }
+# The watchdog's reason and timings travel in the ::warning line on the script's stdout, never
+# in the attempt log (the Flutter tool can overwrite anything appended there).
+grep -q 'hung at launch on attempt 1 -- watchdog: launch failed (log reader died) (phase [a-z]*, [0-9]*s into it; build took [0-9?]*s, kill took [0-9]*s)' "$WORK/out" || { echo "FAIL  watchdog reason/timings missing from the warning line"; sed 's/^/      | /' "$WORK/out"; failures=$((failures + 1)); }
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed"
