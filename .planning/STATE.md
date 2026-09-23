@@ -16,7 +16,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-15)
 
 **Core value:** One call turns a phone video into a smaller MP4 that plays everywhere, and it never makes the file bigger, never returns null, and builds on today's Flutter toolchain.
-**Current focus:** Phase 3 — Apple Compression to Parity (03-02, 03-03 and 03-04 complete; 03-04's real-encode tracer now proven end-to-end on CI after fixing a real `AVVideoAverageBitRateKey` placement bug — see Decisions; 03-01 still partial: 2/3 tasks done, task 1 blocked on the Mac being offline — QUESTIONS.md #8); Phase 2 awaits /gsd-verify-work 2
+**Current focus:** Phase 3 — Apple Compression to Parity. Autonomous run STOPPED 2026-09-23 at a plan boundary (needs_human): 03-01 task 1 blocked on the Mac, 03-05 halted with the audio re-encode fix unverified; 03-06..03-09 not started. Phase 2 still awaits /gsd-verify-work 2.
 
 ## Current Position
 
@@ -115,6 +115,12 @@ Recent decisions affecting current work:
 - [Phase 3 / 03-04]: RESOLVED 2026-09-22 — see Decisions above. The `media_info_test.dart` simulator-hang flake (CI run 35765529347, and again in this continuation's run 35776724779 attempt 1) is the same already-documented pre-existing flake ("seen 2026-09-15 and 2026-09-21 on suites that pass on the very next run"); a job-rerun (`gh run rerun --failed`, doesn't count against the push budget) cleared it and let `compress_test.dart` run for real. The real code bug it had been masking (`AVVideoAverageBitRateKey` set at the wrong dictionary level) is fixed in `89e77b7`; CI run 35787878946 is fully green.
 - [Phase 4]: HEVC/HDR hardware checks need a physical Android phone (QUESTIONS.md #3).
 - [Phase 6]: No verified pub.dev publisher yet (QUESTIONS.md #2).
+
+## Needs Human
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 3 | needs_human | Make the Mac usable, then `/gsd-autonomous --from 3` (or `/gsd-execute-phase 3`). Blockers only Dan can clear: (1) QUESTIONS.md #8 — keep the MacBook Air awake (lid open or on power with sleep-on-adapter off); it dropped off the tailnet ~10 min after every wake on 2026-09-22; (2) QUESTIONS.md #7 — install Homebrew then `brew install cocoapods` (no CocoaPods release installs on the system Ruby 2.6, with or without sudo), because the example's committed Podfiles make `flutter build ios/macos` impossible on the Mac without `pod`. With both done, 03-01 task 1 (`tool/mac_sync.sh`, `tool/mac_run.sh`, SPM build proof — the second SDK is already installed at `~/development/flutter-stable`, 3.47.5) and 03-05's three audio cases verify in minutes instead of the 40-60 min hosted-simulator CI loop that ate 2026-09-22/23. |
 
 ## Deferred Verification
 
