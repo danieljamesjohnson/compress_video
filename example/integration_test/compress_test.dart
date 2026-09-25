@@ -928,11 +928,62 @@ void main() {
           );
           final double outputFrameRate = outputInfo.frameRateFps ?? 30.0;
           final double toleranceMs = (1000 / outputFrameRate).ceilToDouble();
+          final double deltaMs = (result.durationMs - 3000).abs().toDouble();
 
-          expect(
-            (result.durationMs - 3000).abs().toDouble(),
-            lessThanOrEqualTo(toleranceMs),
+          // Measured (not assumed) reader behaviour for 03-07-PLAN.md task 1 -- printed so CI
+          // logs carry the real number Pitfall 7/Open Question 1 asked for: if
+          // AVAssetReader.timeRange's keyframe-seek-then-discard delivered a sample earlier or
+          // later than requested, it would show up here as a duration delta beyond one frame.
+          print(
+            'TRIM_MEASURED source=portrait_hibitrate_1080p60 requestedStartMs=500 '
+            'requestedEndMs=3500 expectedDurationMs=3000 measuredDurationMs=${result.durationMs} '
+            'deltaMs=$deltaMs toleranceMs=$toleranceMs',
           );
+
+          expect(deltaMs, lessThanOrEqualTo(toleranceMs));
+        },
+        timeout: const Timeout(Duration(seconds: 20)),
+      );
+
+      testWidgets(
+        'a trim from 2000ms to 7000ms on trim_source_10s produces a five-second output, '
+        'with the expected duration and tolerance read from the fixture\'s own sidecar '
+        '(CORE-07)',
+        (WidgetTester tester) async {
+          final Map<String, dynamic> sidecar = await _loadSidecar(
+            'trim_source_10s',
+          );
+          final Map<String, dynamic> trim =
+              sidecar['trim'] as Map<String, dynamic>;
+          final int startMs = trim['startMs'] as int;
+          final int endMs = trim['endMs'] as int;
+          final int expectedDurationMs = trim['expectedDurationMs'] as int;
+          final int toleranceMs = trim['toleranceMs'] as int;
+
+          final String path = await _copyAssetToTempFile(
+            'assets/corpus/trim_source_10s.mp4',
+            'trim_source_10s_${DateTime.now().microsecondsSinceEpoch}.mp4',
+          );
+          final CompressJob job = compressVideo.compress(
+            path,
+            options: CompressOptions(trimStartMs: startMs, trimEndMs: endMs),
+          );
+          final CompressResult result = await job.result;
+          final double deltaMs = (result.durationMs - expectedDurationMs)
+              .abs()
+              .toDouble();
+
+          // Measured (not assumed) reader behaviour -- 03-RESEARCH.md Pitfall 7/Open Question
+          // 1 required this be verified against a real GOP structure rather than trusted from
+          // general AVFoundation guidance.
+          print(
+            'TRIM_MEASURED source=trim_source_10s requestedStartMs=$startMs '
+            'requestedEndMs=$endMs expectedDurationMs=$expectedDurationMs '
+            'measuredDurationMs=${result.durationMs} deltaMs=$deltaMs '
+            'toleranceMs=$toleranceMs',
+          );
+
+          expect(deltaMs, lessThanOrEqualTo(toleranceMs.toDouble()));
         },
         timeout: const Timeout(Duration(seconds: 20)),
       );
