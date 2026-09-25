@@ -95,10 +95,47 @@ and neither fails its OWN platform's `_expectCrossPlatformMatches` assertion. Th
 thumbnail's sampled patch came back `[255, 255, 0]` (pure yellow) on Android and `[255, 242, 0]`
 on iOS — a 13-point green delta from JPEG re-encoding, well inside `rgbTolerance` (24). Both are
 legitimate platform differences the tolerances above exist to absorb, not bugs in either
-platform's `getMediaInfo`/`getThumbnail` implementation. `small_480p`'s duration delta (Android
-further from ffprobe truth than Apple) is flagged for Phase 3 (which owns CORE-07 exact
-cross-platform parity) to re-examine once the Apple compression engine lands, rather than fixed
-here.
+platform's `getMediaInfo`/`getThumbnail` implementation.
+
+### `small_480p`'s duration delta, resolved (D-17, 03-07-PLAN.md task 3)
+
+The 01-07 finding above (Android `3026`, Apple `2992`, both against an `ffprobe`-reported
+`durationMs: 3000`) is re-examined here with the Apple compression engine landed, by reading the
+clip's own container boxes directly rather than trusting any one tool's summary.
+
+**Direct box inspection on danserver (2026-09-25), `corpus/small_480p.mp4`:**
+
+- `moov/mvhd` (the movie header — the container's own single, authoritative statement of the
+  presented duration): `timescale=1000`, `duration=3000` → **exactly 3.000s**.
+- Both tracks carry an `edts/elst` (edit list) with `entry_count=1`, `segment_duration=3000` (in
+  the `mvhd`'s 1000-unit movie timescale, i.e. 3.000s) and `media_time=1024` (a media-timescale
+  offset — 1024 samples of AAC encoder priming on the audio track, and the same raw `1024` value,
+  differently scaled by that track's own `15360` timescale, on the video track). An edit list
+  this precise is deliberate authoring, not accidental: whatever encoder produced this fixture
+  wrote an explicit instruction that the PRESENTED duration is 3000ms, distinct from either
+  track's raw, un-edited media duration.
+- `ffprobe -show_format` (which is edit-list-aware in the ffmpeg version installed on danserver)
+  reports `duration=3.000000` for the container and for both streams individually — agreeing
+  exactly with the `mvhd`/`elst` reading above, not coincidentally: `ffprobe` applies the same
+  edit list this inspection read by hand.
+
+**Conclusion: the container's actual, intended duration is 3000ms**, established two independent
+ways (raw `mvhd`/`elst` box values, and an edit-list-aware `ffprobe` read) that agree exactly.
+Neither platform's compression-engine-reported `durationMs` (Android `3026`, Apple `2992`) matches
+this exactly, but both are close: Android is 26ms off, Apple is 8ms off, and BOTH sit inside this
+clip's own `durationToleranceMs` (34ms, one frame at 30fps) — this is not a case of one platform
+"demonstrably misreading" the file (which would justify a code fix) so much as each platform's
+own duration-computation path (Android's `MediaMetadataRetriever`, Apple's re-probe via `Probe`
+reading `AVAsset.duration`) landing at a slightly different rounding of the same edit-list-trimmed
+timeline — Apple's path evidently honours the edit list more precisely than Android's, consistent
+with the original 01-07 observation that Apple was already closer to ffprobe's ground truth.
+
+**Action taken: none to either platform's reading.** Per this plan's own instruction, a platform
+is only "fixed" to match the other when one is demonstrably wrong; here neither is wrong by more
+than a fraction of a frame, and the sidecar's existing `durationToleranceMs` contract already
+absorbs the full observed spread. `small_480p`'s duration delta is treated as fully resolved: the
+ground-truth value is documented above, both platforms' deviations from it are within contract,
+and no cross-platform parity gate change follows from it.
 
 ## Thumbnail probe-patch contract
 
