@@ -152,3 +152,16 @@ find a real Swift type-check failure (fixed, `fac7f69`), then it slept again in 
 off** for a couple of hours so `bash tool/mac_sync.sh && bash tool/mac_run.sh build-ios && bash
 tool/mac_run.sh build-macos` can close 03-01 task 1's last acceptance criterion. Not blocking: the
 autonomous run continues on the GitHub Actions macOS runner (Dan's instruction, 2026-09-25).
+
+**Update 2026-09-25 (executing 03-08-PLAN.md task 1):** `timeout 15 ssh -o ConnectTimeout=8
+-o BatchMode=yes dans-macbook-air true` timed out again; `tailscale status` shows
+`dans-macbook-air ... offline, last seen 5h ago`. This blocks 03-08 task 1 specifically:
+`tool/verify_fresh_app.sh`'s own `<precondition>` requires `bash tool/mac_sync.sh && bash
+tool/mac_run.sh build-macos` to exit 0 before the script is even written, precisely because 03-01
+task 1's own Mac-side `build-macos` proof (above) never completed either. Per the executor's
+precondition protocol this is never auto-approved or worked around — task 1 did not run at all
+(no file written, no commit). Tasks 2 and 3 of 03-08 do not depend on the Mac and proceeded
+normally via GitHub Actions. Same ask as above: leave the MacBook Air open or on power with
+sleep-on-adapter off. When it next answers, resume with `bash tool/mac_sync.sh && bash
+tool/mac_run.sh build-ios && bash tool/mac_run.sh build-macos` (closing 03-01 task 1), then
+`03-08-PLAN.md` task 1 exactly as written.
