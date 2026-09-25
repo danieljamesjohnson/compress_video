@@ -370,12 +370,11 @@ jobs:
 
       - name: Run corpus integration tests on the iOS simulator
         # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) plus
-        # compress_test.dart, compress_audio_test.dart and compress_jobs_test.dart (03-06: per-job
-        # progress, cancellation, and the typed-failure surface, its whole-file Apple guard now
-        # removed) on the concrete simulator resolved above, one `flutter test` process per suite,
-        # via tool/run_ios_integration_suites.sh. compress_output_test.dart stays excluded (and
-        # still skips itself on non-Android platforms): it exercises estimate()/clearCache(),
-        # which land in 03-07.
+        # compress_test.dart, compress_audio_test.dart, compress_jobs_test.dart (03-06: per-job
+        # progress, cancellation, and the typed-failure surface) and compress_output_test.dart
+        # (03-07: estimate()/clearCache()/output-placement, its whole-file Apple guard now
+        # removed) on the concrete simulator resolved above, one `flutter test` process per
+        # suite, via tool/run_ios_integration_suites.sh.
         #
         # The script exists because `flutter test -d <simulator>` hangs at launch on roughly
         # half of all attempts on the hosted runner: Flutter discovers the VM service by tailing
@@ -411,6 +410,21 @@ jobs:
           name: parity-apple
           path: /tmp/parity-apple.txt
 
+      - name: Measure presets on the iOS simulator (doc/PRESETS.md, 03-07-PLAN.md task 3)
+        # tool/measure_presets.dart's own documented reproduction procedure (copy into
+        # integration_test/, run, remove), automated here since the Mac build host is
+        # frequently offline (QUESTIONS.md #8) -- this is the "measured, not assumed" Apple
+        # section 03-RESEARCH.md Pitfall 8 requires, run separately from the macOS host step
+        # below since the simulator's H.264 encoder is software while the macOS host has real
+        # hardware encode.
+        run: bash tool/measure_presets_ci.sh "${{ steps.ios_sim.outputs.udid }}" /tmp/measure-ios-simulator.txt
+
+      - name: Upload iOS simulator preset measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: measure-ios-simulator
+          path: /tmp/measure-ios-simulator.txt
+
       - name: Build macOS
         working-directory: example
         run: |
@@ -428,6 +442,19 @@ jobs:
             -workspace Runner.xcworkspace \
             -scheme Runner \
             -destination 'platform=macOS'
+
+      - name: Measure presets on the macOS host (doc/PRESETS.md, 03-07-PLAN.md task 3)
+        # Same procedure as the iOS simulator step above, run against the `macos` device --
+        # this run has access to real Video Toolbox hardware encode on the runner's Apple
+        # Silicon, unlike the iOS Simulator (03-RESEARCH.md Pitfall 8), so the two tables are
+        # expected to differ and are published separately, never combined.
+        run: bash tool/measure_presets_ci.sh macos /tmp/measure-macos-host.txt
+
+      - name: Upload macOS host preset measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: measure-macos-host
+          path: /tmp/measure-macos-host.txt
 
       - name: Enable Swift Package Manager
         run: flutter config --enable-swift-package-manager

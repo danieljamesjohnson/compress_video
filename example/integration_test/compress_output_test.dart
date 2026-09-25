@@ -118,6 +118,17 @@ void main() {
       final double relativeError =
           (estimate.outputBytes - result.outputBytes).abs() /
           result.outputBytes;
+
+      // Measured (not assumed) estimate accuracy for doc/PRESETS.md/03-07-PLAN.md task 3 --
+      // printed unconditionally (pass or fail) so CI logs on every platform carry the real
+      // number, matching the TRIM_MEASURED/MEASURE convention this project already uses.
+      // ignore: avoid_print
+      print(
+        'ESTIMATE_ACCURACY preset=${preset.name} estimatedBytes=${estimate.outputBytes} '
+        'realBytes=${result.outputBytes} relativeError=$relativeError '
+        'toleranceUsed=$emulatorAccuracyTolerance',
+      );
+
       expect(
         relativeError,
         lessThanOrEqualTo(emulatorAccuracyTolerance),
