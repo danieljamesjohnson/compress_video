@@ -135,7 +135,7 @@ Plans:
   3. A fresh Flutter app adds the plugin and builds for iOS and macOS with CocoaPods and, separately, with Swift Package Manager. iOS and macOS use one shared Swift core.
   4. The example app runs on Android, iOS and macOS. In it, a user picks a video, sets options, watches live progress, can cancel, and plays the compressed result.
 
-**Plans**: 3/9 plans executed
+**Plans**: 5/9 plans executed
 
 Plans:
 **Wave 1**
@@ -153,11 +153,11 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-05-PLAN.md — Transmux fast path, the unconditional two-stage never-larger rule, and the three audio modes
+- [x] 03-05-PLAN.md — Transmux fast path, the unconditional two-stage never-larger rule, and the three audio modes
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 03-06-PLAN.md — Per-job progress, cancellation with partial-file deletion ordered first, the wired error taxonomy and the free-space pre-check
+- [x] 03-06-PLAN.md — Per-job progress, cancellation with partial-file deletion ordered first, the wired error taxonomy and the free-space pre-check
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -233,7 +233,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
-| 3. Apple Compression to Parity | 2/9 | In Progress | - |
+| 3. Apple Compression to Parity | 5/9 | In Progress | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
