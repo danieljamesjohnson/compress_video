@@ -370,12 +370,12 @@ jobs:
 
       - name: Run corpus integration tests on the iOS simulator
         # Runs the Phase 1 corpus suites (media_info_test.dart, thumbnail_test.dart) plus
-        # compress_test.dart and compress_audio_test.dart on the concrete simulator resolved
-        # above, one `flutter test` process per suite, via tool/run_ios_integration_suites.sh.
-        # compress_jobs_test.dart and compress_output_test.dart stay excluded (and still skip
-        # themselves on non-Android platforms): they exercise cancel/progress-stream edge cases
-        # and estimate()/clearCache(), neither of which is implemented on Apple yet (03-06/03-07
-        # land them).
+        # compress_test.dart, compress_audio_test.dart and compress_jobs_test.dart (03-06: per-job
+        # progress, cancellation, and the typed-failure surface, its whole-file Apple guard now
+        # removed) on the concrete simulator resolved above, one `flutter test` process per suite,
+        # via tool/run_ios_integration_suites.sh. compress_output_test.dart stays excluded (and
+        # still skips itself on non-Android platforms): it exercises estimate()/clearCache(),
+        # which land in 03-07.
         #
         # The script exists because `flutter test -d <simulator>` hangs at launch on roughly
         # half of all attempts on the hosted runner: Flutter discovers the VM service by tailing

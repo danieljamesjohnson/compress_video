@@ -37,6 +37,7 @@ else
     integration_test/thumbnail_test.dart
     integration_test/compress_test.dart
     integration_test/compress_audio_test.dart
+    integration_test/compress_jobs_test.dart
   )
 fi
 

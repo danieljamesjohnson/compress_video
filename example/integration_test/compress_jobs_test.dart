@@ -1,7 +1,9 @@
 // Integration test for per-job independence: progress ordering, two-job isolation (02-06-PLAN.md
 // task 1), cancellation (task 2), and the complete error-mapping/real-failure surface (task 3) --
-// all run on a real Android emulator. Every corpus-derived expectation is read from a sidecar
-// exactly like compress_test.dart, so this file and the sidecar can never silently drift apart.
+// run on the Android emulator, the iOS simulator and the macOS host (03-06-PLAN.md removed the
+// platform guard this file used to carry). Every corpus-derived expectation is read from a
+// sidecar exactly like compress_test.dart, so this file and the sidecar can never silently drift
+// apart.
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -72,19 +74,6 @@ Future<void> _awaitProgressBelow100(CompressJob job) async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-
-  // Compression is implemented on Android only until Phase 3 lands the Apple engine
-  // (AVAssetReader/AVAssetWriter). On iOS/macOS these suites would talk to a host API no
-  // Swift code implements yet; register one skipped placeholder and stop so the run stays
-  // honest and finite. Phase 3 removes this guard.
-  if (!Platform.isAndroid) {
-    test(
-      'compression suites are Android-only until Phase 3',
-      () {},
-      skip: 'Apple compression engine lands in Phase 3 (CORE-01/CORE-07).',
-    );
-    return;
-  }
 
   const CompressVideo compressVideo = CompressVideo();
 

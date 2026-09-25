@@ -543,6 +543,20 @@ final class CompressionEngine {
       transmuxed: transmuxed, usedOriginal: usedOriginal, audioReencoded: audioReencoded)
   }
 
+  /// Resolves `request` against `inputInfo` into a `SizeGuard.Plan`, reading `inputURL`'s own
+  /// audio codec first when it has an audio track (needed by `SizeGuard.Plan.wouldTransmux`'s
+  /// audio-codec condition, D-10) -- mirrors `TransformerEngine.resolvePlan` (Android). Exposed
+  /// (not `private`) so `Compression`'s pre-flight free-space check can predict the SAME plan
+  /// `compress` itself resolves, before a reader/writer or export session is ever built: both
+  /// call sites must resolve identically, or the free-space check could pass or fail against a
+  /// prediction the real encode does not honour.
+  func resolvePlan(
+    inputURL: URL, inputInfo: MediaInfoMessage, request: CompressRequestMessage
+  ) async -> SizeGuard.Plan {
+    let audioCodec = inputInfo.hasAudio ? await Self.readAudioCodec(at: inputURL) : nil
+    return resolvePlan(inputInfo: inputInfo, request: request, audioCodec: audioCodec)
+  }
+
   /// Resolves `request` against `inputInfo` (plus the separately-read `audioCodec`, which
   /// `MediaInfoMessage` has no field for) into a `SizeGuard.Plan` -- the single call every
   /// geometry and bitrate number in `compress` comes from.
@@ -699,6 +713,12 @@ final class CompressionEngine {
           }
           if outputDurationMs > 0 {
             let elapsedMs = CMTimeGetSeconds(CMTimeSubtract(pts, sessionStartTime)) * 1000
+            // Clamped to 99, never 100: the last video sample's own presentation time can
+            // legitimately reach (or pass, on a trimmed job) the output duration several ticks
+            // before `writer.finishWriting` actually completes the file -- Android's
+            // TransformerEngine hit the exact same thing and clamps identically
+            // (02-06-SUMMARY.md Deviations). The single, real 100 is sent explicitly, once, right
+            // before the result reply (03-06-PLAN.md task 1) -- never derived here.
             let clamped = min(max(elapsedMs / Double(outputDurationMs) * 100, 0), 99)
             let forwarded = max(clamped, lastSentProgress)
             let now = Date()
@@ -819,8 +839,9 @@ final class CompressionEngine {
 
   /// Reads the normalised codec of `url`'s first audio track, or `nil` if it has none --
   /// mirrors `TransformerEngine.readAudioCodec` (Android), since `MediaInfoMessage` has no
-  /// audio-codec field of its own.
-  private static func readAudioCodec(at url: URL) async -> String? {
+  /// audio-codec field of its own. Not `private`: also called from the `resolvePlan` overload
+  /// above, which `Compression`'s pre-flight free-space check uses.
+  static func readAudioCodec(at url: URL) async -> String? {
     let asset = AVURLAsset(url: url)
     do {
       let track: AVAssetTrack?
