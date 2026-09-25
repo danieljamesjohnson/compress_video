@@ -4,6 +4,7 @@
 // corpus sidecar rather than hard-coded here, exactly like media_info_test.dart and
 // thumbnail_test.dart, so this file and the sidecar can never silently drift apart.
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -14,6 +15,52 @@ import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates one `CompressResult`-shaped record per named compression case under a single
+/// "compression" top-level key (03-08, D-16) -- the compression counterpart of
+/// media_info_test.dart's `_parityRecords`. A compression CASE is not the same thing as a
+/// corpus CLIP, so `tool/check_parity.sh` does not look its tolerance up from a clip sidecar:
+/// each record embeds its own `durationToleranceMs` directly, read from whichever sidecar this
+/// case's own assertions already use. Only genuinely deterministic fields are recorded --
+/// dimensions, codecs, the three shortcut flags, and duration within tolerance -- plus
+/// `outputBytes`/`elapsedMs` in a separate, explicitly tolerant sense (`tool/check_parity.sh`
+/// applies a documented +/-50% envelope to `outputBytes` and never compares `elapsedMs` at
+/// all): the two engines legitimately produce different bytes and take different time by
+/// design (corpus/README.md). Keyed by case name in a [SplayTreeMap] so the emitted JSON is
+/// byte-comparable between platforms regardless of test execution order.
+final SplayTreeMap<String, dynamic> _compressionParity =
+    SplayTreeMap<String, dynamic>();
+
+void _recordCompressionParity(
+  String caseName, {
+  int? widthPx,
+  int? heightPx,
+  String? videoCodec,
+  String? audioCodec,
+  bool? transmuxed,
+  bool? usedOriginal,
+  bool? audioReencoded,
+  int? durationMs,
+  int? durationToleranceMs,
+  int? outputBytes,
+  int? elapsedMs,
+}) {
+  final SplayTreeMap<String, dynamic> record = SplayTreeMap<String, dynamic>();
+  if (widthPx != null) record['widthPx'] = widthPx;
+  if (heightPx != null) record['heightPx'] = heightPx;
+  if (videoCodec != null) record['videoCodec'] = videoCodec;
+  if (audioCodec != null) record['audioCodec'] = audioCodec;
+  if (transmuxed != null) record['transmuxed'] = transmuxed;
+  if (usedOriginal != null) record['usedOriginal'] = usedOriginal;
+  if (audioReencoded != null) record['audioReencoded'] = audioReencoded;
+  if (durationMs != null) record['durationMs'] = durationMs;
+  if (durationToleranceMs != null) {
+    record['durationToleranceMs'] = durationToleranceMs;
+  }
+  if (outputBytes != null) record['outputBytes'] = outputBytes;
+  if (elapsedMs != null) record['elapsedMs'] = elapsedMs;
+  _compressionParity[caseName] = record;
+}
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform compress call reads from a real file path, not
@@ -187,6 +234,16 @@ void main() {
 
   const CompressVideo compressVideo = CompressVideo();
 
+  // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
+  // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
+  // own PARITY_JSON lines from this same suite.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print(
+      'PARITY_JSON ${jsonEncode(<String, dynamic>{'compression': _compressionParity})}',
+    );
+  });
+
   testWidgets(
     'compressing the high-bitrate portrait clip with default options produces a '
     'strictly smaller, upright, re-encoded H.264+AAC MP4',
@@ -270,6 +327,21 @@ void main() {
       for (final double value in progressValues) {
         expect(value, inInclusiveRange(0, 100));
       }
+
+      _recordCompressionParity(
+        'compress_default_reencode',
+        widthPx: result.widthPx,
+        heightPx: result.heightPx,
+        videoCodec: result.videoCodec,
+        audioCodec: result.audioCodec,
+        transmuxed: result.transmuxed,
+        usedOriginal: result.usedOriginal,
+        audioReencoded: result.audioReencoded,
+        durationMs: result.durationMs,
+        durationToleranceMs: durationToleranceMs,
+        outputBytes: result.outputBytes,
+        elapsedMs: result.elapsedMs,
+      );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
@@ -683,6 +755,21 @@ void main() {
         // The input itself must never be touched, including on this path.
         expect(await inputFile.length(), inputLengthBeforeCompress);
         expect(await inputFile.lastModified(), inputModifiedBeforeCompress);
+
+        _recordCompressionParity(
+          'compress_never_larger',
+          widthPx: result.widthPx,
+          heightPx: result.heightPx,
+          videoCodec: result.videoCodec,
+          audioCodec: result.audioCodec,
+          transmuxed: result.transmuxed,
+          usedOriginal: result.usedOriginal,
+          audioReencoded: result.audioReencoded,
+          durationMs: result.durationMs,
+          durationToleranceMs: crossPlatform['durationToleranceMs'] as int,
+          outputBytes: result.outputBytes,
+          elapsedMs: result.elapsedMs,
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
@@ -738,6 +825,21 @@ void main() {
             expectedDurationMs.toDouble(),
             durationToleranceMs.toDouble(),
           ),
+        );
+
+        _recordCompressionParity(
+          'compress_transmux',
+          widthPx: result.widthPx,
+          heightPx: result.heightPx,
+          videoCodec: result.videoCodec,
+          audioCodec: result.audioCodec,
+          transmuxed: result.transmuxed,
+          usedOriginal: result.usedOriginal,
+          audioReencoded: result.audioReencoded,
+          durationMs: result.durationMs,
+          durationToleranceMs: durationToleranceMs,
+          outputBytes: result.outputBytes,
+          elapsedMs: result.elapsedMs,
         );
       },
       timeout: const Timeout(Duration(seconds: 20)),
@@ -986,6 +1088,21 @@ void main() {
           );
 
           expect(deltaMs, lessThanOrEqualTo(toleranceMs.toDouble()));
+
+          _recordCompressionParity(
+            'compress_trim_10s',
+            widthPx: result.widthPx,
+            heightPx: result.heightPx,
+            videoCodec: result.videoCodec,
+            audioCodec: result.audioCodec,
+            transmuxed: result.transmuxed,
+            usedOriginal: result.usedOriginal,
+            audioReencoded: result.audioReencoded,
+            durationMs: result.durationMs,
+            durationToleranceMs: toleranceMs,
+            outputBytes: result.outputBytes,
+            elapsedMs: result.elapsedMs,
+          );
         },
         timeout: const Timeout(Duration(seconds: 20)),
       );

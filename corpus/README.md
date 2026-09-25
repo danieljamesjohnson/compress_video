@@ -242,3 +242,76 @@ these four values from the sidecar; none of them is ever hardcoded in a test. `v
 also refuses to derive this block if `endMs` is not strictly greater than `startMs`, or if `endMs`
 lands within 500ms of the clip's own measured duration — a trim range that runs off (or nearly
 off) the end of the source would make the duration assertion prove nothing.
+
+## The parity gate widens to compression results (03-08, D-16)
+
+`media_info_test.dart`/`thumbnail_test.dart` are not the only suites `tool/check_parity.sh`
+diffs. `compress_test.dart`, `compress_audio_test.dart`, `compress_jobs_test.dart` and
+`compress_output_test.dart` each accumulate their own `_compressionParity` records and print one
+`PARITY_JSON {"compression": {...}}` line in their own `tearDownAll`. Because a compression CASE
+is not the same thing as a corpus CLIP, these records do not look their tolerance up from a
+`$clip.expected.json` sidecar by name; each record instead carries its own `durationToleranceMs`
+directly (the test itself already reads that value from whichever sidecar the case's underlying
+clip has, exactly as every other duration assertion in this repo does). `tool/check_parity.sh`
+merges every suite's own `compression` object into one combined case-name → record map (`jq`'s
+`*` operator does this as a deep merge, not `+`'s shallow one), requires the same case names on
+every platform (a case present on only one is a FATAL, never a silent skip — T-03-35), and then
+applies:
+
+- **Exact fields:** `widthPx`, `heightPx`, `videoCodec`, `audioCodec`, `transmuxed`,
+  `usedOriginal`, `audioReencoded`, `channels`, `reason`, `durationToleranceMs`, `wouldTransmux`,
+  `wouldUseOriginal` — every one of these is either a discrete flag/enum/string or itself a
+  shared, identically-derived constant, so no platform difference is legitimate here.
+- **`durationMs`:** tolerance-based, against the record's own embedded `durationToleranceMs`
+  (not a corpus lookup).
+- **`outputBytes`:** intentionally NOT exact. The two engines legitimately produce different byte
+  counts by design (different encoders, different rate control) — this field is compared with a
+  documented **±50% envelope** (the smaller value must be at least half the larger): a tenfold
+  regression still fails, a legitimate encoder difference does not.
+- **`elapsedMs`:** recorded for the log only. Never compared at all — wall-clock time depends
+  entirely on hardware (a software simulator encoder versus a real Video Toolbox chip versus an
+  emulator's software codec), which is not a parity question this gate can meaningfully answer.
+
+`tool/check_parity_test.sh` proves this in both directions with hand-written fixtures for every
+new field kind, including one deliberately flipped `transmuxed` flag demonstrating the gate
+actually catches a real divergence (T-03-36), before any of it is trusted against a real CI
+artifact.
+
+### `videoBitrateBps` is deliberately NOT a gated field
+
+`doc/PRESETS.md`'s Apple section measured a real, expected cross-platform divergence in the
+*opposite direction* from Android's own measured divergence: Android's emulator software encoder
+undershoots a preset's nominal bitrate target (down to ~71% at `p1080`), while both Apple devices
+(iOS Simulator and the macOS host) *overshoot* it (103–110%). Both are legitimate, measured
+encoder-delivery characteristics, not a `SizeGuard` formula bug (`SizeGuardTest.kt`'s Swift twin
+proves the formula itself is exact and platform-independent on both sides). This plan does not
+add a `videoBitrateBps` field to the compression `PARITY_JSON` schema at all: a tolerance wide
+enough to span roughly a 30-40 percentage-point spread in both directions would be too loose to
+catch a real regression in either direction, and the measured numbers already live in
+`doc/PRESETS.md`, which is the right place for a MEASURED comparison table, not a pass/fail gate.
+If a future phase adds this field, it must span both directions (Android's undershoot AND
+Apple's overshoot), per `doc/PRESETS.md`'s own flagged note.
+
+### The `truncated_mdat.mp4` error-reason divergence is deliberately NOT gated (arbitration)
+
+03-06 recorded a real, measured cross-platform difference for the one damaged-file fixture in
+this corpus: compressing `truncated_mdat.mp4` fails with reason `io` (platform code 2000, "Asset
+loader error") on the Android emulator, and with reason `unsupportedInput` (platform code
+-11880, "Invalid sample cursor") on Apple (03-06-SUMMARY.md), and asked this plan to arbitrate
+whether the parity contract should force one bucket or document the difference.
+
+**Decision: document the difference; do not force agreement.** Both mappings are independently
+correct, deliberate readings of a genuinely different native diagnostic for the same damaged
+file — Android's Media3 surfaces a generic asset-loader I/O failure, while AVFoundation's more
+specific "invalid sample cursor" is the correctly-verified mapping `ErrorMapping.swift` uses
+(matched by raw `AVError.Code` value, not a guessed case name — 03-06-SUMMARY.md). Neither
+platform is "wrong": forcing them to agree would mean either re-mapping Android's `io` result to
+`unsupportedInput` on a fixture that genuinely IS a low-level I/O read failure there, or
+re-mapping Apple's more specific diagnostic down to a vaguer `io` bucket — both would trade a
+real, verified per-platform mapping for a false cross-platform agreement. `compress_jobs_test.dart`
+therefore intentionally never emits a `PARITY_JSON` record for the `truncated_mdat.mp4` case at
+all (see that file's own header comment); only the two error-reason cases this project's own
+tests ALREADY assert are identical on every platform (`fileNotFound` for a missing path,
+`unsupportedInput` for a zero-byte file) are recorded and gated. This mirrors `small_480p`'s
+duration-delta resolution above: a platform is only "fixed" to match the other when one is
+demonstrably wrong, and here neither is.

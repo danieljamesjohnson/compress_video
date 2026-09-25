@@ -11,6 +11,8 @@
 // applies to pixels for orientation. `_readMp4AudioTrackInfo` below walks the ISO/IEC 14496-12
 // box tree (moov -> trak(soun) -> mdia -> minf -> stbl -> stsd/stsz) to read the `mp4a` sample
 // entry's channel count and sum the audio track's own sample byte sizes directly.
+import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -18,6 +20,29 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates one record per named audio-mode compression case under a "compression" top-level
+/// key (03-08, D-16) -- this file's own copy of compress_test.dart's `_compressionParity`
+/// accumulator, matching this project's per-file convention for small test helpers (see this
+/// file's own header comment on `_readMp4AudioTrackInfo`). Only genuinely deterministic fields
+/// are recorded: `audioReencoded`, `audioCodec` and, where a specific channel count was
+/// requested, `channels` -- never the measured bitrate itself, which is explicitly tolerant
+/// (+/-25%, per this file's own assertions) and not part of the cross-platform contract.
+final SplayTreeMap<String, dynamic> _compressionParity =
+    SplayTreeMap<String, dynamic>();
+
+void _recordCompressionParity(
+  String caseName, {
+  String? audioCodec,
+  bool? audioReencoded,
+  int? channels,
+}) {
+  final SplayTreeMap<String, dynamic> record = SplayTreeMap<String, dynamic>();
+  if (audioCodec != null) record['audioCodec'] = audioCodec;
+  if (audioReencoded != null) record['audioReencoded'] = audioReencoded;
+  if (channels != null) record['channels'] = channels;
+  _compressionParity[caseName] = record;
+}
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform compress call reads from a real file path, not
@@ -328,6 +353,16 @@ void main() {
     'audio_hibitrate_${DateTime.now().microsecondsSinceEpoch}.mp4',
   );
 
+  // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
+  // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
+  // own PARITY_JSON lines from this same suite.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print(
+      'PARITY_JSON ${jsonEncode(<String, dynamic>{'compression': _compressionParity})}',
+    );
+  });
+
   testWidgets(
     'default options (AudioPassthrough) on an AAC source copy the audio track: '
     'audioReencoded is false, audioCodec is aac, and the output still has audio',
@@ -343,6 +378,12 @@ void main() {
         result.outputPath,
       );
       expect(outputInfo.hasAudio, isTrue);
+
+      _recordCompressionParity(
+        'audio_passthrough',
+        audioCodec: result.audioCodec,
+        audioReencoded: result.audioReencoded,
+      );
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
@@ -425,6 +466,13 @@ void main() {
         lessThanOrEqualTo(0.25),
         reason: 'measured $measuredBps bps vs requested 64000 bps',
       );
+
+      _recordCompressionParity(
+        'audio_reencode_2ch',
+        audioCodec: result.audioCodec,
+        audioReencoded: result.audioReencoded,
+        channels: info.channelCount,
+      );
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
@@ -447,6 +495,13 @@ void main() {
       );
       expect(info, isNotNull);
       expect(info!.channelCount, 1);
+
+      _recordCompressionParity(
+        'audio_reencode_1ch',
+        audioCodec: result.audioCodec,
+        audioReencoded: result.audioReencoded,
+        channels: info.channelCount,
+      );
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
@@ -483,6 +538,12 @@ void main() {
 
       expect(result.audioCodec, isNull);
       expect(result.audioReencoded, isFalse);
+
+      _recordCompressionParity(
+        'audio_no_track',
+        audioCodec: result.audioCodec,
+        audioReencoded: result.audioReencoded,
+      );
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );

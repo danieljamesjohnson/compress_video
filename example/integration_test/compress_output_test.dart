@@ -6,6 +6,8 @@
 // (02-05-PLAN.md task 2, 02-06-PLAN.md task 3). The placement/clearCache group proves where this
 // plugin writes and what clearCache() is, and is not, allowed to delete.
 import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -13,6 +15,34 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates one record per named estimate()/result-agreement case under a "compression"
+/// top-level key (03-08, D-16) -- this file's own copy of compress_test.dart's
+/// `_compressionParity` accumulator. Only the boolean shortcut predicates this file's own
+/// "estimate(): prediction agreement" group already asserts are recorded -- `estimate()`'s and
+/// the real job's `wouldTransmux`/`transmuxed` and `wouldUseOriginal`/`usedOriginal` flags are
+/// genuinely deterministic and platform-independent by design (the same `SizeGuard`/
+/// `resolvePlan` resolution both calls share); the predicted byte count and elapsed time are not
+/// recorded here at all -- those are exactly the values `doc/PRESETS.md` already measures and
+/// publishes per platform, not a pass/fail parity gate.
+final SplayTreeMap<String, dynamic> _compressionParity =
+    SplayTreeMap<String, dynamic>();
+
+void _recordCompressionParity(
+  String caseName, {
+  required bool transmuxed,
+  required bool usedOriginal,
+  required bool wouldTransmux,
+  required bool wouldUseOriginal,
+}) {
+  _compressionParity[caseName] =
+      SplayTreeMap<String, dynamic>.from(<String, dynamic>{
+        'transmuxed': transmuxed,
+        'usedOriginal': usedOriginal,
+        'wouldTransmux': wouldTransmux,
+        'wouldUseOriginal': wouldUseOriginal,
+      });
+}
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform compress/estimate call reads from a real file path,
@@ -78,6 +108,16 @@ void main() {
   // guard at all.
 
   const CompressVideo compressVideo = CompressVideo();
+
+  // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
+  // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
+  // own PARITY_JSON lines from this same suite.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print(
+      'PARITY_JSON ${jsonEncode(<String, dynamic>{'compression': _compressionParity})}',
+    );
+  });
 
   group('estimate(): accuracy against the real encode', () {
     // The plan's own documented target is plus-or-minus 15 percent (INFO-03). Measured live on
@@ -188,6 +228,14 @@ void main() {
 
         expect(estimate.wouldTransmux, isTrue);
         expect(result.transmuxed, isTrue);
+
+        _recordCompressionParity(
+          'output_transmux_agreement',
+          transmuxed: result.transmuxed,
+          usedOriginal: result.usedOriginal,
+          wouldTransmux: estimate.wouldTransmux,
+          wouldUseOriginal: estimate.wouldUseOriginal,
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
@@ -219,6 +267,14 @@ void main() {
 
         expect(estimate.wouldUseOriginal, isTrue);
         expect(result.usedOriginal, isTrue);
+
+        _recordCompressionParity(
+          'output_never_larger_agreement',
+          transmuxed: result.transmuxed,
+          usedOriginal: result.usedOriginal,
+          wouldTransmux: estimate.wouldTransmux,
+          wouldUseOriginal: estimate.wouldUseOriginal,
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
@@ -250,6 +306,14 @@ void main() {
         expect(result.transmuxed, isFalse);
         expect(estimate.wouldUseOriginal, isFalse);
         expect(result.usedOriginal, isFalse);
+
+        _recordCompressionParity(
+          'output_genuine_encode',
+          transmuxed: result.transmuxed,
+          usedOriginal: result.usedOriginal,
+          wouldTransmux: estimate.wouldTransmux,
+          wouldUseOriginal: estimate.wouldUseOriginal,
+        );
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );

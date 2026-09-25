@@ -5,6 +5,8 @@
 // sidecar exactly like compress_test.dart, so this file and the sidecar can never silently drift
 // apart.
 import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -12,6 +14,27 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates one record per named typed-error-reason case under a "compression" top-level key
+/// (03-08, D-16) -- this file's own copy of compress_test.dart's `_compressionParity`
+/// accumulator. Only the two error reasons this file's own "Real failures" group already
+/// asserts are IDENTICAL on every platform (`fileNotFound` for a missing path, `unsupportedInput`
+/// for a zero-byte file) are recorded here. The `truncated_mdat.mp4` case is deliberately NOT
+/// recorded: this project's own parity arbitration (corpus/README.md, carried from
+/// 03-06-SUMMARY.md) is that Android's `io`/2000 and Apple's `unsupportedInput`/-11880 are both
+/// correct, platform-specific mappings of a genuinely different native diagnostic for the same
+/// damaged file, not a bug -- forcing that pair to agree would misclassify whichever platform's
+/// mapping happened to be declared "wrong" by fiat. Progress and cancellation, this file's other
+/// two groups, are inherently timing-dependent and have no genuinely cross-platform value to
+/// record.
+final SplayTreeMap<String, dynamic> _compressionParity =
+    SplayTreeMap<String, dynamic>();
+
+void _recordCompressionParity(String caseName, {required String reason}) {
+  _compressionParity[caseName] = SplayTreeMap<String, dynamic>.from(
+    <String, dynamic>{'reason': reason},
+  );
+}
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform compress call reads from a real file path, not
@@ -76,6 +99,16 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   const CompressVideo compressVideo = CompressVideo();
+
+  // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
+  // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
+  // own PARITY_JSON lines from this same suite.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print(
+      'PARITY_JSON ${jsonEncode(<String, dynamic>{'compression': _compressionParity})}',
+    );
+  });
 
   group('Per-job progress: ordering, range and a single terminal 100', () {
     testWidgets(
@@ -466,6 +499,11 @@ void main() {
           ),
         );
         expect(await File(outputPath).exists(), isFalse);
+
+        _recordCompressionParity(
+          'jobs_missing_file',
+          reason: CompressVideoErrorReason.fileNotFound.name,
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
@@ -500,6 +538,11 @@ void main() {
           ),
         );
         expect(await File(outputPath).exists(), isFalse);
+
+        _recordCompressionParity(
+          'jobs_zero_byte',
+          reason: CompressVideoErrorReason.unsupportedInput.name,
+        );
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
