@@ -454,18 +454,27 @@ jobs:
         # core (darwin/compress_video/Sources/compress_video/) that XCTest just ran above, this
         # time end-to-end through the full Pigeon/Dart stack, so any delta the `parity` job's
         # macOS-vs-iOS comparison finds below is a real bug (one shared core, D-22), never a
-        # legitimate platform difference. `flutter test -d macos` runs the app directly as a
-        # native process rather than tailing a simulator's unified log the way the iOS Simulator
-        # does (see tool/run_ios_integration_suites.sh's own header on why THAT needs a launch
-        # watchdog) -- this step has not shown the same launch-hang failure mode, so it runs the
-        # whole `integration_test/` directory as one `flutter test` invocation with no retry
-        # wrapper. `timeout-minutes` is a backstop, not an expected budget: six suites of real
-        # encodes on this runner's own Apple Silicon measured in single-digit minutes locally.
+        # legitimate platform difference.
+        #
+        # CI run 36195780910 tried the obvious single invocation (`flutter test integration_test
+        # -d macos`, one process covering all six suites) and it failed: the first suite
+        # (compress_audio_test.dart) passed, then every remaining suite hit "Error waiting for a
+        # debug connection: The log reader stopped unexpectedly, or never started." followed by
+        # "Unable to start the app on the device." -- macOS's `open` re-activates the FIRST
+        # suite's still-running app instance instead of launching a fresh one, so no new
+        # VM-service port ever opens (flutter/flutter#101854, #118532). This is the macOS-desktop
+        # flavour of the exact upstream launch flake tool/run_ios_integration_suites.sh already
+        # survives for the iOS Simulator, so it now also drives the macOS runs: one `flutter
+        # test <suite> -d macos` process per suite, a watchdog that classifies the shape above as
+        # a retryable launch failure (not a genuine test failure), and -- the actual fix, since
+        # this watchdog's own process-group kill cannot reach an app `open` already handed off to
+        # launchd -- a `pkill` of any leftover app instance before every suite, not only after a
+        # failed attempt. `timeout-minutes` is a backstop, not an expected budget: six suites of
+        # real encodes on this runner's own Apple Silicon measured in single-digit minutes
+        # locally, before this failure mode was found.
         working-directory: example
         timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          flutter test integration_test -d macos --timeout 120s | tee /tmp/macos_integration.log
+        run: LOG=/tmp/macos_integration.log bash ../tool/run_ios_integration_suites.sh macos
 
       - name: Extract cross-platform parity records (macOS)
         # Captures the PARITY_JSON lines the macOS run above emitted, for the `parity` job

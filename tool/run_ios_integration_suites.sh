@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Runs the corpus integration suites on one iOS simulator, one `flutter test` process per
-# suite, with a launch watchdog that makes a hosted-simulator launch hang cheap and visible.
+# Runs the corpus integration suites on one iOS simulator OR the macOS desktop target, one
+# `flutter test` process per suite, with a launch watchdog that makes a hosted-runner launch
+# hang cheap and visible.
 #
-# Usage: tool/run_ios_integration_suites.sh <simulator-udid> [suite.dart ...]
+# Usage: tool/run_ios_integration_suites.sh <simulator-udid | macos> [suite.dart ...]
 #   Combined output of every attempt is appended to $LOG (default /tmp/apple_integration.log)
-#   so the CI step that follows can grep the PARITY_JSON records out of it.
+#   so the CI step that follows can grep the PARITY_JSON records out of it. Pass the literal
+#   device id `macos` (as `flutter test -d macos` itself expects) to run against the macOS
+#   desktop target instead of an iOS simulator UDID.
 #
-# Why a watchdog at all: `flutter test <suite> -d <sim>` discovers the Dart VM service by
+# Why a watchdog at all (iOS): `flutter test <suite> -d <sim>` discovers the Dart VM service by
 # tailing the simulator's unified log through `xcrun simctl spawn <udid> log stream`
 # (flutter_tools ios/simulators.dart, _IOSSimulatorLogReader). On GitHub's hosted macOS
 # runners that process dies on roughly half of all launches. The tool then prints
@@ -23,11 +26,26 @@
 # compress_audio_test.dart never ran. With phase-aware detection a hang costs one rebuild
 # plus a few seconds (~2 min), which is why the per-suite attempt cap is 8 here and not 5.
 #
+# Why the SAME watchdog for macOS (03-08, CI run 36195780910): `flutter test -d macos` builds
+# and then launches the .app via macOS's `open` command rather than tailing a simulator log,
+# but the failure mode rhymes -- CI run 36195780910's macOS step ran `compress_audio_test.dart`
+# to completion first, then every one of the next five suites hit "Error waiting for a debug
+# connection: The log reader stopped unexpectedly, or never started." followed by "Unable to
+# start the app on the device.": once the first suite's app instance was left running, `open`
+# re-activated the EXISTING instance instead of launching a fresh one, so no new VM-service
+# port ever opened. Reusing this same per-suite-process-plus-watchdog design fixes it two ways:
+# each suite already gets its own fresh `flutter test` invocation (rather than one process
+# covering every suite, which is what actually reused the stale instance), and `reset_device`
+# below additionally kills any leftover app process BEFORE every macOS suite -- necessary
+# because this watchdog's own `kill_tree` cannot reach a macOS app launched via `open`: `open`
+# hands the app off to `launchd` and returns immediately, so it is never a member of the killed
+# `flutter test` process group in the first place.
+#
 # Exit codes: 0 every suite passed; a suite's own `flutter test` exit code when it failed
 # with real test output (a genuine failure -- no retry); 1 when a suite hung on every attempt.
 set -o pipefail
 
-UDID="${1:?usage: $0 <simulator-udid> [suite ...]}"
+UDID="${1:?usage: $0 <simulator-udid | macos> [suite ...]}"
 shift
 if [ "$#" -gt 0 ]; then
   SUITES=("$@")
@@ -51,13 +69,24 @@ RUN_BUDGET="${RUN_BUDGET:-600}"        # seconds for a launched suite to finish
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-8}"
 POLL="${POLL:-5}"
 SIMCTL="${SIMCTL:-xcrun simctl}"
+PKILL="${PKILL:-pkill}"
 
 : > "$LOG"
 
-reset_simulator() {
-  $SIMCTL shutdown "$UDID" || true
-  $SIMCTL boot "$UDID" || true
-  $SIMCTL bootstatus "$UDID" -b || true
+reset_device() {
+  if [ "$UDID" = "macos" ]; then
+    # No simulator to reboot -- the only state to clear is a leftover app process. Match on
+    # the executable name (PRODUCT_NAME in example/macos/Runner/Configs/AppInfo.xcconfig) AND
+    # on the bundle path, since a process can outlive its parent under either identity
+    # depending on how `open`/launchd attached it.
+    "$PKILL" -x compress_video_example 2>/dev/null || true
+    "$PKILL" -f "compress_video_example.app" 2>/dev/null || true
+    sleep 1
+  else
+    $SIMCTL shutdown "$UDID" || true
+    $SIMCTL boot "$UDID" || true
+    $SIMCTL bootstatus "$UDID" -b || true
+  fi
 }
 
 # Number of real test-progress lines ("MM:SS +N[ -M]: <test name>") in $1. `flutter test`'s
@@ -126,20 +155,26 @@ run_attempt() {
   while kill -0 "$pid" 2>/dev/null; do
     sleep "$POLL"
     elapsed=$((elapsed + POLL))
-    # A dead log reader is definitive: the tool has already given up on this launch and
-    # will sit there forever. Do not wait for any budget.
-    if grep -qE 'Error waiting for a debug connection|^No tests ran\.' "$attempt_log"; then
-      give_up "launch failed (log reader died)"
+    # A dead log reader (iOS) or a failed app launch (macOS, CI run 36195780910 -- "Unable to
+    # start the app on the device" from flutter_tools' integration_test_device.dart when `open`
+    # re-activates a leftover instance instead of starting a fresh one) is definitive: the tool
+    # has already given up on this launch and will sit there forever. Do not wait for any budget.
+    if grep -qE 'Error waiting for a debug connection|^No tests ran\.|Unable to start the app on the device' "$attempt_log"; then
+      give_up "launch failed (log reader died or app failed to start)"
       return 99
     fi
     case "$phase" in
       build)
-        if grep -q '^Xcode build done\.' "$attempt_log"; then
+        # iOS builds via `xcodebuild` and prints "Xcode build done."; the macOS desktop target
+        # builds through Flutter's own build system and prints "✓ Built <path>/<app>.app"
+        # instead (CI run 36195780910) -- neither phrasing appears on the other platform, so
+        # matching either is safe and lets one regex cover both device kinds.
+        if grep -qE '^Xcode build done\.|✓ Built ' "$attempt_log"; then
           phase=launch
           elapsed=0
           build_done=$(date +%s)
         elif [ "$elapsed" -ge "$BUILD_BUDGET" ]; then
-              give_up "no 'Xcode build done.' within ${BUILD_BUDGET}s"
+              give_up "no build-done marker within ${BUILD_BUDGET}s"
               return 99
         fi
         ;;
@@ -163,8 +198,19 @@ run_attempt() {
   wait "$pid"
 }
 
-reset_simulator || true
+reset_device || true
 for suite in "${SUITES[@]}"; do
+  # macOS only: kill any leftover app instance BEFORE every suite, not just after a failed
+  # attempt. This is the actual fix for CI run 36195780910 -- suite 1 can succeed and still
+  # leave its app process running (kill_tree cannot reach a process `open` handed off to
+  # launchd), and an existing instance is exactly what makes the NEXT suite's `open` call
+  # re-activate it instead of launching fresh. iOS is left untouched here: a simulator
+  # reboot before every suite would cost real minutes against the 90-minute step budget, and
+  # nothing in the observed iOS failures (all six suites passed in run 36195780910) shows a
+  # need for it.
+  if [ "$UDID" = "macos" ]; then
+    reset_device || true
+  fi
   attempt=1
   while :; do
     attempt_log=$(mktemp)
@@ -183,8 +229,8 @@ for suite in "${SUITES[@]}"; do
       echo "::error::$suite hung at launch on all $attempt attempts (last: $WATCHDOG_NOTE)"
       exit 1
     fi
-    echo "::warning::$suite hung at launch on attempt $attempt -- $WATCHDOG_NOTE; resetting the simulator and retrying"
-    reset_simulator || true
+    echo "::warning::$suite hung at launch on attempt $attempt -- $WATCHDOG_NOTE; resetting and retrying"
+    reset_device || true
     attempt=$((attempt + 1))
   done
 done
