@@ -135,7 +135,7 @@ Plans:
   3. A fresh Flutter app adds the plugin and builds for iOS and macOS with CocoaPods and, separately, with Swift Package Manager. iOS and macOS use one shared Swift core.
   4. The example app runs on Android, iOS and macOS. In it, a user picks a video, sets options, watches live progress, can cancel, and plays the compressed result.
 
-**Plans**: 5/9 plans executed
+**Plans**: 6/9 plans executed
 
 Plans:
 **Wave 1**
@@ -161,7 +161,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 03-07-PLAN.md — Trim within one frame on all three platforms (CORE-07), the shared-resolver estimate, output placement and bounded `clearCache()`, and the measured Apple preset tables
+- [x] 03-07-PLAN.md — Trim within one frame on all three platforms (CORE-07), the shared-resolver estimate, output placement and bounded `clearCache()`, and the measured Apple preset tables
 
 **Wave 7** *(blocked on Waves 2 and 6 completion)*
 
