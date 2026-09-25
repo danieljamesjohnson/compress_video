@@ -392,11 +392,17 @@ jobs:
         # the moment the log-reader error appears, and retries a launch failure up to 8 times
         # from a fresh simulator boot; a suite that produced real test output before failing is
         # a genuine failure and fails fast with no retry. A hang now costs one incremental Xcode
-        # build (~1-2 min) instead of ~12. `timeout-minutes: 60` stays as the outer backstop.
+        # build (~1-2 min) instead of ~12. `timeout-minutes: 90` stays as the outer backstop --
+        # raised from 60 (03-07-PLAN.md task 2) once compress_output_test.dart became this
+        # step's sixth suite: run 36168698223 measured the six-suite step absorbing 12 launch
+        # hangs (~4-5 min apiece including rebuild and simulator reset) and exhausting the old
+        # 60-minute budget before compress_audio_test.dart or compress_output_test.dart got a
+        # turn, even though every suite that DID run was green. This raises the ceiling only --
+        # it does not change the watchdog script's own per-suite/per-phase budgets.
         # tool/run_ios_integration_suites_test.sh replays all of these shapes against a fake
         # `flutter` and is the place to prove any change to the watchdog before pushing it.
         working-directory: example
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: bash ../tool/run_ios_integration_suites.sh "${{ steps.ios_sim.outputs.udid }}"
 
       - name: Extract cross-platform parity records (Apple)
