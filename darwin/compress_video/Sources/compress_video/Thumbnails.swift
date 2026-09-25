@@ -266,8 +266,12 @@ final class Thumbnails: ThumbnailHostApi {
     if let outputPath {
       destinationPath = try Arguments.requireWritableOutputParent(outputPath)
     } else {
-      let cacheDirectory = try cacheSubdirectory()
-      destinationPath = (cacheDirectory as NSString).appendingPathComponent(uniqueThumbnailFileName())
+      // Shares PluginFiles.cacheSubDir() with CompressionEngine's own output placement (D-12)
+      // -- not a second, coincidentally-identical path computation -- so a thumbnail this
+      // plugin wrote is reclaimed by the same Compression.clearCache() sweep as a compression
+      // output, matching what Android's Phase 2 Thumbnails.kt already does.
+      let cacheDirectory = try PluginFiles.cacheSubDir()
+      destinationPath = cacheDirectory.appendingPathComponent(uniqueThumbnailFileName()).path
     }
 
     do {
@@ -281,28 +285,6 @@ final class Thumbnails: ThumbnailHostApi {
     }
 
     return destinationPath
-  }
-
-  /// Returns the path to (creating if necessary) a `compress_video` subdirectory of the
-  /// user's caches directory, which resolves inside the app container for a sandboxed macOS
-  /// app -- the default destination never writes outside it.
-  private func cacheSubdirectory() throws -> String {
-    let fileManager = FileManager.default
-    guard let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
-    else {
-      throw CompressVideoError(code: "io", message: "Could not locate the caches directory", details: nil)
-    }
-    let subDirectory = cachesDirectory.appendingPathComponent("compress_video", isDirectory: true)
-    do {
-      try fileManager.createDirectory(at: subDirectory, withIntermediateDirectories: true)
-    } catch {
-      throw CompressVideoError(
-        code: "io",
-        message: "Could not create the thumbnail cache directory",
-        details: error.localizedDescription
-      )
-    }
-    return subDirectory.path
   }
 
   /// A `.jpg` filename unique per call -- epoch milliseconds plus an 8-character random hex

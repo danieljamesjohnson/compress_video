@@ -69,26 +69,45 @@ final class Compression: CompressHostApi {
     }
   }
 
-  /// Not yet implemented on Apple platforms in this phase -- lands in 03-07, mirroring
-  /// `Compression.kt`'s `estimate()`, which resolves the same `SizeGuard.Plan` the real job
-  /// would use.
+  /// Returns a pre-flight `EstimateMessage` for `request` against `path`, without decoding a
+  /// single frame and without building an `AVAssetReader`/`AVAssetWriter` or export session at
+  /// all.
+  ///
+  /// Validates and probes exactly like `startCompress` does, then resolves the SAME
+  /// `SizeGuard.Plan` via `engine.resolvePlan(inputURL:inputInfo:request:)` that
+  /// `engine.compress` itself resolves internally -- the identical resolver call `03-06`
+  /// already added for the free-space pre-check above -- so this path and a subsequent real
+  /// job can never disagree about the predicted bytes, dimensions, or whether
+  /// `wouldTransmux`/`wouldUseOriginal` would apply (D-11, INFO-03 parity). Mirrors
+  /// `Compression.kt`'s `estimate()`.
   func estimate(path: String, request: CompressRequestMessage) async throws -> EstimateMessage {
-    throw CompressVideoError(
-      code: "unknown",
-      message: "CompressHostApi.estimate is not yet implemented on Apple platforms; lands in 03-07",
-      details: nil
+    try Arguments.requireValidCompressRequest(request)
+    let standardizedPath = try Arguments.requireReadableMediaFile(path)
+    let inputInfo = try await Probe().getMediaInfo(path: standardizedPath)
+
+    let plan = await engine.resolvePlan(
+      inputURL: URL(fileURLWithPath: standardizedPath), inputInfo: inputInfo, request: request)
+
+    return EstimateMessage(
+      outputBytes: plan.predictedOutputBytes,
+      durationMs: plan.outputDurationMs,
+      widthPx: Int64(plan.targetWidthPx),
+      heightPx: Int64(plan.targetHeightPx),
+      wouldTransmux: plan.wouldTransmux,
+      wouldUseOriginal: plan.wouldUseOriginal
     )
   }
 
-  /// Not yet implemented on Apple platforms in this phase -- lands in 03-07, mirroring
-  /// `Compression.kt`'s `clearCache()`, which sweeps `PluginFiles.cacheSubDir()` excluding
-  /// every live job's temp file.
+  /// Deletes every file this plugin has written to its own cache directory, except a file a
+  /// still-running job is currently writing to -- succeeds as a no-op when the directory is
+  /// empty or does not exist yet. Mirrors `Compression.kt`'s `clearCache()`: sweeps
+  /// `PluginFiles.cacheSubDir()` via `PluginFiles.sweep`, excluding every live job's resolved
+  /// temp path (`JobRegistry.liveTempFilePaths()`, read via an explicit `MainActor` hop like
+  /// every other `JobRegistry` access in this file).
   func clearCache() async throws {
-    throw CompressVideoError(
-      code: "unknown",
-      message: "CompressHostApi.clearCache is not yet implemented on Apple platforms; lands in 03-07",
-      details: nil
-    )
+    let cacheDir = try PluginFiles.cacheSubDir()
+    let skip = await MainActor.run { JobRegistry.liveTempFilePaths() }
+    PluginFiles.sweep(cacheDir: cacheDir, skipResolvedPaths: skip)
   }
 
   /// Throws a `CompressVideoError` with reason `"outOfSpace"` when the destination filesystem's
