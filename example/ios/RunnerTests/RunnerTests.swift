@@ -239,6 +239,32 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  /// Regression for CI run 36176323945: a caller-supplied NFC (precomposed) filename must come
+  /// back NFC, not NFD -- `standardizedFileURL`/`resolvingSymlinksInPath()` route the path
+  /// through Apple's file-system representation, which decomposes it, unless the result is
+  /// re-normalised (03-07-PLAN.md task 2's non-ASCII outputPath fix).
+  func testRequireWritableOutputParentPreservesNfcForNonAsciiFilename() throws {
+    let nfcFileName = "vid\u{00E9}o_\u{65E5}\u{672C}\u{8A9E}_output.mp4"  // precomposed "é"
+    let nfdFileName = "vide\u{0301}o_\u{65E5}\u{672C}\u{8A9E}_output.mp4"  // decomposed "e"+"´"
+    // Swift's native String `==` compares by Unicode CANONICAL EQUIVALENCE -- it considers NFC
+    // and NFD forms of the same text EQUAL, which is exactly the distinction this regression is
+    // about, so it cannot be used to prove anything here. NSString.isEqual(to:) instead compares
+    // literal UTF-16 code units (matching Dart's own String equality, which is what actually
+    // observed this bug in compress_output_test.dart's non-ASCII outputPath case), so every
+    // comparison in this test goes through NSString rather than Swift's `==`.
+    XCTAssertFalse(
+      (nfcFileName as NSString).isEqual(to: nfdFileName),
+      "the two literals must differ byte-for-byte for this test to prove anything")
+
+    let outputPath = NSTemporaryDirectory() + nfcFileName
+    let resolved = try Arguments.requireWritableOutputParent(outputPath)
+    let resolvedFileName = (resolved as NSString).lastPathComponent
+
+    XCTAssertTrue(
+      (resolvedFileName as NSString).isEqual(to: nfcFileName),
+      "the returned filename must stay byte-identical NFC, not decompose to NFD")
+  }
+
   // MARK: - Arguments pure validators
 
   func testValidatePositionMsNegativeRejectedAsUnsupportedInput() {

@@ -304,12 +304,25 @@ enum Arguments {
   /// the same "canonicalise the existing prefix, append the rest" behaviour Java's
   /// `File.canonicalFile` gives on the Kotlin side for a not-yet-existing output path -- rather
   /// than silently skipping symlink resolution altogether for the entire path.
+  ///
+  /// The result is Unicode-normalised to NFC (`precomposedStringWithCanonicalMapping`) before
+  /// being returned. `URL(fileURLWithPath:)`/`standardizedFileURL`/`resolvingSymlinksInPath()`
+  /// route a path through Apple's file-system-representation conversion, which decomposes
+  /// precomposed characters into NFD -- confirmed live on CI (run 36176323945): a caller-
+  /// supplied `vidéo_日本語_output.mp4` (NFC, as any normal Dart string literal is) came back
+  /// from this function, and therefore from `CompressResultMessage.outputPath`, byte-different
+  /// at the "é" despite looking and printing identically. Both filesystems this project targets
+  /// treat NFC and NFD forms of the same name as the same file for lookup purposes (confirmed by
+  /// the same failing test's `resolveSymbolicLinksSync()` comparison passing either way), so
+  /// normalising back to NFC here changes nothing about which file is written or read -- it only
+  /// restores the byte sequence the caller (and Android's `File.canonicalFile`, which performs
+  /// no such conversion at all) would otherwise expect back unchanged.
   private static func standardizedAbsolutePath(_ path: String) -> String {
     let standardizedURL = URL(fileURLWithPath: path).standardizedFileURL
     let fileManager = FileManager.default
 
     if fileManager.fileExists(atPath: standardizedURL.path) {
-      return standardizedURL.resolvingSymlinksInPath().path
+      return standardizedURL.resolvingSymlinksInPath().path.precomposedStringWithCanonicalMapping
     }
 
     // Walk up from the full path to the nearest existing ancestor, resolve symlinks in that
@@ -325,6 +338,6 @@ enum Arguments {
     for component in suffixComponents.reversed() {
       resolved = resolved.appendingPathComponent(component)
     }
-    return resolved.standardizedFileURL.path
+    return resolved.standardizedFileURL.path.precomposedStringWithCanonicalMapping
   }
 }
