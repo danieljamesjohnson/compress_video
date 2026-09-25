@@ -251,28 +251,41 @@ enum Arguments {
   /// Mirrors the Dart-side checks deliberately: the Dart side gives a fast local failure
   /// without crossing the channel, while this is the authority for any caller that reaches the
   /// generated host API another way.
+  ///
+  /// Written as a list of checks walked in order rather than one `??` chain: a ten-term
+  /// `??` expression over `String?` is exactly the shape Swift's type-checker gives up on
+  /// ("unable to type-check this expression in reasonable time") -- it compiled on CI's
+  /// runner but failed on the MacBook Air (03-01 task 1, 2026-09-25), because the limit is
+  /// wall-clock and therefore machine-dependent.
   static func requireValidCompressRequest(_ request: CompressRequestMessage) throws {
-    let violatedReason =
-      validateMaxFps(request.maxFps)
-      ?? validateMaxLongSidePx(request.maxLongSidePx)
-      ?? validateVideoBitrateBps(request.videoBitrateBps)
-      ?? validateTargetSizeMb(request.targetSizeMb)
-      ?? validateSizeTargetsNotContradictory(
-        targetSizeMb: request.targetSizeMb, videoBitrateBps: request.videoBitrateBps)
-      ?? validateTrimRange(trimStartMs: request.trimStartMs, trimEndMs: request.trimEndMs)
-      ?? validateOutputPath(request.outputPath)
-      ?? validateVideoCodec(request.videoCodec)
-      ?? validateHdrMode(request.hdrMode)
-      ?? validateAudioReencode(
-        audioMode: request.audioMode,
-        audioBitrateBps: request.audioBitrateBps,
-        audioChannels: request.audioChannels)
-    if let violatedReason {
-      throw CompressVideoError(
-        code: violatedReason,
-        message: "Invalid compress request argument",
-        details: nil
-      )
+    let checks: [() -> String?] = [
+      { validateMaxFps(request.maxFps) },
+      { validateMaxLongSidePx(request.maxLongSidePx) },
+      { validateVideoBitrateBps(request.videoBitrateBps) },
+      { validateTargetSizeMb(request.targetSizeMb) },
+      {
+        validateSizeTargetsNotContradictory(
+          targetSizeMb: request.targetSizeMb, videoBitrateBps: request.videoBitrateBps)
+      },
+      { validateTrimRange(trimStartMs: request.trimStartMs, trimEndMs: request.trimEndMs) },
+      { validateOutputPath(request.outputPath) },
+      { validateVideoCodec(request.videoCodec) },
+      { validateHdrMode(request.hdrMode) },
+      {
+        validateAudioReencode(
+          audioMode: request.audioMode,
+          audioBitrateBps: request.audioBitrateBps,
+          audioChannels: request.audioChannels)
+      },
+    ]
+    for check in checks {
+      if let violatedReason = check() {
+        throw CompressVideoError(
+          code: violatedReason,
+          message: "Invalid compress request argument",
+          details: nil
+        )
+      }
     }
   }
 
