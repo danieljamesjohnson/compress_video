@@ -181,9 +181,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   // The Apple engine (AVAssetReader/AVAssetWriter) landed in Phase 3 (03-04-PLAN.md); this
-  // suite now runs on all three platforms. Transmux, audio re-encode/strip and trim-exactness
-  // are not yet implemented on Apple -- see 03-04-SUMMARY.md for exactly which cases below
-  // pass on iOS/macOS today and which remain for 03-05/03-07.
+  // suite runs on all three platforms. Transmux and audio re-encode/strip landed in 03-05,
+  // trim exactness (the 2000-7000ms sidecar-driven case below) in 03-07 -- every case in this
+  // file now runs unskipped on iOS and macOS.
 
   const CompressVideo compressVideo = CompressVideo();
 
