@@ -1,3 +1,4 @@
+import AVFoundation
 #if os(iOS)
   import Flutter
   import UIKit
@@ -827,10 +828,10 @@ class RunnerTests: XCTestCase {
   // real case names (03-RESEARCH.md Pitfall 6) -- NOT the CONTEXT.md-prose
   // `.decoderNotAvailable`/`.encoderNotAvailable`, which do not exist.
 
-  func testKnownAVErrorCodesHasExactlyTwelveEntries() {
+  func testKnownAVErrorCodesHasExactlyThirteenEntries() {
     // Fails the whole suite if a code is ever added to knownAVErrorCodes without a
     // corresponding case below -- mirrors ErrorMappingTest.kt's own acceptance criterion.
-    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 12)
+    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 13)
   }
 
   func testReasonForAVErrorDecoderNotFoundMapsToDecoderUnavailable() {
@@ -884,6 +885,16 @@ class RunnerTests: XCTestCase {
     // an audio output-settings dictionary that had already passed writer.canApply(...).
     XCTAssertEqual(
       ErrorMapping.reasonForAVError(.unsupportedOutputSettings), "encoderUnavailable")
+  }
+
+  func testReasonForAVErrorInvalidSampleCursorMapsToUnsupportedInput() {
+    // -11880 ("Invalid sample cursor"), confirmed live in CI run 36151081384 reading a
+    // genuinely damaged/truncated MP4 (truncated_mdat.mp4) -- not a named case literal here
+    // (03-06-PLAN.md/ErrorMapping.swift's own doc comment: the exact Swift case name for this
+    // raw value was never independently confirmed), so this test matches the way
+    // ErrorMapping.swift itself does: by raw value.
+    XCTAssertEqual(
+      ErrorMapping.reasonForAVError(AVError.Code(rawValue: -11880)!), "unsupportedInput")
   }
 
   func testReasonForAVErrorUnmappedCodeMapsToUnknown() {

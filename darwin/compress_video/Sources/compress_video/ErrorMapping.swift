@@ -35,7 +35,21 @@ enum ErrorMapping {
     .sessionNotRunning,
     .outOfMemory,
     .unsupportedOutputSettings,
+    invalidSampleCursor,
   ]
+
+  /// AVFoundation's "Invalid sample cursor" error (-11880) -- observed live reading a
+  /// genuinely damaged/truncated MP4 (`truncated_mdat.mp4`, CI run 36151081384: a real
+  /// `AVAssetReader` surfaced this reading past the file's truncated `mdat` box). Constructed
+  /// by RAW VALUE rather than a named case literal like `.unsupportedOutputSettings` above:
+  /// this exact case's Swift name was not independently confirmed against 03-RESEARCH.md's
+  /// Pitfall 6 caution against guessing AVFoundation case names by analogy, and matching by the
+  /// integer this SDK's own `AVError.Code(rawValue:)` already accepted (proven live by this
+  /// exact failure reaching `reasonForAVError` with a non-nil `code` at all,
+  /// `CompressionEngine.mapToCompressVideoError`) avoids the compile-time risk of a guessed
+  /// name that may not exist on this project's iOS 13/macOS 11 deployment floor. Force-unwrapped
+  /// because that same live observation is proof the initializer succeeds for this raw value.
+  private static let invalidSampleCursor = AVError.Code(rawValue: -11880)!
 
   /// Maps `code` to a `CompressVideoErrorReason` name string (for example
   /// `"decoderUnavailable"`). A code outside `knownAVErrorCodes` returns `"unknown"` -- the
@@ -43,6 +57,17 @@ enum ErrorMapping {
   /// `CompressVideoException`'s own `reasonFromPlatformCode` round trip already does for a
   /// reason name this Dart version does not recognise.
   static func reasonForAVError(_ code: AVError.Code) -> String {
+    // `invalidSampleCursor` is a raw-value-constructed `let`, not a declared enum case name --
+    // a bare `case invalidSampleCursor:` inside the switch below would be parsed as a NEW
+    // catch-all BINDING (Swift only treats a lowercase switch-case identifier as an existing
+    // case reference when it names a real case of the switched type), silently matching every
+    // code before `default` ever runs. Checked here, ahead of the switch, instead.
+    if code == invalidSampleCursor {
+      // -11880 ("Invalid sample cursor"): observed live reading a genuinely damaged/truncated
+      // MP4 (CI run 36151081384) -- a malformed sample table is unsupported input, the same
+      // bucket .fileFormatNotRecognized/.fileFailedToParse/.decodeFailed already fall into.
+      return "unsupportedInput"
+    }
     switch code {
     case .decoderNotFound, .decoderTemporarilyUnavailable:
       return "decoderUnavailable"

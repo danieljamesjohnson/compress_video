@@ -920,9 +920,19 @@ final class CompressionEngine {
     // but currently-unlisted code) falls through to the generic "io" branch below rather than
     // crashing on a forced unwrap.
     if nsError.domain == AVFoundationErrorDomain, let code = AVError.Code(rawValue: nsError.code) {
+      // "code \(magnitude)" (positive, no sign) is a SEPARATE, deliberately-shaped phrase from
+      // the signed raw value earlier in the same string -- CompressVideoException's own
+      // codeIsObservable contract (compress_jobs_test.dart, mirroring 02-06's
+      // numeric-code-in-message rule) greps the message for the literal pattern `code \d+`,
+      // which a bare negative AVFoundation code (`error -11880`) never matches (the `-` sits
+      // between "code " and the digits). This is what makes a RECOGNISED reason's numeric code
+      // observable from Dart even though CompressVideoException.platformDetail is reserved for
+      // an UNRECOGNISED reason string instead (see ErrorMapping's own doc comment).
+      let magnitude = abs(nsError.code)
       return CompressVideoError(
         code: ErrorMapping.reasonForAVError(code),
-        message: "AVFoundation error \(nsError.code): \(nsError.localizedDescription)",
+        message:
+          "AVFoundation error \(nsError.code) (code \(magnitude)): \(nsError.localizedDescription)",
         details: nsError.localizedDescription
       )
     }
