@@ -934,6 +934,7 @@ void main() {
           // logs carry the real number Pitfall 7/Open Question 1 asked for: if
           // AVAssetReader.timeRange's keyframe-seek-then-discard delivered a sample earlier or
           // later than requested, it would show up here as a duration delta beyond one frame.
+          // ignore: avoid_print
           print(
             'TRIM_MEASURED source=portrait_hibitrate_1080p60 requestedStartMs=500 '
             'requestedEndMs=3500 expectedDurationMs=3000 measuredDurationMs=${result.durationMs} '
@@ -976,6 +977,7 @@ void main() {
           // Measured (not assumed) reader behaviour -- 03-RESEARCH.md Pitfall 7/Open Question
           // 1 required this be verified against a real GOP structure rather than trusted from
           // general AVFoundation guidance.
+          // ignore: avoid_print
           print(
             'TRIM_MEASURED source=trim_source_10s requestedStartMs=$startMs '
             'requestedEndMs=$endMs expectedDurationMs=$expectedDurationMs '
