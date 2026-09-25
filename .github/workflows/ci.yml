@@ -449,6 +449,35 @@ jobs:
             -scheme Runner \
             -destination 'platform=macOS'
 
+      - name: Run corpus integration tests on macOS (03-08, D-16/D-22)
+        # The Flutter DESKTOP target, not the iOS Simulator -- exercises the SAME shared Swift
+        # core (darwin/compress_video/Sources/compress_video/) that XCTest just ran above, this
+        # time end-to-end through the full Pigeon/Dart stack, so any delta the `parity` job's
+        # macOS-vs-iOS comparison finds below is a real bug (one shared core, D-22), never a
+        # legitimate platform difference. `flutter test -d macos` runs the app directly as a
+        # native process rather than tailing a simulator's unified log the way the iOS Simulator
+        # does (see tool/run_ios_integration_suites.sh's own header on why THAT needs a launch
+        # watchdog) -- this step has not shown the same launch-hang failure mode, so it runs the
+        # whole `integration_test/` directory as one `flutter test` invocation with no retry
+        # wrapper. `timeout-minutes` is a backstop, not an expected budget: six suites of real
+        # encodes on this runner's own Apple Silicon measured in single-digit minutes locally.
+        working-directory: example
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          flutter test integration_test -d macos --timeout 120s | tee /tmp/macos_integration.log
+
+      - name: Extract cross-platform parity records (macOS)
+        # Captures the PARITY_JSON lines the macOS run above emitted, for the `parity` job
+        # (03-08, D-22) to diff against the iOS simulator's own record from the same shared core.
+        run: grep '^PARITY_JSON ' /tmp/macos_integration.log > /tmp/parity-macos.txt
+
+      - name: Upload macOS parity artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-macos
+          path: /tmp/parity-macos.txt
+
       - name: Measure presets on the macOS host (doc/PRESETS.md, 03-07-PLAN.md task 3)
         # Same procedure as the iOS simulator step above, run against the `macos` device --
         # this run has access to real Video Toolbox hardware encode on the runner's Apple
@@ -472,6 +501,15 @@ jobs:
       - name: Build iOS via Swift Package Manager
         working-directory: example
         run: flutter build ios --simulator --no-codesign
+
+      - name: Build macOS via Swift Package Manager (D-20)
+        # D-20 requires both install paths to build BOTH Apple platforms in CI. The iOS SPM
+        # build above proves one half; this proves macOS's own SPM path with the identical
+        # Swift Package Manager configuration still enabled from the step above (no re-clean
+        # needed -- Package.swift's dependency resolution is per-platform, not a leftover from
+        # the iOS build).
+        working-directory: example
+        run: flutter build macos --debug
 
   parity:
     name: Cross-platform parity
@@ -534,6 +572,20 @@ jobs:
           name: parity-apple
           path: parity-artifacts/apple
 
-      - name: Diff cross-platform parity values (media info + thumbnail)
+      - name: Download macOS parity artifact
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: parity-macos
+          path: parity-artifacts/macos
+
+      - name: Diff cross-platform parity values (Android vs iOS)
         if: steps.gate.outputs.proceed == 'true'
         run: bash tool/check_parity.sh parity-artifacts/android/parity-android.txt parity-artifacts/apple/parity-apple.txt
+
+      - name: Diff cross-platform parity values (macOS vs iOS)
+        # macOS and iOS run the SAME shared Swift core (darwin/compress_video/Sources/
+        # compress_video/) -- a delta here is a real bug, not a platform difference, so this
+        # comparison runs at the identical strictness as the Android/iOS pair above (D-22).
+        if: steps.gate.outputs.proceed == 'true'
+        run: bash tool/check_parity.sh parity-artifacts/macos/parity-macos.txt parity-artifacts/apple/parity-apple.txt
