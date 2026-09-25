@@ -109,6 +109,12 @@ macOS runner (30-40 min per attempt) instead of your Mac (minutes). The second F
 Leftover from the attempts, harmless and removable: `~/.gem/ruby/2.6.0/` (partial gems) and
 `~/development/cocoapods-install*.log`.
 
+**RESOLVED 2026-09-25:** found `/opt/homebrew/bin/pod` (CocoaPods 1.17.0) and Homebrew 5.1.15 on the Mac
+-- Dan installed them. Note for agents: non-interactive SSH does not put `/opt/homebrew/bin` on PATH, so
+`which pod` over plain `ssh` says "not found"; `tool/mac_run.sh` exports it. `flutter build ios` on the
+Mac now gets past `pod install` (455 ms).
+
+
 ## 8. MacBook Air is offline on the tailnet (blocks 03-01 task 1)
 
 2026-09-22, executing 03-01-PLAN.md task 1 (Mac second-SDK bring-up + `tool/mac_sync.sh`/`mac_run.sh`):
@@ -138,3 +144,11 @@ certainly on battery with the lid closed. **What unblocks Phase 3 for real: leav
 the next couple of hours.** The SDK clone may be partial; the 03-01 continuation re-validates it and
 re-clones if needed. Until then the run continues with plans that need no Mac (03-03 done; 03-02 is
 using the GitHub Actions macOS runner as its XCTest verifier).
+
+**Update 2026-09-25 ~09:15-09:40 CDT:** reachable again for about 25 minutes (on battery, 91%,
+`pmset` showed sleep held off by Music/sharingd), long enough to execute 03-01 task 1's scripts and
+find a real Swift type-check failure (fixed, `fac7f69`), then it slept again in the middle of
+`flutter build macos`. Still the same ask: **leave the MacBook Air open or on power with sleep-on-adapter
+off** for a couple of hours so `bash tool/mac_sync.sh && bash tool/mac_run.sh build-ios && bash
+tool/mac_run.sh build-macos` can close 03-01 task 1's last acceptance criterion. Not blocking: the
+autonomous run continues on the GitHub Actions macOS runner (Dan's instruction, 2026-09-25).

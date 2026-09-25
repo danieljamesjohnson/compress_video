@@ -97,7 +97,7 @@ coverage:
 # Metrics
 duration: 9min
 completed: 2026-09-22
-status: halted
+status: partial  # task 1 executed 2026-09-25 except the Mac build proof -- see "Task 1 progress"
 ---
 
 # Phase 3 Plan 01: Mac Build Host, Trim Fixture and Validation Reconciliation Summary
@@ -184,6 +184,40 @@ None - no external service configuration required. The Mac being asleep/offline 
 - **Resume path:** re-check `ssh dans-macbook-air true` (or re-run `/gsd-execute-phase 3`, which will re-attempt task 1's precondition). Once the Mac answers, execute task 1 exactly as `03-01-PLAN.md` specifies — nothing about task 1 has changed, and no work has been lost or needs to be redone for tasks 2/3.
 - **Per the atomic close-out invariant:** this plan intentionally has no `03-01-SUMMARY.md` claiming full completion — `status: halted` above reflects that task 1 is outstanding, not that the plan finished. A future execution should re-summarize as `status: complete` once task 1 lands, or this halted summary should be read alongside a task-1-only follow-up commit.
 
+## Task 1 progress, 2026-09-25 (continued under the `/gsd-autonomous` resume from 03-06)
+
+The Mac was reachable again on 2026-09-25 (~09:15-09:40 CDT) and Dan had installed Homebrew 5.1.15
+and CocoaPods 1.17.0 on it since QUESTIONS.md #7 was written, so task 1 was executed directly:
+
+- **Second SDK:** already present at `~/development/flutter-stable` -- `flutter --version` prints
+  `Flutter 3.47.5 • channel stable` (>= 3.44.0). `flutter config` shows
+  `enable-swift-package-manager: true`. Dan's `~/flutter` HEAD before:
+  `90673a4eef275d1a6692c26ac80d6d746d41a73a`; nothing ran from it, and the "after" read could not be
+  taken because the Mac slept (see below) -- re-read it on the next Mac session.
+- **`tool/mac_sync.sh`** written and proven (commit `ba3c15e`): 26 then 17 files transferred;
+  `ls -a ~/CodeProjects/compress-video` on the Mac shows `pubspec.yaml` and `darwin` and no
+  `.git`, `.planning`, `build` or `.dart_tool`.
+- **`tool/mac_run.sh`** written and proven: `MAC_RUN_TIMEOUT=2 mac_run.sh shell 'sleep 30'` exits
+  142 in 19 s and leaves no `sleep` on the Mac (the alarm kills the whole remote process group;
+  CI's exec-only alarm would not); `shell true` exits 0, `shell false` exits 1. First version had a
+  real bug (`exec </dev/null` at the top of a `bash -s` script ends the script) -- fixed by reading
+  the script with `bash -c "$(cat)"`.
+- **`build-ios` ran and FAILED on a real code defect:** `Arguments.swift:254` -- a ten-term `??`
+  chain over `String?` -- hit "The compiler is unable to type-check this expression in reasonable
+  time" on the Mac's Xcode 26.2, which CI's faster runner never tripped. Fixed in `fac7f69`
+  (same checks, same order, walked as a `[() -> String?]`).
+- **Outstanding:** `build-ios` after that fix and `build-macos` (it reached "Building macOS
+  application..." and then the Mac went to sleep; SSH timed out from ~09:40). CI's `apple` job
+  builds iOS via CocoaPods, iOS via SPM and macOS on every push, so the fix is validated there
+  meanwhile; the Mac-side proof is the only acceptance criterion still open. Resume with
+  `bash tool/mac_sync.sh && bash tool/mac_run.sh build-ios && bash tool/mac_run.sh build-macos`
+  next time `timeout 15 ssh -o ConnectTimeout=8 -o BatchMode=yes dans-macbook-air true` succeeds.
+- The `.claude/CLAUDE.md` lane note for the Mac workflow is recorded (same commit as this summary).
+
+Status is `partial`, not `halted`: with Dan's 2026-09-25 instruction to resume Phase 3 at 03-06 and
+run autonomously, the Mac build proof is a deferred item (STATE.md "Deferred Items"), not a
+designed stop that should keep 03-06..03-09 blocked.
+
 ## Self-Check: PASSED
 
 - `[ -f corpus/trim_source_10s.mp4 ]` → FOUND
@@ -196,4 +230,4 @@ None - no external service configuration required. The Mac being asleep/offline 
 
 ---
 *Phase: 03-apple-compression-to-parity*
-*Completed: 2026-09-22 (partial — task 1 outstanding)*
+*Completed: 2026-09-22 (tasks 2-3); task 1 executed 2026-09-25 except the Mac build proof*

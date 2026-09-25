@@ -91,8 +91,8 @@ coverage:
     rationale: "Unresolved engine bug, not a test-authoring issue: the measured bitrate is IDENTICAL (24,182bps) before and after the AAC-settings fix, and the channel-count mismatch is the same shape as before. The constancy of the measured value across different requested bitrates (64,000 and 128,000 both measure 24,182) is the strongest single clue and is recorded in Deviations below with next-step hypotheses -- but was not run to ground within this plan's attempt budget."
 
 duration: ~11h across one long session (dominated by CI wall-clock across 10 pushed attempts plus 3 orchestrator reruns, iOS-simulator launch hangs, and three rounds of CI-infra hardening)
-completed: 2026-09-23
-status: halted
+completed: 2026-09-25
+status: complete
 ---
 
 # Phase 3 Plan 05: Apple Transmux, Never-Larger, and Audio Modes Summary
@@ -178,6 +178,21 @@ See `key-decisions` in frontmatter for the full accounting. In short: the shared
 ---
 
 **Total deviations:** 2 auto-fixed engine bugs, 2 test-contract corrections, 3 rounds of CI infrastructure hardening, and 1 unresolved engine bug (see below). No scope creep -- every change is either a cited bug fix or infrastructure that was blocking any verification signal at all.
+
+## Resolution, 2026-09-25
+
+The halt above is resolved by evidence. Quick task 260923-9lc replaced the simulator-suite step's
+watchdog (`tool/run_ios_integration_suites.sh`) and `compress_audio_test.dart` then ran to
+completion on CI twice on identical engine code: run **35857609478** and run **35869222604**,
+**7/7 both times**, including the three cases this plan halted on --
+`AudioOptions.reencode at 64000bps/2 channels reports audioReencoded true and re-probes as AAC
+with exactly 2 channels, within 25 percent of the requested bitrate`, `the same reencode request
+at 1 channel re-probes as exactly 1 channel`, and `a 64000bps and a 128000bps reencode of the
+same clip produce measurably different audio bitrates in the expected direction`. So commit
+`8a44a04`'s fix (`AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_Constant` plus the
+esds-authoritative channel count in the test) is proven on the simulator; task 3 is complete
+and this plan's status is `complete`. The "Issues Encountered" section below is kept as the
+record of how it got there.
 
 ## Issues Encountered
 
