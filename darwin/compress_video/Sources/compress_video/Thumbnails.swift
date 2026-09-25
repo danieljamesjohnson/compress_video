@@ -261,6 +261,17 @@ final class Thumbnails: ThumbnailHostApi {
   /// place, so a failure mid-write never leaves a truncated JPEG at the destination -- this
   /// never touches `path` (the caller's input video); only the destination file is ever
   /// written here.
+  ///
+  /// `destinationPath` is normalised to NFC (`precomposedStringWithCanonicalMapping`) before
+  /// being returned, mirroring `CompressionEngine.buildResult`'s own fix for the identical
+  /// Unicode-decomposition hazard (CI runs 36176323945, 36181752118): any `String` that has
+  /// been through a file URL's `.path` getter on Darwin can come back NFD regardless of what
+  /// Unicode form went in. The explicit-`outputPath` branch below is already NFC end to end
+  /// (`Arguments.requireWritableOutputParent`'s own return value is used directly, with no
+  /// further `URL(fileURLWithPath:)`-then-`.path` round trip), and the generated-filename
+  /// branch is ASCII-only (no decomposable characters), so normalising here is a defensive
+  /// no-op on the current code paths rather than a fix for an observed failure -- kept so a
+  /// future change to either branch cannot silently reopen the same bug.
   private func writeJpegAtomically(_ jpegData: Data, outputPath: String?) throws -> String {
     let destinationPath: String
     if let outputPath {
@@ -284,7 +295,7 @@ final class Thumbnails: ThumbnailHostApi {
       )
     }
 
-    return destinationPath
+    return destinationPath.precomposedStringWithCanonicalMapping
   }
 
   /// A `.jpg` filename unique per call -- epoch milliseconds plus an 8-character random hex

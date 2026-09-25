@@ -594,6 +594,20 @@ final class CompressionEngine {
 
   /// Re-probes `destinationURL` via `Probe` for every field but the three passed in, never
   /// from the writer's own approximate settings.
+  ///
+  /// `destinationURL.path` is re-normalised to NFC (`precomposedStringWithCanonicalMapping`)
+  /// for the reported `CompressResultMessage.outputPath` -- confirmed on CI (runs 36176323945,
+  /// 36181752118) that `Arguments.standardizedAbsolutePath`'s own NFC normalisation does not
+  /// survive being re-wrapped in `URL(fileURLWithPath:)` (`Compression.swift`'s
+  /// `destinationURL = URL(fileURLWithPath: standardizedOutputPath)`): on Darwin, ANY
+  /// `URL(fileURLWithPath:)` construction stores its path via the POSIX file-system
+  /// representation, which is NFD by long-standing Apple convention, and `.path` reconstructs
+  /// the Swift `String` FROM that decomposed representation regardless of what Unicode form
+  /// went in -- this happens on construction alone, with no real filesystem I/O required, so
+  /// normalising upstream in `Arguments.swift` alone cannot fix it. This is therefore the
+  /// correct, single choke point for the fix: every caller-visible path this file reports
+  /// (real encode, transmux, and both never-larger branches) builds its `CompressResultMessage`
+  /// through this one function.
   private func buildResult(
     destinationURL: URL, inputBytes: Int64, startedAt: Date, transmuxed: Bool, usedOriginal: Bool,
     audioReencoded: Bool
@@ -609,7 +623,7 @@ final class CompressionEngine {
     let elapsedMs = Int64((Date().timeIntervalSince(startedAt) * 1000).rounded())
 
     return CompressResultMessage(
-      outputPath: destinationURL.path,
+      outputPath: destinationURL.path.precomposedStringWithCanonicalMapping,
       inputBytes: inputBytes,
       outputBytes: outputBytes,
       widthPx: outputInfo.widthPx,

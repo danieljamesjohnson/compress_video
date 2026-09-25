@@ -265,6 +265,41 @@ class RunnerTests: XCTestCase {
       "the returned filename must stay byte-identical NFC, not decompose to NFD")
   }
 
+  /// Regression for CI run 36181752118: `Arguments.standardizedAbsolutePath`'s NFC fix above
+  /// does NOT survive being re-wrapped in a fresh `URL(fileURLWithPath:)` and read back via
+  /// `.path` -- exactly what `Compression.swift` (`destinationURL = URL(fileURLWithPath:
+  /// standardizedOutputPath)`) then `CompressionEngine.buildResult`/`Thumbnails
+  /// .writeJpegAtomically` (`destinationURL.path` / `.appendingPathComponent(...).path`) do
+  /// before a path ever reaches a `CompressResultMessage`/thumbnail return value. This proves
+  /// the root cause (the bare round trip loses NFC) and the fix
+  /// (`.precomposedStringWithCanonicalMapping` applied AFTER that round trip, the exact
+  /// expression shape both call sites now use) in one test, with no dependency on either
+  /// class's AVFoundation-heavy internals.
+  func testFileURLPathRoundTripLosesNfcAndPrecomposedStringRestoresIt() {
+    let nfcFileName = "vid\u{00E9}o_\u{65E5}\u{672C}\u{8A9E}_output.mp4"  // precomposed "é"
+
+    let roundTrippedPath = URL(fileURLWithPath: NSTemporaryDirectory() + nfcFileName).path
+    let roundTrippedFileName = (roundTrippedPath as NSString).lastPathComponent
+
+    // The bare round trip is the bug: proves Arguments.swift's own NFC fix cannot, by itself,
+    // survive being wrapped in a new URL downstream.
+    XCTAssertFalse(
+      (roundTrippedFileName as NSString).isEqual(to: nfcFileName),
+      "a bare URL(fileURLWithPath:)-then-.path round trip is expected to decompose NFC to NFD "
+        + "on Darwin -- if this now passes, Foundation's behaviour changed and the "
+        + "buildResult()/writeJpegAtomically() fix sites may no longer need their own "
+        + "normalisation step")
+
+    // precomposedStringWithCanonicalMapping applied AFTER the round trip is the fix: the exact
+    // expression CompressionEngine.buildResult and Thumbnails.writeJpegAtomically both use.
+    let fixedFileName =
+      (roundTrippedPath.precomposedStringWithCanonicalMapping as NSString).lastPathComponent
+    XCTAssertTrue(
+      (fixedFileName as NSString).isEqual(to: nfcFileName),
+      "precomposedStringWithCanonicalMapping after the round trip must restore byte-identical "
+        + "NFC")
+  }
+
   // MARK: - Arguments pure validators
 
   func testValidatePositionMsNegativeRejectedAsUnsupportedInput() {
