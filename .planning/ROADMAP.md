@@ -196,7 +196,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — Android HDR: `Composition`-based `HdrMode` with the OpenGL→MediaCodec fallback chain, `toneMapped` computed from the export's own colour info, the not-washed-out pixel proof, and the forced 5.1/PCM downmix that closes AUDO-03
+- [x] 04-02-PLAN.md — Android HDR: `Composition`-based `HdrMode` with the OpenGL→MediaCodec fallback chain, `toneMapped` computed from the export's own colour info, the not-washed-out pixel proof, and the forced 5.1/PCM downmix that closes AUDO-03 — complete; HDR fallback chain proven typed-exhausted on this emulator (documented hardware limitation, `doc/HARDWARE_CHECKLIST.md`), audio downmix proven with real passes (5.1→stereo, PCM→AAC)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
