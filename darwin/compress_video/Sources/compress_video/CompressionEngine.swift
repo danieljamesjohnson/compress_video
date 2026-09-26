@@ -209,14 +209,16 @@ final class CompressionEngine {
     let includeAudio = inputInfo.hasAudio && audioTrack != nil && request.audioMode != .strip
     let audioWillReencode =
       includeAudio && (request.audioMode == .reencode || !sourceIsAAC || sourceChannelsExceedStereo)
-    // Resolved once, here, so the READER can decode straight to this channel count (AVFoundation
-    // downmixes/upmixes during a Linear PCM decode when a target AVNumberOfChannelsKey is given)
-    // and the WRITER's own AAC settings ask for the identical count -- appending a 6-channel PCM
-    // buffer to a 2-channel AAC writer input without this reader-side downmix fails outright
-    // (AVFoundation error -11800 "the operation could not be completed", confirmed live on CI
-    // against surround51_480p.mp4: unlike Android's Media3, AVAssetWriterInput does not itself
-    // remix a mismatched channel count on append). An explicit `reencode` request uses the
-    // caller's own channel count (validated non-nil, 1 or 2, by
+    // Resolved once, here, so the READER (via an AVAssetReaderAudioMixOutput, which actually
+    // performs this downmix -- see that call site's own comment) can decode straight to this
+    // channel count, and the WRITER's own AAC settings ask for the identical count. Skipping the
+    // reader-side downmix entirely reproduces two distinct, real failures depending on which
+    // AVAssetReader output class is used: an AVAssetReaderTrackOutput silently ignores a
+    // mismatched channel count and decodes at the source's own native count instead (CI run
+    // 36270368399: no error, but the final file's own esds still declared 6 channels); appending
+    // THOSE native-channel-count PCM buffers to a writer input configured for fewer channels
+    // fails outright with AVFoundation error -11800 (CI run 36267489006). An explicit `reencode`
+    // request uses the caller's own channel count (validated non-nil, 1 or 2, by
     // Arguments.requireValidCompressRequest before this engine is ever called). The engine-forced
     // case (a non-AAC source, or more than two channels, under a passthrough request) targets the
     // source's own channel count capped at two -- a mono non-AAC source must not be upmixed, and
@@ -381,21 +383,34 @@ final class CompressionEngine {
     videoReaderOutput.alwaysCopiesSampleData = false
     reader.add(videoReaderOutput)
 
-    var audioReaderOutput: AVAssetReaderTrackOutput?
+    var audioReaderOutput: AVAssetReaderOutput?
     if includeAudio, let audioTrack {
-      // outputSettings: nil for passthrough (compressed samples, D-07); a linear-PCM decode
-      // request for a re-encode, EXPLICITLY downmixed/upmixed to `audioTargetChannels` at the
-      // reader itself -- AVFoundation's Linear PCM decode honours AVNumberOfChannelsKey as a
-      // real channel remix, which is what makes the writer's own AAC settings below able to
-      // accept the appended samples at all (see `audioTargetChannels`'s own comment).
-      let readerSettings: [String: Any]? =
-        audioWillReencode
-        ? [AVFormatIDKey: kAudioFormatLinearPCM, AVNumberOfChannelsKey: audioTargetChannels!]
-        : nil
-      let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: readerSettings)
-      output.alwaysCopiesSampleData = false
-      reader.add(output)
-      audioReaderOutput = output
+      if audioWillReencode {
+        // AVAssetReaderTrackOutput does NOT perform a real channel downmix: requesting a
+        // smaller AVNumberOfChannelsKey than the source's own channel count in its outputSettings
+        // is silently ignored, and the decoded PCM comes back at the source's own native channel
+        // count regardless (confirmed live on CI, run 36270368399: a 6-channel AAC source under
+        // this exact request produced no error, but the final file's own esds still declared 6
+        // channels). AVAssetReaderAudioMixOutput is the class that actually applies
+        // `audioSettings`' channel count through Core Audio's real mix/downmix engine -- even
+        // with no explicit `audioMix` (volume ramps) set, which is why every other audio
+        // property (format, sample rate) above already worked identically on both output types.
+        let readerSettings: [String: Any] = [
+          AVFormatIDKey: kAudioFormatLinearPCM, AVNumberOfChannelsKey: audioTargetChannels!,
+        ]
+        let audioMixOutput = AVAssetReaderAudioMixOutput(
+          audioTracks: [audioTrack], audioSettings: readerSettings)
+        audioMixOutput.alwaysCopiesSampleData = false
+        reader.add(audioMixOutput)
+        audioReaderOutput = audioMixOutput
+      } else {
+        // outputSettings: nil -- passthrough, compressed samples (D-07). A plain track output
+        // is correct here: no format conversion of any kind is being asked for.
+        let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        reader.add(output)
+        audioReaderOutput = output
+      }
     }
 
     let videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoOutputSettings)
@@ -830,7 +845,11 @@ final class CompressionEngine {
     writer: AVAssetWriter,
     videoOutput: AVAssetReaderTrackOutput,
     videoInput: AVAssetWriterInput,
-    audioOutput: AVAssetReaderTrackOutput?,
+    // AVAssetReaderOutput, not AVAssetReaderTrackOutput: the audio side may be an
+    // AVAssetReaderAudioMixOutput when a real channel downmix is in play (see the call site's
+    // own comment) -- both are AVAssetReaderOutput subclasses, and copyNextSampleBuffer() below
+    // is declared on that common base, so this loop needs nothing track-output-specific.
+    audioOutput: AVAssetReaderOutput?,
     audioInput: AVAssetWriterInput?,
     jobQueue: DispatchQueue,
     frameInterval: CMTime?,
