@@ -6,6 +6,12 @@ import 'package:flutter/foundation.dart' show immutable;
 /// native export engine's own approximate fields (02-RESEARCH.md Pitfall 4). A compression
 /// call never resolves to `null` -- every failure completes with a `CompressVideoException`
 /// instead.
+///
+/// **What is the same across platforms, for the same input and [CompressOptions]:** [widthPx],
+/// [heightPx], [videoCodec], [audioCodec], [transmuxed], [usedOriginal], [audioReencoded], and
+/// [durationMs] within one output frame -- verified by this project's own cross-platform parity
+/// gate on Android, iOS and macOS. **Deliberately NOT the same:** [outputBytes] and [elapsedMs]
+/// -- see their own dartdoc below for why. `doc/PRESETS.md` has the measured per-platform tables.
 @immutable
 class CompressResult {
   /// Creates a [CompressResult]. Application code does not normally construct this directly --
@@ -35,6 +41,14 @@ class CompressResult {
   final int inputBytes;
 
   /// Size of the output file, in bytes.
+  ///
+  /// **Deliberately platform-dependent.** Android's Media3 Transformer and Apple's
+  /// AVAssetReader/AVAssetWriter are different encoders that spend bits differently at the same
+  /// nominal preset or explicit target -- this project's own measurements in `doc/PRESETS.md`
+  /// record Apple overshooting the nominal bitrate target by 3-10% while Android's emulator
+  /// undershoots to as low as 71%. This is not a bug and is never gated to byte-for-byte
+  /// equality across platforms; the only cross-platform check on this field is a wide envelope
+  /// that catches an order-of-magnitude regression, not a difference in encoder behaviour.
   final int outputBytes;
 
   /// Displayed (rotation-corrected) width of the output, in pixels -- the width a player shows,
@@ -90,6 +104,10 @@ class CompressResult {
   final bool audioReencoded;
 
   /// Wall-clock time the compression took, in milliseconds.
+  ///
+  /// **Deliberately platform-dependent**, for the same reason [outputBytes] is: the host's own
+  /// encoder decides how long an encode takes (hardware vs. software, device vs. simulator), and
+  /// this package never compares elapsed time across platforms in any parity check.
   final int elapsedMs;
 
   @override

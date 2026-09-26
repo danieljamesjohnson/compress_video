@@ -165,3 +165,17 @@ normally via GitHub Actions. Same ask as above: leave the MacBook Air open or on
 sleep-on-adapter off. When it next answers, resume with `bash tool/mac_sync.sh && bash
 tool/mac_run.sh build-ios && bash tool/mac_run.sh build-macos` (closing 03-01 task 1), then
 `03-08-PLAN.md` task 1 exactly as written.
+
+**Update 2026-09-25 (executing 03-09-PLAN.md task 1):** `timeout 15 ssh -o ConnectTimeout=8
+-o BatchMode=yes dans-macbook-air true` timed out again ("Connection timed out" on port 22),
+probed once at the start of this plan per its own Mac-dependent-task instructions. This blocks
+03-09 task 1 specifically: the example app driven by hand on the iOS simulator and the macOS
+host, with screenshots closing 02-UAT.md item 6 and closing BULD-04's Apple half. Per the
+executor's precondition protocol and this run's explicit standing instruction to defer rather
+than loop, task 1 did not run at all — no screenshots, no 02-UAT.md change, no commit. Tasks 2
+and 3 of 03-09 do not need the Mac (CI run 36202392709 stands as the observed evidence for the
+plugin engine's behaviour on iOS/macOS; only the example app's own UI needs a live Mac) and
+proceeded normally. Same ask as the rows above: leave the MacBook Air open or on power with
+sleep-on-adapter off. When it next answers, resume with `bash tool/mac_sync.sh && bash
+tool/mac_run.sh ios integration_test/compress_test.dart` (03-09 task 1's own precondition),
+then execute `03-09-PLAN.md` task 1 exactly as written.

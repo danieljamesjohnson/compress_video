@@ -9,13 +9,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Core compression
 
-- [ ] **CORE-01**: App can compress a local video file to an H.264 + AAC MP4 with a single call, on Android, iOS and macOS, with the same Dart API and the same observable behaviour on each
+- [x] **CORE-01**: App can compress a local video file to an H.264 + AAC MP4 with a single call, on Android, iOS and macOS, with the same Dart API and the same observable behaviour on each
 - [x] **CORE-02**: Caller can choose output size by a named preset (documented per platform: what resolution and bitrate it really produces) or by an explicit target: max long side in pixels, video bitrate, or target file size in MB
 - [x] **CORE-03**: Caller receives a typed result: output path, bytes before and after, width, height, duration, codec used, whether the video track was transmuxed, whether HDR was tone-mapped, elapsed time; the call never resolves to `null`
 - [x] **CORE-04**: Failures surface as typed errors with a reason (unsupported input, encoder unavailable, out of space, interrupted, cancelled); no failure can crash the host app, and no failure is swallowed into a debug print
 - [x] **CORE-05**: Output is never larger than the input: when the encode would be bigger, the plugin returns the original bytes (copied to the output path) and the result says so
 - [x] **CORE-06**: When the input already satisfies the target (resolution, fps, codec, bitrate), the plugin remuxes without re-encoding and completes in a fraction of the encode time; the result reports it
-- [ ] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
+- [x] **CORE-07**: Caller can trim with start and end in milliseconds; the output duration matches the requested range within one frame on every platform
 - [x] **CORE-08**: Caller can cap the output frame rate (default cap 30 fps); resolution and frame rate are never upscaled
 - [x] **CORE-09**: Caller can choose the output directory and file name; the default is a unique name in the app cache directory, and a `clearCache()` removes only files the plugin created
 
@@ -49,7 +49,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Build, platforms and verification
 
 - [x] **BULD-01**: Android implementation uses Media3 Transformer with minSdk 23, builds on the current stable AGP and Kotlin with the AGP-9 built-in Kotlin path, targets compileSdk 36, and contains no native `.so` code (16 KB page-size safe by construction)
-- [ ] **BULD-02**: iOS (13+) and macOS (11+) implementations share one Swift core, and the package installs through both CocoaPods and Swift Package Manager
+- [x] **BULD-02**: iOS (13+) and macOS (11+) implementations share one Swift core, and the package installs through both CocoaPods and Swift Package Manager
 - [x] **BULD-03**: Dart and native sides communicate through Pigeon-generated typed messages; every quantity has one unit documented in the Dart API
 - [ ] **BULD-04**: The example app picks a video, compresses it with chosen options, shows live progress, cancels, and plays the result, on all three platforms
 - [x] **BULD-05**: CI builds the plugin and example on every push for Android (Linux runner) and iOS/macOS (macOS runner), runs Dart unit tests and native unit tests, and fails on analyzer warnings
@@ -100,13 +100,13 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORE-01 | Phase 3 | Pending |
+| CORE-01 | Phase 3 | Complete |
 | CORE-02 | Phase 2 | Complete |
 | CORE-03 | Phase 2 | Complete |
 | CORE-04 | Phase 2 | Complete |
 | CORE-05 | Phase 2 | Complete |
 | CORE-06 | Phase 2 | Complete |
-| CORE-07 | Phase 3 | Pending |
+| CORE-07 | Phase 3 | Complete |
 | CORE-08 | Phase 2 | Complete |
 | CORE-09 | Phase 2 | Complete |
 | ORNT-01 | Phase 2 | Complete |
@@ -125,7 +125,7 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | INFO-02 | Phase 1 | Complete |
 | INFO-03 | Phase 2 | Complete |
 | BULD-01 | Phase 2 | Complete |
-| BULD-02 | Phase 3 | Pending |
+| BULD-02 | Phase 3 | Complete |
 | BULD-03 | Phase 1 | Complete |
 | BULD-04 | Phase 3 | Pending |
 | BULD-05 | Phase 1 | Complete |

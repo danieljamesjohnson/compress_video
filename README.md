@@ -123,6 +123,33 @@ raw platform exception escape. `reason` is one of:
 | iOS | 13.0 |
 | macOS | 11.0 |
 
+## What "the same on every platform" means
+
+Android, iOS and macOS run on genuinely different encoders (Media3 Transformer vs.
+AVAssetReader/AVAssetWriter), so this package is precise about what it guarantees to be the same
+across platforms and what it does not.
+
+**The same on every platform, for a given input and `CompressOptions`:**
+
+* the output's displayed `widthPx` / `heightPx`
+* the output's `videoCodec` and `audioCodec`
+* the `transmuxed`, `usedOriginal` and `audioReencoded` flags
+* `durationMs`, within one output frame
+
+**Deliberately NOT the same — different by design, not by bug:**
+
+* `outputBytes` — different encoders spend bits differently at the same nominal target; a
+  cross-platform parity gate in this project's own CI treats a wide byte-count spread as
+  expected and only fails on an order-of-magnitude regression
+* `elapsedMs` — wall-clock encode time depends on the host's own encoder (hardware vs. software,
+  device vs. simulator) and is never compared across platforms
+
+This is not a promise of byte-for-byte or elapsed-time parity anywhere in this package's surface
+— see the `outputBytes` and `elapsedMs` dartdoc on [`CompressResult`] for the same statement at
+the point a caller reads those fields, and `doc/PRESETS.md` for the actual per-platform measured
+tables (including a real, measured Apple-overshoots/Android-undershoots bitrate divergence) that
+substantiate this section rather than assert it.
+
 ## What this plugin deliberately does not do
 
 * **Bundle FFmpeg.** No GPL dependency, no ~100 MB binary blob, no software-only encode path.

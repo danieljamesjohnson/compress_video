@@ -32,6 +32,12 @@ recur here. Re-check every pin quarterly; the research this table is drawn from
 | `actions/checkout` | `@v6` | GitHub Actions marketplace | 2026-09-15 |
 | `actions/setup-java` | `@v4` | GitHub Actions marketplace | 2026-09-15 |
 | `actions/upload-artifact` / `actions/download-artifact` | `@v4` (both, added 01-07 for the cross-platform parity gate) | GitHub Actions marketplace, first-party `actions/*` | 2026-09-21 |
+| Flutter (Mac build host, `dans-macbook-air`) | Second SDK at `~/development/flutter-stable`, `3.47.5` stable — matches CI's floating `channel: stable` pin above; Dan's own `~/flutter` (3.41.2, below this package's pubspec floor) is never touched | `tool/mac_sync.sh`/`tool/mac_run.sh`, installed 2026-09-22/25 (03-01 task 1) | 2026-09-25 |
+| Xcode (Mac build host) | 26.2 | `xcodebuild -version` over `ssh dans-macbook-air` | 2026-09-22 |
+| iOS simulator runtime (Mac build host) | iOS 26.2 (iPhone 17 / 17 Pro / Air / 16e, iPad simulators available) | `xcrun simctl list` over `ssh dans-macbook-air` | 2026-09-22 |
+| CocoaPods (Mac build host) | 1.17.0 via Homebrew 5.1.15 at `/opt/homebrew/bin/pod` — resolved 2026-09-25 (QUESTIONS.md #7); non-interactive SSH does not put `/opt/homebrew/bin` on `PATH`, `tool/mac_run.sh` exports it | Dan installed it; confirmed live via `flutter build ios` completing `pod install` | 2026-09-25 |
+| Apple install-path proof, CocoaPods | Proven on the GitHub Actions `macos-latest` runner only (CocoaPods 1.17.0 preinstalled there); the Mac build host uses the SPM path locally since it has no CocoaPods gems path proven for `flutter build` yet | CI `apple` job's "Build iOS (CocoaPods)" / "Build macOS" steps | 2026-09-26 (CI run 36202392709) |
+| Apple install-path proof, Swift Package Manager | Proven both on the GitHub Actions `macos-latest` runner and, for the build (not the full `tool/verify_fresh_app.sh` fresh-app proof — that remains Mac-blocked, see `QUESTIONS.md` #8), on the Mac build host itself via `tool/mac_run.sh` | CI `apple` job's "Build iOS via Swift Package Manager" / "Build macOS via Swift Package Manager" steps; `tool/mac_run.sh build-ios` locally (03-01) | 2026-09-26 (CI run 36202392709) |
 
 **last verified:** 2026-09-21, against CI run 35615277549 (both platform jobs `success`) and, for
 the added `parity` job, run 35631865999 (`android`, `apple` and `parity` all `success`). Every
