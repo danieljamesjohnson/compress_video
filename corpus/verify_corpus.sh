@@ -67,6 +67,43 @@ TRIM_START_MS=2000
 TRIM_END_MS=7000
 TRIM_MIN_INSIDE_MS=500
 
+# Clips carrying an `hdr`/`hdrProbe` sidecar block (Phase 4, D-01). Coded-frame patch
+# geometry, must match generate_corpus.sh's hdr_hlg10.mp4/hdr_pq10.mp4 drawbox calls exactly.
+# No rotation matrix on any HDR clip, so coded coordinates ARE displayed coordinates.
+HDR_CLIPS=(hdr_hlg10.mp4 hdr_pq10.mp4)
+HDR_PATCH_BOX_W=160
+HDR_PATCH_BOX_H=160
+HDR_PATCH_Y=40
+HDR_PATCH_XS=(40 240 440 640)
+HDR_PATCH_CHANNELS=(r g b none)
+# Documented floors/margin for a later plan's tone-mapped-output sample (04-05): this box
+# cannot author a reference tone-map, so this sidecar records colour IDENTITY (which patch is
+# which) and thresholds, never an expected RGB triple.
+HDR_MIN_SATURATION=40
+HDR_MIN_WHITE_LUMA=120
+HDR_DOMINANCE_MARGIN=20
+
+is_hdr_clip() {
+  local needle="$1" c
+  for c in "${HDR_CLIPS[@]}"; do
+    [ "$c" = "$needle" ] && return 0
+  done
+  return 1
+}
+
+# Clips carrying an `audio` sidecar block (Phase 4, D-09/D-10): the source's real codec and
+# channel count, read directly from ffprobe rather than normalized, since this block is about
+# what the source really is, not the normalize_codec() bucket used for cross-platform video.
+AUDIO_PROBE_CLIPS=(pcm_audio_480p.mp4 surround51_480p.mp4)
+
+is_audio_probe_clip() {
+  local needle="$1" c
+  for c in "${AUDIO_PROBE_CLIPS[@]}"; do
+    [ "$c" = "$needle" ] && return 0
+  done
+  return 1
+}
+
 is_patch_clip() {
   local needle="$1" c
   for c in "${PATCH_CLIPS[@]}"; do
@@ -144,6 +181,15 @@ derive_sidecar() {
   local video_codec
   video_codec=$(normalize_codec "$codec_name")
 
+  # isHdr is derived from the clip's own probed colour transfer, not hardcoded: arib-std-b67
+  # (HLG) and smpte2084 (PQ/HDR10) are the two transfer functions this corpus's HDR clips carry.
+  local color_transfer is_hdr
+  color_transfer=$(echo "$json" | jq -r '.streams[] | select(.codec_type=="video") | .color_transfer // "unknown"')
+  case "$color_transfer" in
+    arib-std-b67|smpte2084) is_hdr=true ;;
+    *) is_hdr=false ;;
+  esac
+
   local cross_platform tolerant
   cross_platform=$(jq -n \
     --argjson durationMs "$duration_ms" \
@@ -153,7 +199,7 @@ derive_sidecar() {
     --argjson rotationDegrees "$rotation_deg" \
     --argjson sizeBytes "$size_bytes" \
     --argjson hasAudio "$has_audio" \
-    --argjson isHdr false \
+    --argjson isHdr "$is_hdr" \
     --arg videoCodec "$video_codec" \
     '{durationMs:$durationMs, durationToleranceMs:$durationToleranceMs, widthPx:$widthPx, heightPx:$heightPx, rotationDegrees:$rotationDegrees, sizeBytes:$sizeBytes, hasAudio:$hasAudio, isHdr:$isHdr, videoCodec:$videoCodec}')
 
@@ -281,6 +327,51 @@ derive_sidecar() {
     result=$(jq -n --argjson base "$result" --argjson trim "$trim_block" '$base + {trim:$trim}')
   fi
 
+  if is_hdr_clip "$clip"; then
+    local bit_depth
+    bit_depth=$(echo "$json" | jq -r '.streams[] | select(.codec_type=="video") | (.bits_per_raw_sample // "10")')
+
+    local hdr_block
+    hdr_block=$(jq -n \
+      --arg colorTransfer "$color_transfer" \
+      --arg colorPrimaries "$(echo "$json" | jq -r '.streams[] | select(.codec_type=="video") | .color_primaries')" \
+      --argjson bitDepth "$bit_depth" \
+      '{colorTransfer:$colorTransfer, colorPrimaries:$colorPrimaries, bitDepth:$bitDepth}')
+
+    # Patch geometry/identity only -- ffmpeg cannot author a reference tone-map, so this block
+    # deliberately records WHAT the patches are and WHERE they are, plus documented thresholds
+    # a later plan's real sampled output is checked against, never an expected RGB triple.
+    local patches="[]" i x y channel
+    for i in "${!HDR_PATCH_XS[@]}"; do
+      x=$(( HDR_PATCH_XS[i] + HDR_PATCH_BOX_W / 2 ))
+      y=$(( HDR_PATCH_Y + HDR_PATCH_BOX_H / 2 ))
+      channel="${HDR_PATCH_CHANNELS[i]}"
+      patches=$(jq -n --argjson base "$patches" --argjson xPx "$x" --argjson yPx "$y" --arg dominantChannel "$channel" \
+        '$base + [{xPx:$xPx, yPx:$yPx, dominantChannel:$dominantChannel}]')
+    done
+
+    local hdr_probe
+    hdr_probe=$(jq -n \
+      --argjson patches "$patches" \
+      --argjson minSaturation "$HDR_MIN_SATURATION" \
+      --argjson minWhiteLuma "$HDR_MIN_WHITE_LUMA" \
+      --argjson dominanceMargin "$HDR_DOMINANCE_MARGIN" \
+      '{patches:$patches, minSaturation:$minSaturation, minWhiteLuma:$minWhiteLuma, dominanceMargin:$dominanceMargin}')
+
+    result=$(jq -n --argjson base "$result" --argjson hdr "$hdr_block" --argjson hdrProbe "$hdr_probe" '$base + {hdr:$hdr, hdrProbe:$hdrProbe}')
+  fi
+
+  if is_audio_probe_clip "$clip"; then
+    local raw_audio_codec audio_channels
+    raw_audio_codec=$(echo "$json" | jq -r '.streams[] | select(.codec_type=="audio") | .codec_name')
+    audio_channels=$(echo "$json" | jq -r '.streams[] | select(.codec_type=="audio") | .channels')
+
+    local audio_block
+    audio_block=$(jq -n --arg codec "$raw_audio_codec" --argjson channels "$audio_channels" '{codec:$codec, channels:$channels}')
+
+    result=$(jq -n --argjson base "$result" --argjson audio "$audio_block" '$base + {audio:$audio}')
+  fi
+
   echo "$result"
 }
 
@@ -306,7 +397,7 @@ check_damaged_clip() {
   echo "CHECK: $clip still probes as video (duration ${duration}s), no sidecar by design"
 }
 
-CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4)
+CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4 hdr_hlg10.mp4)
 STATUS=0
 
 for clip in "${CLIPS[@]}"; do

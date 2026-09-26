@@ -21,7 +21,7 @@ fi
 
 mkdir -p "$DEST_DIR"
 
-CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4)
+CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4 hdr_hlg10.mp4)
 # Deliberately damaged, has no sidecar by design (see verify_corpus.sh) — do
 # not fail just because its ".expected.json" doesn't exist.
 DAMAGED_CLIPS=(truncated_mdat.mp4)

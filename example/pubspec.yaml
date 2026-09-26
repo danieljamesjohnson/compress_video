@@ -84,6 +84,8 @@ flutter:
     - assets/corpus/truncated_mdat.mp4
     - assets/corpus/trim_source_10s.mp4
     - assets/corpus/trim_source_10s.expected.json
+    - assets/corpus/hdr_hlg10.mp4
+    - assets/corpus/hdr_hlg10.expected.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

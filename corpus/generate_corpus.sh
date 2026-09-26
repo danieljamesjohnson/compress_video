@@ -366,4 +366,80 @@ fi
 assert_size "$TRIM" "$TRIM_MAX_BYTES"
 echo "OK: $TRIM (coded ${TRIM_CODED_W}x${TRIM_CODED_H}, ${TRIM_FPS_RAW}fps, GOP ${TRIM_GOP}, duration ${TRIM_DURATION_MS}ms, $(stat -c%s "$TRIM") bytes)"
 
-echo "All six corpus clips generated and self-verified."
+# ---------------------------------------------------------------------------
+# Clip G: hdr_hlg10.mp4
+# ---------------------------------------------------------------------------
+# 10-bit HEVC Main10, HLG (arib-std-b67) transfer, BT.2020 primaries -- Phase 4's first HDR
+# fixture (D-01). ffmpeg cannot author Dolby Vision RPU metadata, so the real iPhone/Pixel HDR
+# clips stay a reserved slot (see README.md "Reserved slots") until Dan drops them.
+#
+# High-entropy (mandelbrot) source at ~6Mbps, same reasoning as portrait_hibitrate_1080p60.mp4:
+# a low-entropy 10-bit source would encode so small that a later tone-mapped H.264 re-encode of
+# it would come out LARGER, tripping the unconditional never-larger substitution and silently
+# replacing the tone-map path this phase exists to test with a byte copy of the HDR original.
+#
+# Four 160x160 pure red/green/blue/white patches at y=40, x=40/240/440/640, constant for the
+# whole clip (no time-bucket schedule -- this probe is about colour fidelity, not position in
+# time). verify_corpus.sh records their geometry and colour IDENTITY in the hdrProbe sidecar
+# block; it cannot record an expected RGB triple because ffmpeg cannot author a reference
+# tone-map -- see verify_corpus.sh's HDR_CLIPS handling.
+#
+# x265 pools=1:frame-threads=1 forces single-threaded, deterministic encoding (the libx264
+# clips above get the same guarantee from -threads 1 -x264-params threads=1:sliced_threads=0;
+# libx265 has no -threads/-x264-params equivalent, so the determinism knob moves into
+# -x265-params instead) -- required because this script's own contract is that two runs
+# produce byte-identical clips.
+echo "Generating hdr_hlg10.mp4..."
+
+HDR_HLG10=hdr_hlg10.mp4
+HDR_HLG10_TMP=hdr_hlg10.tmp.mp4
+HDR_HLG10_MAX_BYTES=3000000
+
+ffmpeg -y -loglevel error \
+  -f lavfi -i "mandelbrot=size=1280x720:rate=30" \
+  -filter_complex "[0:v]drawbox=x=40:y=40:w=160:h=160:color=red:t=fill,drawbox=x=240:y=40:w=160:h=160:color=green:t=fill,drawbox=x=440:y=40:w=160:h=160:color=blue:t=fill,drawbox=x=640:y=40:w=160:h=160:color=white:t=fill[v]" \
+  -map "[v]" -an -t 2 \
+  -pix_fmt yuv420p10le -c:v libx265 -profile:v main10 \
+  -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc \
+  -x265-params "pools=1:frame-threads=1" \
+  -tag:v hvc1 -b:v 6M -maxrate 6M -bufsize 6M \
+  "$HDR_HLG10_TMP"
+
+mv "$HDR_HLG10_TMP" "$HDR_HLG10"
+
+HDR_HLG10_JSON=$(probe_json "$HDR_HLG10")
+HDR_HLG10_V_COUNT=$(echo "$HDR_HLG10_JSON" | jq '[.streams[] | select(.codec_type=="video")] | length')
+HDR_HLG10_A_COUNT=$(echo "$HDR_HLG10_JSON" | jq '[.streams[] | select(.codec_type=="audio")] | length')
+if [ "$HDR_HLG10_V_COUNT" != "1" ] || [ "$HDR_HLG10_A_COUNT" != "0" ]; then
+  fail "$HDR_HLG10" "expected exactly 1 video + 0 audio stream, got ${HDR_HLG10_V_COUNT} video + ${HDR_HLG10_A_COUNT} audio"
+fi
+HDR_HLG10_CODEC=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .codec_name')
+if [ "$HDR_HLG10_CODEC" != "hevc" ]; then
+  fail "$HDR_HLG10" "expected codec_name hevc, got ${HDR_HLG10_CODEC}"
+fi
+HDR_HLG10_PROFILE=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .profile')
+case "$HDR_HLG10_PROFILE" in
+  *"Main 10"*) : ;;
+  *) fail "$HDR_HLG10" "expected profile containing 'Main 10', got ${HDR_HLG10_PROFILE}" ;;
+esac
+HDR_HLG10_PIXFMT=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .pix_fmt')
+if [ "$HDR_HLG10_PIXFMT" != "yuv420p10le" ]; then
+  fail "$HDR_HLG10" "expected pix_fmt yuv420p10le, got ${HDR_HLG10_PIXFMT}"
+fi
+HDR_HLG10_TRANSFER=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .color_transfer')
+if [ "$HDR_HLG10_TRANSFER" != "arib-std-b67" ]; then
+  fail "$HDR_HLG10" "expected color_transfer arib-std-b67, got ${HDR_HLG10_TRANSFER}"
+fi
+HDR_HLG10_PRIMARIES=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .color_primaries')
+if [ "$HDR_HLG10_PRIMARIES" != "bt2020" ]; then
+  fail "$HDR_HLG10" "expected color_primaries bt2020, got ${HDR_HLG10_PRIMARIES}"
+fi
+HDR_HLG10_CODED_W=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .width')
+HDR_HLG10_CODED_H=$(echo "$HDR_HLG10_JSON" | jq -r '.streams[] | select(.codec_type=="video") | .height')
+if [ "$HDR_HLG10_CODED_W" != "1280" ] || [ "$HDR_HLG10_CODED_H" != "720" ]; then
+  fail "$HDR_HLG10" "expected coded dimensions 1280x720, got ${HDR_HLG10_CODED_W}x${HDR_HLG10_CODED_H}"
+fi
+assert_size "$HDR_HLG10" "$HDR_HLG10_MAX_BYTES"
+echo "OK: $HDR_HLG10 (hevc Main10, yuv420p10le, arib-std-b67/bt2020, coded ${HDR_HLG10_CODED_W}x${HDR_HLG10_CODED_H}, $(stat -c%s "$HDR_HLG10") bytes)"
+
+echo "All corpus clips generated and self-verified."

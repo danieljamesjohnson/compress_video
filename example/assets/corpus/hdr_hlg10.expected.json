@@ -1,0 +1,51 @@
+{
+  "crossPlatform": {
+    "durationMs": 2000,
+    "durationToleranceMs": 34,
+    "hasAudio": false,
+    "heightPx": 720,
+    "isHdr": true,
+    "rotationDegrees": 0,
+    "sizeBytes": 1666878,
+    "videoCodec": "hevc",
+    "widthPx": 1280
+  },
+  "hdr": {
+    "bitDepth": 10,
+    "colorPrimaries": "bt2020",
+    "colorTransfer": "arib-std-b67"
+  },
+  "hdrProbe": {
+    "dominanceMargin": 20,
+    "minSaturation": 40,
+    "minWhiteLuma": 120,
+    "patches": [
+      {
+        "dominantChannel": "r",
+        "xPx": 120,
+        "yPx": 120
+      },
+      {
+        "dominantChannel": "g",
+        "xPx": 320,
+        "yPx": 120
+      },
+      {
+        "dominantChannel": "b",
+        "xPx": 520,
+        "yPx": 120
+      },
+      {
+        "dominantChannel": "none",
+        "xPx": 720,
+        "yPx": 120
+      }
+    ]
+  },
+  "tolerant": {
+    "frameRateFps": 30.000,
+    "frameRateToleranceFps": 0.5,
+    "videoBitrateBps": 6651156,
+    "videoBitrateTolerancePct": 25
+  }
+}
