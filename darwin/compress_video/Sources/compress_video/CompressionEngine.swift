@@ -3,6 +3,7 @@ import AudioToolbox
 import CoreMedia
 import CoreVideo
 import Foundation
+import VideoToolbox
 
 /// Builds and drives one `AVAssetReader`/`AVAssetWriter` pipeline per compression job -- the
 /// counterpart of Android's `TransformerEngine.kt`.
@@ -121,12 +122,43 @@ final class CompressionEngine {
     let sourceAudioChannelCount = sourceAudioStreamDescription.map { Int($0.mChannelsPerFrame) }
     let sourceAudioSampleRate = sourceAudioStreamDescription?.mSampleRate
 
-    // outputCodecIsHevc is always false until task 2 adds the hardware-HEVC/keep-HDR probe --
-    // wired as a real parameter now so task 2 is a value change here, not another signature
-    // change (04-04 task 1).
+    // HEVC opt-in (CDEC-01) and keep-HDR (CDEC-03) capability gates, computed once, up front,
+    // independent of whether an encode ever runs -- both feed into the SAME outputIsHevc
+    // decision below, mirroring `TransformerEngine.compress`'s own identically-named gate
+    // exactly. Built from the SAME two primitives (`CodecCapabilities.hasHardwareHevcEncoder`,
+    // `Self.readSourceColorTransfer`) the `resolvePlan` overload above calls for
+    // `SizeGuard.Options.outputCodecIsHevc`, so this job and a pre-flight `estimate()`/
+    // free-space check can never disagree about which codec would really be produced.
+    let requestedHevc = request.videoCodec == "hevc"
+    let requestedKeepHdr = request.hdrMode == "keepHdr"
+    let hasHardwareHevc = requestedHevc && CodecCapabilities.hasHardwareHevcEncoder()
+    // Keep-HDR achievability (D-07/D-08): nothing to keep when the request didn't ask for it or
+    // the source isn't genuinely HDR; otherwise achievable only when BOTH the source's own
+    // colour transfer is readable (never guessed from the HDR boolean -- read once here, reused
+    // below to build the HEVC dictionary's own AVVideoColorPropertiesKey) AND a hardware HEVC
+    // encoder exists -- the same probe the plain HEVC opt-in above uses, since D-07 requires a
+    // hardware HEVC 10-bit encoder specifically, not merely HDR-editing support in the abstract.
+    let sourceColorTransfer: CFString?
+    if requestedKeepHdr && inputInfo.isHdr {
+      sourceColorTransfer = await Self.readSourceColorTransfer(videoTrack: videoTrack)
+    } else {
+      sourceColorTransfer = nil
+    }
+    let keepHdrAchievable =
+      requestedKeepHdr && inputInfo.isHdr && sourceColorTransfer != nil
+      && CodecCapabilities.hasHardwareHevcEncoder()
+    var outputIsHevc = hasHardwareHevc || keepHdrAchievable
+    // D-06/D-08: true when the caller asked for HEVC and this device has no hardware HEVC
+    // encoder, OR asked for keep-HDR and keep-HDR is not achievable -- mirrors
+    // `TransformerEngine.compress`'s own `hevcFallback` formula exactly. `var`: the pre-flight
+    // `canApply` guard below can still flip this to `true` if the writer disagrees with the
+    // probe. Threaded through `finishJob`/`buildResult`, guarded there by `!usedOriginal`,
+    // exactly like `toneMapped`.
+    var hevcFallback = (requestedHevc && !hasHardwareHevc) || (requestedKeepHdr && !keepHdrAchievable)
+
     let plan = resolvePlan(
       inputInfo: inputInfo, request: request, audioCodec: inputAudioCodec,
-      audioChannelCount: sourceAudioChannelCount, outputCodecIsHevc: false)
+      audioChannelCount: sourceAudioChannelCount, outputCodecIsHevc: outputIsHevc)
 
     // Never-larger PRE-check (D-11, mirrors TransformerEngine.compress): when the resolver
     // already knows encoding would not help, skip building a reader/writer at all.
@@ -139,7 +171,7 @@ final class CompressionEngine {
       return try await buildResult(
         destinationURL: destinationURL, inputBytes: inputBytes, startedAt: startedAt,
         transmuxed: false, usedOriginal: true, audioReencoded: false,
-        inputWasHdr: inputInfo.isHdr, hevcFallback: false)
+        inputWasHdr: inputInfo.isHdr, hevcFallback: hevcFallback)
     }
 
     // Transmux (D-05): when the resolver says a remux would satisfy the request, attempt an
@@ -190,8 +222,14 @@ final class CompressionEngine {
     let inputCodedHeight = Int(naturalSize.height.rounded())
     let needsResize = codedTargetWidth != inputCodedWidth || codedTargetHeight != inputCodedHeight
 
+    // Keep-HDR's reader pixel format (10-bit biplanar video-range) replaces the default path's
+    // 8-bit BGRA ONLY when keep-HDR is genuinely achievable -- the default tone-map path's
+    // reader settings (Phase 3's D-08 decision: 8-bit BGRA, so the system tone-maps) are left
+    // exactly as they are for every other case, including a plain HEVC opt-in with no HDR.
     var videoReaderSettings: [String: Any] = [
-      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+      kCVPixelBufferPixelFormatTypeKey as String:
+        keepHdrAchievable
+        ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_32BGRA
     ]
     // Only add the resize keys when a resize is actually needed (03-RESEARCH.md Pattern 2) --
     // mirrors Android's "only add the effect if it changes something" rule.
@@ -207,8 +245,9 @@ final class CompressionEngine {
     // `writer.canApply(outputSettings:forMediaType:)` below (CI run 35765529347, diagnosed
     // 2026-09-22: 21/22 compress_test.dart cases threw `encoderUnavailable`, the one pass being
     // the transmux case that never touches AVAssetWriter). Do NOT re-add a top-level
-    // AVVideoAverageBitRateKey -- keep it only inside AVVideoCompressionPropertiesKey below.
-    let videoOutputSettings: [String: Any] = [
+    // AVVideoAverageBitRateKey -- keep it only inside AVVideoCompressionPropertiesKey below --
+    // this applies equally to the HEVC dictionary built below.
+    let h264OutputSettings: [String: Any] = [
       AVVideoCodecKey: AVVideoCodecType.h264,
       AVVideoWidthKey: codedTargetWidth,
       AVVideoHeightKey: codedTargetHeight,
@@ -221,6 +260,34 @@ final class CompressionEngine {
       ] as [String: Any],
     ]
 
+    // The parallel HEVC dictionary (CDEC-01/03): same bitrate/frame-rate-hint shape as the
+    // H.264 one above, plus -- for keep-HDR only -- an AVVideoColorPropertiesKey carrying the
+    // source's own transfer function (read once above, never guessed from the HDR boolean) with
+    // BT.2020 primaries and matrix.
+    var hevcOutputSettings: [String: Any] = [
+      AVVideoCodecKey: AVVideoCodecType.hevc,
+      AVVideoWidthKey: codedTargetWidth,
+      AVVideoHeightKey: codedTargetHeight,
+      AVVideoCompressionPropertiesKey: [
+        AVVideoAverageBitRateKey: plan.videoBitrateBps,
+        AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String,
+        AVVideoExpectedSourceFrameRateKey: plan.effectiveFps,
+      ] as [String: Any],
+    ]
+    if keepHdrAchievable, let sourceColorTransfer {
+      let avTransferFunction: String =
+        sourceColorTransfer == kCVImageBufferTransferFunction_ITU_R_2100_HLG
+        ? AVVideoTransferFunction_ITU_R_2100_HLG : AVVideoTransferFunction_SMPTE_ST_2084_PQ
+      hevcOutputSettings[AVVideoColorPropertiesKey] =
+        [
+          AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+          AVVideoTransferFunctionKey: avTransferFunction,
+          AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+        ] as [String: Any]
+    }
+
+    var videoOutputSettings: [String: Any] = outputIsHevc ? hevcOutputSettings : h264OutputSettings
+
     let tempURL = PluginFiles.tempFileBeside(destinationURL)
     let reader: AVAssetReader
     let writer: AVAssetWriter
@@ -232,12 +299,27 @@ final class CompressionEngine {
     }
 
     // Pre-flight validation, turning a rejected settings combination into a typed error rather
-    // than a mid-encode failure.
-    guard writer.canApply(outputSettings: videoOutputSettings, forMediaType: .video) else {
-      throw CompressVideoError(
-        code: "encoderUnavailable",
-        message: "This device's H.264 encoder does not support the requested output settings",
-        details: nil)
+    // than a mid-encode failure. If the HEVC dictionary is rejected on a device the probe above
+    // said was capable, that is a real disagreement between the probe and the writer
+    // (Assumption A2): fall back to H.264 rather than failing the job over a capability mismatch
+    // the caller cannot act on, reverting the reader's pixel format back to 8-bit BGRA too.
+    if !writer.canApply(outputSettings: videoOutputSettings, forMediaType: .video) {
+      guard outputIsHevc else {
+        throw CompressVideoError(
+          code: "encoderUnavailable",
+          message: "This device's H.264 encoder does not support the requested output settings",
+          details: nil)
+      }
+      outputIsHevc = false
+      hevcFallback = true
+      videoReaderSettings[kCVPixelBufferPixelFormatTypeKey as String] = kCVPixelFormatType_32BGRA
+      videoOutputSettings = h264OutputSettings
+      guard writer.canApply(outputSettings: videoOutputSettings, forMediaType: .video) else {
+        throw CompressVideoError(
+          code: "encoderUnavailable",
+          message: "This device's H.264 encoder does not support the requested output settings",
+          details: nil)
+      }
     }
 
     let trimStartMs = request.trimStartMs ?? 0
@@ -576,12 +658,24 @@ final class CompressionEngine {
   ) async -> SizeGuard.Plan {
     let audioCodec = inputInfo.hasAudio ? await Self.readAudioCodec(at: inputURL) : nil
     let audioChannelCount = inputInfo.hasAudio ? await Self.readAudioChannelCount(at: inputURL) : nil
-    // outputCodecIsHevc is always false until task 2 adds the hardware-HEVC/keep-HDR probe --
-    // wired as a real parameter now (rather than hardcoded inside the private overload below)
-    // so task 2 is a value change here, not another signature change (04-04 task 1).
+    // The SAME hardware-HEVC/keep-HDR primitives `compress` itself calls for its own codec gate
+    // (04-04, CDEC-01/03) -- reading its own video track here rather than threading one in from
+    // `compress`, so this pre-flight caller (`Compression`'s free-space check) can independently
+    // resolve the identical `SizeGuard.Options.outputCodecIsHevc` `compress` resolves, with no
+    // risk of the two ever drifting apart (mirrors `TransformerEngine.resolvePlan`'s own reuse
+    // of `hasHardwareHevcEncoder`/`resolveKeepHdrAchievable`).
+    let requestedHevc = request.videoCodec == "hevc"
+    let requestedKeepHdr = request.hdrMode == "keepHdr"
+    let hasHardwareHevc = requestedHevc && CodecCapabilities.hasHardwareHevcEncoder()
+    var keepHdrAchievable = false
+    if requestedKeepHdr && inputInfo.isHdr, let videoTrack = await Self.loadFirstVideoTrack(at: inputURL) {
+      let sourceColorTransfer = await Self.readSourceColorTransfer(videoTrack: videoTrack)
+      keepHdrAchievable = sourceColorTransfer != nil && CodecCapabilities.hasHardwareHevcEncoder()
+    }
+    let outputCodecIsHevc = hasHardwareHevc || keepHdrAchievable
     return resolvePlan(
       inputInfo: inputInfo, request: request, audioCodec: audioCodec,
-      audioChannelCount: audioChannelCount, outputCodecIsHevc: false)
+      audioChannelCount: audioChannelCount, outputCodecIsHevc: outputCodecIsHevc)
   }
 
   /// Resolves `request` against `inputInfo` (plus the separately-read `audioCodec`/
@@ -952,6 +1046,50 @@ final class CompressionEngine {
     } catch {
       return nil
     }
+  }
+
+  /// Loads `url`'s first video track, or `nil` on any failure (including "no video track") --
+  /// used only by the pre-flight `resolvePlan` overload above, which does not otherwise load
+  /// any track of its own (unlike `compress`, which already holds one).
+  private static func loadFirstVideoTrack(at url: URL) async -> AVAssetTrack? {
+    let asset = AVURLAsset(url: url)
+    do {
+      if #available(iOS 16, macOS 13, *) {
+        return try await asset.loadTracks(withMediaType: .video).first
+      } else {
+        try await awaitLegacyLoad(asset, keys: ["tracks"])
+        return asset.tracks(withMediaType: .video).first
+      }
+    } catch {
+      return nil
+    }
+  }
+
+  /// Reads `videoTrack`'s own colour transfer characteristic (HLG or PQ) from its format
+  /// description's transfer-function extension, or `nil` when it cannot be determined --
+  /// mirrors `Probe.isHdr`'s own fallback read exactly. Keep-HDR (D-07) reads this rather than
+  /// guessing the transfer from the HDR boolean: when it cannot be read, keep-HDR is not
+  /// achievable and the job takes the fallback.
+  private static func readSourceColorTransfer(videoTrack: AVAssetTrack) async -> CFString? {
+    let formatDescriptions: [CMFormatDescription]
+    if #available(iOS 16, macOS 13, *) {
+      formatDescriptions = (try? await videoTrack.load(.formatDescriptions)) ?? []
+    } else {
+      try? await awaitLegacyLoad(videoTrack, keys: ["formatDescriptions"])
+      formatDescriptions = (videoTrack.formatDescriptions as? [CMFormatDescription]) ?? []
+    }
+    guard let formatDescription = formatDescriptions.first,
+      let extensions = CMFormatDescriptionGetExtensions(formatDescription) as? [String: Any],
+      let transferFunction = extensions[kCMFormatDescriptionExtension_TransferFunction as String]
+        as? String
+    else { return nil }
+    if transferFunction == (kCVImageBufferTransferFunction_ITU_R_2100_HLG as String) {
+      return kCVImageBufferTransferFunction_ITU_R_2100_HLG
+    }
+    if transferFunction == (kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String) {
+      return kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ
+    }
+    return nil
   }
 
   /// Normalises an audio track's format description media subtype into a wire-contract codec

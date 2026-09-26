@@ -955,6 +955,21 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(estimatePlan.wouldTransmux)
   }
 
+  // MARK: - CodecCapabilities.hasHardwareEncoder
+  //
+  // Drives the pure decision function directly with an injected closure -- no
+  // VTCopySupportedPropertyDictionaryForEncoder call and no real hardware required (D-05). The
+  // real wrapper (hasHardwareHevcEncoder()) is exercised end to end by hard_inputs_test.dart on
+  // the iOS simulator and the macOS host instead.
+
+  func testHasHardwareEncoderReturnsTrueWhenTheInjectedProbeSaysYes() {
+    XCTAssertTrue(CodecCapabilities.hasHardwareEncoder(isHardwareEncoderAvailable: { true }))
+  }
+
+  func testHasHardwareEncoderReturnsFalseWhenTheInjectedProbeSaysNo() {
+    XCTAssertFalse(CodecCapabilities.hasHardwareEncoder(isHardwareEncoderAvailable: { false }))
+  }
+
   // MARK: - ErrorMapping
   //
   // One case per AVError.Code ErrorMapping.swift maps, mirroring Android's

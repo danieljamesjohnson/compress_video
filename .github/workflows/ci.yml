@@ -294,6 +294,17 @@ jobs:
         # on the other.
         run: diff example/ios/RunnerTests/RunnerTests.swift example/macos/RunnerTests/RunnerTests.swift
 
+      - name: Log runner architecture (04-RESEARCH.md Open Question 3)
+        # This plan's macOS-leg HEVC/keep-HDR success-path assertions rest on the claim that
+        # macos-latest is an Apple Silicon runner with a hardware Media Engine HEVC encoder --
+        # logged here, once, before the integration steps, so that claim is an observed fact
+        # rather than a changelog read. If this ever prints an Intel brand string, the macOS leg
+        # takes the fallback branch like the iOS simulator does, and the HEVC success path stays
+        # entirely in doc/HARDWARE_CHECKLIST.md until a real Apple Silicon Mac proves it.
+        run: |
+          uname -m
+          sysctl -n machdep.cpu.brand_string
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:

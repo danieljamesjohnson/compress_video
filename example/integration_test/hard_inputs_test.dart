@@ -687,15 +687,12 @@ void main() {
       'hdr_hlg10.mp4 (HLG) with HdrMode.keepHdr',
       (WidgetTester tester) => expectKeepHdrOrFallback('hdr_hlg10'),
       timeout: const Timeout(Duration(seconds: 60)),
-      // The Apple engine does not implement keep-HDR until 04-04.
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
       'hdr_pq10.mp4 (PQ/HDR10) with HdrMode.keepHdr',
       (WidgetTester tester) => expectKeepHdrOrFallback('hdr_pq10'),
       timeout: const Timeout(Duration(seconds: 60)),
-      skip: !Platform.isAndroid,
     );
   });
 
@@ -859,7 +856,6 @@ void main() {
         }
       },
       timeout: const Timeout(Duration(seconds: 30)),
-      skip: !Platform.isAndroid,
     );
   });
 }
