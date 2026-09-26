@@ -78,6 +78,17 @@ enum Arguments {
     let parentPath = (standardizedPath as NSString).deletingLastPathComponent
     let fileManager = FileManager.default
 
+    var isOutputPathDirectory: ObjCBool = false
+    if fileManager.fileExists(atPath: standardizedPath, isDirectory: &isOutputPathDirectory),
+      isOutputPathDirectory.boolValue
+    {
+      throw CompressVideoError(
+        code: "io",
+        message: "outputPath already exists as a directory",
+        details: nil
+      )
+    }
+
     var isDirectory: ObjCBool = false
     guard fileManager.fileExists(atPath: parentPath, isDirectory: &isDirectory),
       isDirectory.boolValue

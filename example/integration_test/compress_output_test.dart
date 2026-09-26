@@ -474,6 +474,53 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 20)),
     );
+
+    testWidgets(
+      'an explicit outputPath that already names an existing directory fails with reason io '
+      'and leaves that directory (and its contents) untouched -- CR-01 regression',
+      (WidgetTester tester) async {
+        final String path = await _copyHiBitrateClip(
+          'placement_output_is_directory',
+        );
+        final Directory existingOutputDir = await Directory.systemTemp
+            .createTemp('compress_video_output_is_directory_');
+        // A file inside the directory proves the directory is not silently recursively
+        // deleted (the exact CR-01 data-loss path) if this regression is ever reintroduced.
+        final File sentinelFile = File(
+          '${existingOutputDir.path}/sentinel.txt',
+        );
+        await sentinelFile.writeAsString('do not delete me');
+
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: CompressOptions(outputPath: existingOutputDir.path),
+        );
+
+        await expectLater(
+          job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.io,
+            ),
+          ),
+        );
+        expect(
+          existingOutputDir.existsSync(),
+          isTrue,
+          reason:
+              'the pre-existing directory must survive the rejected request',
+        );
+        expect(
+          sentinelFile.existsSync(),
+          isTrue,
+          reason:
+              "the directory's own contents must survive the rejected request",
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 20)),
+    );
   });
 
   group('clearCache() (CORE-09, D-15, T-02-26, T-02-28)', () {

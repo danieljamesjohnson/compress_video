@@ -80,6 +80,28 @@ internal class ArgumentsTest {
     }
 
     @Test
+    fun requireWritableOutputParent_outputPathIsExistingDirectory_rejectedAsIo() {
+        // CR-01 regression: outputPath naming an existing directory must be rejected here,
+        // before any encode is attempted, not merely discovered when PluginFiles.moveIntoPlace's
+        // File.renameTo fails at the very end of a (wasted) full encode.
+        val tempDir = File.createTempFile("compress_video_arguments_test_", "").also {
+            it.delete()
+            it.mkdirs()
+        }
+        tempDir.deleteOnExit()
+        try {
+            val existingSubDir = File(tempDir, "existing_subdir").also { it.mkdirs() }
+            val error =
+                assertFailsWith<CompressVideoError> {
+                    Arguments.requireWritableOutputParent(existingSubDir.path)
+                }
+            assertEquals("io", error.code)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun requireWritableOutputParent_existingWritableParent_returnsCanonicalPath() {
         val tempDir = File.createTempFile("compress_video_arguments_test_", "").also {
             it.delete()

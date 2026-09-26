@@ -50,7 +50,21 @@ enum PluginFiles {
   /// first so the move can proceed, mirroring the same final observable state.
   static func moveIntoPlace(tempFile: URL, destination: URL) throws {
     do {
-      if FileManager.default.fileExists(atPath: destination.path) {
+      var isDestinationDirectory: ObjCBool = false
+      if FileManager.default.fileExists(
+        atPath: destination.path, isDirectory: &isDestinationDirectory)
+      {
+        if isDestinationDirectory.boolValue {
+          // Defence in depth: `Arguments.requireWritableOutputParent` already rejects a
+          // directory `outputPath` before any encode starts, but this refusal means a
+          // directory destination can never be recursively deleted through this call even if
+          // some future call site skips that upstream validation.
+          throw CompressVideoError(
+            code: "io",
+            message: "destination exists and is a directory",
+            details: nil
+          )
+        }
         try FileManager.default.removeItem(at: destination)
       }
       try FileManager.default.moveItem(at: tempFile, to: destination)

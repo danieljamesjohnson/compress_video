@@ -64,6 +64,14 @@ object Arguments {
                 throw CompressVideoError("io", "Could not resolve outputPath", e.message)
             }
 
+        // CR-01 parity with darwin's Arguments.swift: reject an outputPath that already names
+        // an existing directory here, before any encode is attempted, rather than only
+        // discovering it when PluginFiles.moveIntoPlace's File.renameTo fails at the very end
+        // of a (wasted) full encode.
+        if (canonical.isDirectory) {
+            throw CompressVideoError("io", "outputPath already exists as a directory")
+        }
+
         val parent = canonical.parentFile
         if (parent == null || !parent.exists() || !parent.isDirectory) {
             throw CompressVideoError("io", "outputPath's parent directory does not exist")

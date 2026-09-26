@@ -239,6 +239,22 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  /// CR-01 regression: `outputPath` naming an already-existing directory must be rejected here,
+  /// before any encode is attempted -- not silently recursed into and deleted by
+  /// `PluginFiles.moveIntoPlace` at the very end of a (wasted) encode.
+  func testRequireWritableOutputParentOutputPathIsExistingDirectoryRejectedAsIo() throws {
+    let existingDir =
+      NSTemporaryDirectory() + "compress_video_arguments_test_existing_dir_\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: existingDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: existingDir) }
+
+    XCTAssertThrowsError(
+      try Arguments.requireWritableOutputParent(existingDir)
+    ) { error in
+      XCTAssertEqual((error as? CompressVideoError)?.code, "io")
+    }
+  }
+
   /// Regression for CI run 36176323945: a caller-supplied NFC (precomposed) filename must come
   /// back NFC, not NFD -- `standardizedFileURL`/`resolvingSymlinksInPath()` route the path
   /// through Apple's file-system representation, which decomposes it, unless the result is
