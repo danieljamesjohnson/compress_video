@@ -49,13 +49,13 @@ object SizeGuard {
         /** Average audio-track bitrate, in bits per second, or `null` when unknown. */
         val audioBitrateBps: Long?,
         /**
-         * The input's own audio channel count, or `null` when [hasAudio] is `false` or the
-         * platform could not determine it. Defaults to `null` so every pre-existing call site
-         * that constructs an [InputInfo] without this field keeps compiling unchanged (04-02).
-         * Feeds [wouldTransmux]'s channel-count condition (AUDO-03): a `null` value is treated
-         * as "unknown, assume safe to remux" exactly like [videoBitrateBps]'s own unknown-input
-         * handling elsewhere in this file, since a genuinely-unknown channel count is not
-         * evidence of a six-channel track.
+         * `audioChannelCount`: the input's own audio channel count, or `null` when [hasAudio] is
+         * `false` or the platform could not determine it. Defaults to `null` so every
+         * pre-existing call site that constructs an [InputInfo] without this field keeps
+         * compiling unchanged (04-02). Feeds [wouldTransmux]'s `audioChannelCount` condition
+         * (AUDO-03): a `null` value is treated as "unknown, assume safe to remux" exactly like
+         * [videoBitrateBps]'s own unknown-input handling elsewhere in this file, since a
+         * genuinely-unknown channel count is not evidence of a six-channel track.
          */
         val audioChannelCount: Int? = null,
     )
