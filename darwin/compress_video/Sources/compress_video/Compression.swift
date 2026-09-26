@@ -48,16 +48,31 @@ final class Compression: CompressHostApi {
       inputURL: URL(fileURLWithPath: standardizedPath), inputInfo: inputInfo, request: request,
       destinationURL: destinationURL)
 
+    // WR-01: a fresh unstructured `Task` per `onProgress` call has no ordering guarantee
+    // relative to any other such `Task` -- if an earlier call's `await flutterApi.onProgress`
+    // suspends longer than a later call's, the later percentage can reach Dart first even
+    // though the native copy loop's own `lastSentProgress` gate emitted them in order.
+    // `AsyncStream` is a strict FIFO queue with exactly one reader below, so funnelling every
+    // call through `progressContinuation.yield(percent)` (a synchronous, ordering-preserving
+    // enqueue) and delivering them from that single consuming task removes the race instead of
+    // merely relying on scheduling happening to preserve order.
+    var progressContinuation: AsyncStream<Double>.Continuation!
+    let progressStream = AsyncStream<Double> { progressContinuation = $0 }
+    Task { @MainActor [flutterApi] in
+      for await percent in progressStream {
+        try? await flutterApi.onProgress(jobId: jobId, percent: percent)
+      }
+    }
+    defer { progressContinuation.finish() }
+
     return try await engine.compress(
       jobId: jobId,
       inputURL: URL(fileURLWithPath: standardizedPath),
       inputInfo: inputInfo,
       request: request,
       destinationURL: destinationURL,
-      onProgress: { [flutterApi] percent in
-        Task { @MainActor in
-          try? await flutterApi.onProgress(jobId: jobId, percent: percent)
-        }
+      onProgress: { percent in
+        progressContinuation.yield(percent)
       }
     )
   }
