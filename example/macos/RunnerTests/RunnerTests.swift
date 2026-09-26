@@ -451,7 +451,8 @@ class RunnerTests: XCTestCase {
     frameRateFps: Double? = 60.0,
     hasAudio: Bool = true,
     audioCodec: String? = "aac",
-    audioBitrateBps: Int64? = 128_000
+    audioBitrateBps: Int64? = 128_000,
+    audioChannelCount: Int? = nil
   ) -> SizeGuard.InputInfo {
     SizeGuard.InputInfo(
       displayedWidthPx: displayedWidthPx,
@@ -464,7 +465,8 @@ class RunnerTests: XCTestCase {
       frameRateFps: frameRateFps,
       hasAudio: hasAudio,
       audioCodec: audioCodec,
-      audioBitrateBps: audioBitrateBps
+      audioBitrateBps: audioBitrateBps,
+      audioChannelCount: audioChannelCount
     )
   }
 
@@ -479,7 +481,8 @@ class RunnerTests: XCTestCase {
     audioPassthroughRequested: Bool = true,
     requestedAudioBitrateBps: Int64? = nil,
     trimStartMs: Int64? = nil,
-    trimEndMs: Int64? = nil
+    trimEndMs: Int64? = nil,
+    outputCodecIsHevc: Bool = false
   ) -> SizeGuard.Options {
     SizeGuard.Options(
       maxLongSidePx: maxLongSidePx,
@@ -492,7 +495,8 @@ class RunnerTests: XCTestCase {
       audioPassthroughRequested: audioPassthroughRequested,
       requestedAudioBitrateBps: requestedAudioBitrateBps,
       trimStartMs: trimStartMs,
-      trimEndMs: trimEndMs
+      trimEndMs: trimEndMs,
+      outputCodecIsHevc: outputCodecIsHevc
     )
   }
 
@@ -512,7 +516,8 @@ class RunnerTests: XCTestCase {
     frameRateFps: Double? = 30.0,
     hasAudio: Bool = true,
     audioCodec: String? = "aac",
-    audioBitrateBps: Int64? = 128_000
+    audioBitrateBps: Int64? = 128_000,
+    audioChannelCount: Int? = nil
   ) -> SizeGuard.InputInfo {
     SizeGuard.InputInfo(
       displayedWidthPx: displayedWidthPx,
@@ -525,7 +530,8 @@ class RunnerTests: XCTestCase {
       frameRateFps: frameRateFps,
       hasAudio: hasAudio,
       audioCodec: audioCodec,
-      audioBitrateBps: audioBitrateBps
+      audioBitrateBps: audioBitrateBps,
+      audioChannelCount: audioChannelCount
     )
   }
 
@@ -540,7 +546,8 @@ class RunnerTests: XCTestCase {
     audioPassthroughRequested: Bool = true,
     requestedAudioBitrateBps: Int64? = nil,
     trimStartMs: Int64? = nil,
-    trimEndMs: Int64? = nil
+    trimEndMs: Int64? = nil,
+    outputCodecIsHevc: Bool = false
   ) -> SizeGuard.Options {
     SizeGuard.Options(
       maxLongSidePx: maxLongSidePx,
@@ -553,7 +560,8 @@ class RunnerTests: XCTestCase {
       audioPassthroughRequested: audioPassthroughRequested,
       requestedAudioBitrateBps: requestedAudioBitrateBps,
       trimStartMs: trimStartMs,
-      trimEndMs: trimEndMs
+      trimEndMs: trimEndMs,
+      outputCodecIsHevc: outputCodecIsHevc
     )
   }
 
@@ -869,6 +877,56 @@ class RunnerTests: XCTestCase {
   func testWouldTransmux_noAudioInputWithEverythingElseQualifying_qualifies() {
     let input = sizeGuardTransmuxInput(hasAudio: false, audioCodec: nil)
     let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  // --- wouldTransmux audio channel count (AUDO-03, mirrors SizeGuardTest.kt's own 04-02
+  // additions) ---
+  //
+  // A six-channel AAC input that otherwise satisfies every other transmux condition must NOT
+  // take the remux fast path with its six channels intact; the same input at two channels still
+  // qualifies, and an unknown (nil) count is treated as safe-to-remux.
+
+  func testWouldTransmux_sixChannelAudio_disqualifies() {
+    let input = sizeGuardTransmuxInput(audioChannelCount: 6)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_twoChannelAudio_stillQualifies() {
+    let input = sizeGuardTransmuxInput(audioChannelCount: 2)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_threeChannelAudio_disqualifies() {
+    let input = sizeGuardTransmuxInput(audioChannelCount: 3)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_unknownAudioChannelCount_stillQualifies() {
+    let input = sizeGuardTransmuxInput(audioChannelCount: nil)
+    let plan = SizeGuard.resolve(input: input, options: sizeGuardTransmuxOptions())
+    XCTAssertTrue(plan.wouldTransmux)
+  }
+
+  // --- wouldTransmux outputCodecIsHevc (mirrors SizeGuardTest.kt's own 04-03 additions) ---
+  //
+  // The qualifying sizeGuardTransmuxOptions() baseline defaults outputCodecIsHevc to false;
+  // setting it true disqualifies transmux even though every other condition still holds, and
+  // setting it explicitly false still qualifies (the default is not merely "happens to be
+  // false").
+
+  func testWouldTransmux_outputCodecIsHevc_disqualifies() {
+    let options = sizeGuardTransmuxOptions(outputCodecIsHevc: true)
+    let plan = SizeGuard.resolve(input: sizeGuardTransmuxInput(), options: options)
+    XCTAssertFalse(plan.wouldTransmux)
+  }
+
+  func testWouldTransmux_outputCodecIsNotHevc_stillQualifies() {
+    let options = sizeGuardTransmuxOptions(outputCodecIsHevc: false)
+    let plan = SizeGuard.resolve(input: sizeGuardTransmuxInput(), options: options)
     XCTAssertTrue(plan.wouldTransmux)
   }
 

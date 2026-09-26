@@ -19,10 +19,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 // 04-02: this plan adds real compression cases (HDR tone-map, fidelity, unusual audio, 4K60)
-// alongside 04-01's media-info-only cases above. Every new case asserts Android-only behaviour
-// (the Apple engine does not implement HDR tone-mapping or the forced audio downmix until
-// 04-04) with the same `skip: !Platform.isAndroid` guard commit 2007973 established for
-// compress_test.dart's own transmux cases, so the Apple CI legs stay green in the meantime.
+// alongside 04-01's media-info-only cases above. Through 04-03, every new case asserted
+// Android-only behaviour (the Apple engine did not implement HDR tone-mapping, keep-HDR, the
+// HEVC opt-in or the forced audio downmix yet) with the same `skip: !Platform.isAndroid` guard
+// commit 2007973 established for compress_test.dart's own transmux cases. 04-04 brings the
+// Apple engine to parity and removes every one of those skip guards; this whole suite now runs
+// on all three platforms.
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform probe reads from a real file path, not asset bytes.
@@ -590,15 +592,12 @@ void main() {
       'hdr_hlg10.mp4 (HLG) with default options',
       (WidgetTester tester) => expectToneMapOrExhaustedFallback('hdr_hlg10'),
       timeout: const Timeout(Duration(seconds: 60)),
-      // The Apple engine does not implement HDR tone-mapping until 04-04.
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
       'hdr_pq10.mp4 (PQ/HDR10) with default options',
       (WidgetTester tester) => expectToneMapOrExhaustedFallback('hdr_pq10'),
       timeout: const Timeout(Duration(seconds: 60)),
-      skip: !Platform.isAndroid,
     );
   });
 

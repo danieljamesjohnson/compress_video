@@ -39,6 +39,14 @@ enum SizeGuard {
     let audioCodec: String?
     /// Average audio-track bitrate, in bits per second, or `nil` when unknown.
     let audioBitrateBps: Int64?
+    /// The input's own audio channel count, or `nil` when `hasAudio` is `false` or the
+    /// platform could not determine it. Defaults to `nil` so every pre-existing call site that
+    /// constructs an `InputInfo` without this field keeps compiling unchanged (04-04, porting
+    /// `SizeGuard.kt`'s own 04-02 field). Feeds `wouldTransmux`'s `audioChannelCount` condition
+    /// (AUDO-03): a `nil` value is treated as "unknown, assume safe to remux" exactly like
+    /// `videoBitrateBps`'s own unknown-input handling elsewhere in this file, since a
+    /// genuinely-unknown channel count is not evidence of a six-channel track.
+    let audioChannelCount: Int?
 
     init(
       displayedWidthPx: Int,
@@ -51,7 +59,8 @@ enum SizeGuard {
       frameRateFps: Double?,
       hasAudio: Bool,
       audioCodec: String?,
-      audioBitrateBps: Int64?
+      audioBitrateBps: Int64?,
+      audioChannelCount: Int? = nil
     ) {
       self.displayedWidthPx = displayedWidthPx
       self.displayedHeightPx = displayedHeightPx
@@ -64,6 +73,7 @@ enum SizeGuard {
       self.hasAudio = hasAudio
       self.audioCodec = audioCodec
       self.audioBitrateBps = audioBitrateBps
+      self.audioChannelCount = audioChannelCount
     }
   }
 
@@ -101,6 +111,14 @@ enum SizeGuard {
     let trimStartMs: Int64?
     /// End of the trim range, in milliseconds, or `nil` for the end of the input.
     let trimEndMs: Int64?
+    /// Whether the REAL job's own resolved output video codec is HEVC (04-04, porting
+    /// `SizeGuard.kt`'s own 04-03 field, CDEC-01/03): either an HEVC opt-in request with a
+    /// hardware encoder, or an achievable keep-HDR request. Defaults to `false` so every
+    /// pre-existing call site that constructs an `Options` without this field keeps compiling
+    /// unchanged. Feeds `wouldTransmux`'s codec condition: a remux copies the INPUT's own video
+    /// track unchanged, so a resolved HEVC output can never be produced by the remux fast path
+    /// regardless of what the input's own codec is.
+    let outputCodecIsHevc: Bool
 
     init(
       maxLongSidePx: Int64?,
@@ -113,7 +131,8 @@ enum SizeGuard {
       audioPassthroughRequested: Bool,
       requestedAudioBitrateBps: Int64?,
       trimStartMs: Int64?,
-      trimEndMs: Int64?
+      trimEndMs: Int64?,
+      outputCodecIsHevc: Bool = false
     ) {
       self.maxLongSidePx = maxLongSidePx
       self.videoBitrateBps = videoBitrateBps
@@ -126,6 +145,7 @@ enum SizeGuard {
       self.requestedAudioBitrateBps = requestedAudioBitrateBps
       self.trimStartMs = trimStartMs
       self.trimEndMs = trimEndMs
+      self.outputCodecIsHevc = outputCodecIsHevc
     }
   }
 
@@ -176,6 +196,10 @@ enum SizeGuard {
 
   /// The audio codec token that satisfies `wouldTransmux`'s audio-codec condition.
   private static let audioCodecAAC = "aac"
+
+  /// The channel count that satisfies `wouldTransmux`'s audio-channel-count condition
+  /// (AUDO-03).
+  private static let maxTransmuxAudioChannels = 2
 
   // The AAC encoder's own advertised bitrate range -- mirrors Android's own live-measured
   // `c2.android.aac.encoder` range (`SizeGuard.kt`'s own comment): a requested or fallback
@@ -280,6 +304,13 @@ enum SizeGuard {
     let wouldTransmux =
       input.videoCodec == videoCodecH264
       && (!input.hasAudio || input.audioCodec == audioCodecAAC)
+      // AUDO-03: a six-channel AAC input otherwise satisfying every other condition must NOT
+      // take the remux fast path with its six channels intact -- `nil` (unknown) is treated as
+      // "assume safe to remux", matching this file's existing unknown-input-bitrate handling.
+      && (input.audioChannelCount == nil || input.audioChannelCount! <= Self.maxTransmuxAudioChannels)
+      // 04-03/04-04 (CDEC-01/03): a request that will really resolve to HEVC output must never
+      // be silently answered with a remuxed H.264 copy of the input.
+      && !options.outputCodecIsHevc
       && options.audioPassthroughRequested
       && noTrimRequested
       && inputLongSidePx <= effectiveLongSidePx

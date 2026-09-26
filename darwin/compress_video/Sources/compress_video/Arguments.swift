@@ -224,16 +224,25 @@ enum Arguments {
     return nil
   }
 
-  /// Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` -- the only
-  /// accepted value in this phase; HEVC opt-in is Phase 4 -- or `nil` if it is valid.
+  /// Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` or `"hevc"`,
+  /// or `nil` if it is valid. This validator only checks the STRING is one of the two known
+  /// tokens -- it says nothing about whether HEVC is actually achievable on this device. HEVC
+  /// is honoured only when `CodecCapabilities.hasHardwareHevcEncoder` finds a hardware HEVC
+  /// encoder (CDEC-01); otherwise the engine falls back to H.264 and the result reports
+  /// `hevcFallback: true`. Mirrors `Arguments.kt`'s own relaxed validator exactly.
   static func validateVideoCodec(_ videoCodec: String) -> String? {
-    videoCodec != "h264" ? "unsupportedInput" : nil
+    videoCodec != "h264" && videoCodec != "hevc" ? "unsupportedInput" : nil
   }
 
-  /// Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` -- the
-  /// only accepted value in this phase; keep-HDR opt-in is Phase 4 -- or `nil` if it is valid.
+  /// Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` or
+  /// `"keepHdr"`, or `nil` if it is valid. This validator only checks the STRING is one of the
+  /// two known tokens -- it says nothing about whether keep-HDR is actually achievable on this
+  /// device or this input. Keep-HDR is honoured only when the source is genuinely HDR and a
+  /// hardware HEVC encoder that can keep the source's own transfer function is found (CDEC-03);
+  /// otherwise the engine falls back to tone-mapped SDR H.264, reporting `toneMapped: true` and
+  /// `hevcFallback: true`. Mirrors `Arguments.kt`'s own relaxed validator exactly.
   static func validateHdrMode(_ hdrMode: String) -> String? {
-    hdrMode != "toneMapToSdr" ? "unsupportedInput" : nil
+    hdrMode != "toneMapToSdr" && hdrMode != "keepHdr" ? "unsupportedInput" : nil
   }
 
   /// Returns `"unsupportedInput"` when `audioMode` is `.reencode` and either

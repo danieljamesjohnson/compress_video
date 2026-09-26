@@ -121,16 +121,25 @@ final class CompressionEngine {
     let sourceAudioChannelCount = sourceAudioStreamDescription.map { Int($0.mChannelsPerFrame) }
     let sourceAudioSampleRate = sourceAudioStreamDescription?.mSampleRate
 
-    let plan = resolvePlan(inputInfo: inputInfo, request: request, audioCodec: inputAudioCodec)
+    // outputCodecIsHevc is always false until task 2 adds the hardware-HEVC/keep-HDR probe --
+    // wired as a real parameter now so task 2 is a value change here, not another signature
+    // change (04-04 task 1).
+    let plan = resolvePlan(
+      inputInfo: inputInfo, request: request, audioCodec: inputAudioCodec,
+      audioChannelCount: sourceAudioChannelCount, outputCodecIsHevc: false)
 
     // Never-larger PRE-check (D-11, mirrors TransformerEngine.compress): when the resolver
     // already knows encoding would not help, skip building a reader/writer at all.
     if plan.wouldUseOriginal {
       try Self.copyOriginalAtomically(from: inputURL, to: destinationURL)
       onProgress(100.0)
+      // No encode ever runs on this fast path -- nothing could have been tone-mapped or have
+      // fallen back to anything; buildResult's own !usedOriginal guard forces both flags false
+      // regardless of the literals passed here.
       return try await buildResult(
         destinationURL: destinationURL, inputBytes: inputBytes, startedAt: startedAt,
-        transmuxed: false, usedOriginal: true, audioReencoded: false)
+        transmuxed: false, usedOriginal: true, audioReencoded: false,
+        inputWasHdr: inputInfo.isHdr, hevcFallback: false)
     }
 
     // Transmux (D-05): when the resolver says a remux would satisfy the request, attempt an
@@ -147,6 +156,7 @@ final class CompressionEngine {
         destinationURL: destinationURL,
         inputBytes: inputBytes,
         startedAt: startedAt,
+        inputWasHdr: inputInfo.isHdr,
         onProgress: onProgress
       )
     }
@@ -418,10 +428,13 @@ final class CompressionEngine {
 
     onProgress(100.0)
 
+    // hevcFallback is always false until task 2 adds the hardware-HEVC/keep-HDR gate -- wired
+    // as a real parameter now so task 2 is a value change here, not another signature change
+    // (04-04 task 1).
     let result = try await finishJob(
       tempURL: tempURL, inputURL: inputURL, destinationURL: destinationURL,
       inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: false,
-      audioReencoded: audioWillReencode)
+      audioReencoded: audioWillReencode, inputWasHdr: inputInfo.isHdr, hevcFallback: false)
     await MainActor.run { JobRegistry.remove(jobId: jobId) }
     return result
   }
@@ -449,6 +462,7 @@ final class CompressionEngine {
     destinationURL: URL,
     inputBytes: Int64,
     startedAt: Date,
+    inputWasHdr: Bool,
     onProgress: @escaping (Double) -> Void
   ) async throws -> CompressResultMessage {
     guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
@@ -501,7 +515,11 @@ final class CompressionEngine {
 
     let result = try await finishJob(
       tempURL: tempURL, inputURL: inputURL, destinationURL: destinationURL,
-      inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: true, audioReencoded: false)
+      inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: true, audioReencoded: false,
+      // A transmux never touches the codec/HDR decision -- SizeGuard.Options.outputCodecIsHevc
+      // already disqualifies a genuinely-HEVC-bound request from transmuxing at all, so a
+      // transmux attempt can never itself be the thing that fell back from HEVC or kept HDR.
+      inputWasHdr: inputWasHdr, hevcFallback: false)
     await MainActor.run { JobRegistry.remove(jobId: jobId) }
     return result
   }
@@ -527,7 +545,9 @@ final class CompressionEngine {
     inputBytes: Int64,
     startedAt: Date,
     attemptedTransmux: Bool,
-    audioReencoded: Bool
+    audioReencoded: Bool,
+    inputWasHdr: Bool,
+    hevcFallback: Bool
   ) async throws -> CompressResultMessage {
     let tempBytes = (try? Self.fileSize(of: tempURL)) ?? Int64.max
     let usedOriginal = tempBytes >= inputBytes
@@ -540,7 +560,8 @@ final class CompressionEngine {
     let transmuxed = attemptedTransmux && !usedOriginal
     return try await buildResult(
       destinationURL: destinationURL, inputBytes: inputBytes, startedAt: startedAt,
-      transmuxed: transmuxed, usedOriginal: usedOriginal, audioReencoded: audioReencoded)
+      transmuxed: transmuxed, usedOriginal: usedOriginal, audioReencoded: audioReencoded,
+      inputWasHdr: inputWasHdr, hevcFallback: hevcFallback)
   }
 
   /// Resolves `request` against `inputInfo` into a `SizeGuard.Plan`, reading `inputURL`'s own
@@ -554,14 +575,22 @@ final class CompressionEngine {
     inputURL: URL, inputInfo: MediaInfoMessage, request: CompressRequestMessage
   ) async -> SizeGuard.Plan {
     let audioCodec = inputInfo.hasAudio ? await Self.readAudioCodec(at: inputURL) : nil
-    return resolvePlan(inputInfo: inputInfo, request: request, audioCodec: audioCodec)
+    let audioChannelCount = inputInfo.hasAudio ? await Self.readAudioChannelCount(at: inputURL) : nil
+    // outputCodecIsHevc is always false until task 2 adds the hardware-HEVC/keep-HDR probe --
+    // wired as a real parameter now (rather than hardcoded inside the private overload below)
+    // so task 2 is a value change here, not another signature change (04-04 task 1).
+    return resolvePlan(
+      inputInfo: inputInfo, request: request, audioCodec: audioCodec,
+      audioChannelCount: audioChannelCount, outputCodecIsHevc: false)
   }
 
-  /// Resolves `request` against `inputInfo` (plus the separately-read `audioCodec`, which
-  /// `MediaInfoMessage` has no field for) into a `SizeGuard.Plan` -- the single call every
-  /// geometry and bitrate number in `compress` comes from.
+  /// Resolves `request` against `inputInfo` (plus the separately-read `audioCodec`/
+  /// `audioChannelCount`, which `MediaInfoMessage` has no fields for, and the already-resolved
+  /// `outputCodecIsHevc` decision) into a `SizeGuard.Plan` -- the single call every geometry and
+  /// bitrate number in `compress` comes from.
   private func resolvePlan(
-    inputInfo: MediaInfoMessage, request: CompressRequestMessage, audioCodec: String?
+    inputInfo: MediaInfoMessage, request: CompressRequestMessage, audioCodec: String?,
+    audioChannelCount: Int?, outputCodecIsHevc: Bool
   ) -> SizeGuard.Plan {
     let input = SizeGuard.InputInfo(
       displayedWidthPx: Int(inputInfo.widthPx),
@@ -574,7 +603,8 @@ final class CompressionEngine {
       frameRateFps: inputInfo.frameRateFps,
       hasAudio: inputInfo.hasAudio,
       audioCodec: audioCodec,
-      audioBitrateBps: nil
+      audioBitrateBps: nil,
+      audioChannelCount: audioChannelCount
     )
     let options = SizeGuard.Options(
       maxLongSidePx: request.maxLongSidePx,
@@ -587,7 +617,8 @@ final class CompressionEngine {
       audioPassthroughRequested: request.audioMode == .passthrough,
       requestedAudioBitrateBps: request.audioBitrateBps,
       trimStartMs: request.trimStartMs,
-      trimEndMs: request.trimEndMs
+      trimEndMs: request.trimEndMs,
+      outputCodecIsHevc: outputCodecIsHevc
     )
     return SizeGuard.resolve(input: input, options: options)
   }
@@ -610,7 +641,7 @@ final class CompressionEngine {
   /// through this one function.
   private func buildResult(
     destinationURL: URL, inputBytes: Int64, startedAt: Date, transmuxed: Bool, usedOriginal: Bool,
-    audioReencoded: Bool
+    audioReencoded: Bool, inputWasHdr: Bool, hevcFallback: Bool
   ) async throws -> CompressResultMessage {
     let outputInfo = try await Probe().getMediaInfo(path: destinationURL.path)
     let outputBytes = (try? Self.fileSize(of: destinationURL)) ?? 0
@@ -621,6 +652,17 @@ final class CompressionEngine {
       audioCodec = nil
     }
     let elapsedMs = Int64((Date().timeIntervalSince(startedAt) * 1000).rounded())
+
+    // toneMapped/hevcFallback (D-04, D-06): both guarded by !usedOriginal exactly like
+    // transmuxed/audioReencoded already are -- a substituted original never "fell back" to or
+    // "tone-mapped" anything, whatever the raw request or a real re-probe says. toneMapped is
+    // computed here, at the one place that already holds both the input's own HDR flag and a
+    // fresh re-probe of the produced file's own HDR flag -- the input was HDR, the output is
+    // not (mirrors `TransformerEngine.finishSuccess`'s own `ColorInfo.isTransferHdr`-derived
+    // computation exactly). Phase 3's D-08 reader path (8-bit BGRA, the system tone-maps) is
+    // unchanged; this is new REPORTING of a mechanism that already existed, not a new one.
+    let toneMapped = !usedOriginal && inputWasHdr && !outputInfo.isHdr
+    let resolvedHevcFallback = !usedOriginal && hevcFallback
 
     return CompressResultMessage(
       outputPath: destinationURL.path.precomposedStringWithCanonicalMapping,
@@ -633,8 +675,8 @@ final class CompressionEngine {
       audioCodec: audioCodec,
       transmuxed: transmuxed,
       usedOriginal: usedOriginal,
-      toneMapped: false,
-      hevcFallback: false,
+      toneMapped: toneMapped,
+      hevcFallback: resolvedHevcFallback,
       audioReencoded: audioReencoded,
       elapsedMs: elapsedMs
     )
@@ -875,6 +917,38 @@ final class CompressionEngine {
       }
       guard let formatDescription else { return nil }
       return normalizedAudioCodec(fourCC: CMFormatDescriptionGetMediaSubType(formatDescription))
+    } catch {
+      return nil
+    }
+  }
+
+  /// Reads the channel count of `url`'s first audio track, or `nil` if it has none or the
+  /// stream description could not be read -- mirrors `readAudioCodec` above and
+  /// `TransformerEngine.readAudioChannelCount` (Android), feeding
+  /// `SizeGuard.InputInfo.audioChannelCount` (AUDO-03) the same way `readAudioCodec` feeds
+  /// `audioCodec`. Not `private`: also called from the `resolvePlan` overload above.
+  static func readAudioChannelCount(at url: URL) async -> Int? {
+    let asset = AVURLAsset(url: url)
+    do {
+      let track: AVAssetTrack?
+      if #available(iOS 16, macOS 13, *) {
+        track = try await asset.loadTracks(withMediaType: .audio).first
+      } else {
+        try await awaitLegacyLoad(asset, keys: ["tracks"])
+        track = asset.tracks(withMediaType: .audio).first
+      }
+      guard let track else { return nil }
+      let formatDescription: CMFormatDescription?
+      if #available(iOS 16, macOS 13, *) {
+        formatDescription = try await track.load(.formatDescriptions).first
+      } else {
+        try await awaitLegacyLoad(track, keys: ["formatDescriptions"])
+        formatDescription = (track.formatDescriptions as? [CMFormatDescription])?.first
+      }
+      guard let formatDescription,
+        let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee
+      else { return nil }
+      return Int(streamDescription.mChannelsPerFrame)
     } catch {
       return nil
     }
