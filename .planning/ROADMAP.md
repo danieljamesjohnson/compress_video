@@ -169,7 +169,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 03-09-PLAN.md — Phase sign-off: committed simulator and macOS screenshots closing 02-UAT.md #6, one observed green `apple` + `parity` CI run, and the cross-platform sameness wording
+- [ ] 03-09-PLAN.md — `status: partial`. Cross-platform sameness wording added to README/`CompressResult` dartdoc, CHANGELOG/TOOLCHAIN/CLAUDE.md updated, CORE-01/CORE-07/BULD-02 marked complete on CI evidence (runs 36202392709, 36207227343, both fully green), and every row of 03-VALIDATION.md's Per-Task Verification Map given an observed status. Task 1 (example app driven by hand on the iOS simulator and macOS host, screenshots closing 02-UAT.md #6) not yet run: blocked on the same MacBook Air unreachability as 03-08 (QUESTIONS.md #8) — BULD-04 stays open until it does
 
 **UI hint**: yes
 **Research**: Needed. Topics: AVAssetWriter output settings for 8-bit/HDR reader output, `sourceFormatHint`, deriving progress without the deprecated export-session `progress`, and differences between macOS and iOS.
@@ -233,7 +233,7 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 |-------|----------------|--------|-----------|
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
-| 3. Apple Compression to Parity | 5/9 | In Progress | - |
+| 3. Apple Compression to Parity | 6/9 | In Progress | - |
 | 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
