@@ -942,7 +942,11 @@ final class CompressionEngine {
       // between "code " and the digits). This is what makes a RECOGNISED reason's numeric code
       // observable from Dart even though CompressVideoException.platformDetail is reserved for
       // an UNRECOGNISED reason string instead (see ErrorMapping's own doc comment).
-      let magnitude = abs(nsError.code)
+      // `.magnitude` (not `abs(_:)`) because `abs(Int.min)` traps -- its positive counterpart
+      // is not representable as an `Int` -- and this whole function's purpose is to turn every
+      // underlying failure into a typed `CompressVideoError` rather than crash (WR-02).
+      // `UInt.magnitude` can never trap for any `Int` input, including `Int.min`.
+      let magnitude = nsError.code.magnitude
       return CompressVideoError(
         code: ErrorMapping.reasonForAVError(code),
         message:
