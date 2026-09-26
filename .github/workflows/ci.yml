@@ -466,9 +466,20 @@ jobs:
         # section 03-RESEARCH.md Pitfall 8 requires, run separately from the macOS host step
         # below since the simulator's H.264 encoder is software while the macOS host has real
         # hardware encode.
+        # timeout-minutes/continue-on-error (04-03, CI run 36247184701): tool/measure_presets_ci.sh
+        # now has its own bounded retry (see that script's own header), but this is a second,
+        # independent bound -- a hung or genuinely failed measurement must never block the
+        # suites/XCTest/SPM/parity steps that follow, since this step only feeds doc/PRESETS.md's
+        # own tables, not a release gate.
+        timeout-minutes: 20
+        continue-on-error: true
         run: bash tool/measure_presets_ci.sh "${{ steps.ios_sim.outputs.udid }}" /tmp/measure-ios-simulator.txt
 
       - name: Upload iOS simulator preset measurements
+        # if/hashFiles (04-03): a skipped or failed measurement above must not fail the upload
+        # step either -- the measurement file may not exist at all if the step never got far
+        # enough to write it.
+        if: always() && hashFiles('/tmp/measure-ios-simulator.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: measure-ios-simulator
@@ -564,9 +575,14 @@ jobs:
         # this run has access to real Video Toolbox hardware encode on the runner's Apple
         # Silicon, unlike the iOS Simulator (03-RESEARCH.md Pitfall 8), so the two tables are
         # expected to differ and are published separately, never combined.
+        # timeout-minutes/continue-on-error: same reasoning as the iOS simulator step above
+        # (04-03, CI run 36247184701).
+        timeout-minutes: 20
+        continue-on-error: true
         run: bash tool/measure_presets_ci.sh macos /tmp/measure-macos-host.txt
 
       - name: Upload macOS host preset measurements
+        if: always() && hashFiles('/tmp/measure-macos-host.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: measure-macos-host

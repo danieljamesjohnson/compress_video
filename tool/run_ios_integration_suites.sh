@@ -208,39 +208,50 @@ run_attempt() {
   wait "$pid"
 }
 
-reset_device || true
-for suite in "${SUITES[@]}"; do
-  # macOS only: kill any leftover app instance BEFORE every suite, not just after a failed
-  # attempt. This is the actual fix for CI run 36195780910 -- suite 1 can succeed and still
-  # leave its app process running (kill_tree cannot reach a process `open` handed off to
-  # launchd), and an existing instance is exactly what makes the NEXT suite's `open` call
-  # re-activate it instead of launching fresh. iOS is left untouched here: a simulator
-  # reboot before every suite would cost real minutes against the 90-minute step budget, and
-  # nothing in the observed iOS failures (all six suites passed in run 36195780910) shows a
-  # need for it.
-  if [ "$UDID" = "macos" ]; then
-    reset_device || true
-  fi
-  attempt=1
-  while :; do
-    attempt_log=$(mktemp)
-    status=0
-    run_attempt "$suite" "$attempt_log" || status=$?
-    cat "$attempt_log" | tee -a "$LOG"
-    rm -f "$attempt_log"
-    if [ "$status" -eq 0 ]; then
-      break
+# Runs every suite in $SUITES against $UDID with the full reset/retry/watchdog loop. A
+# separate function (rather than bare top-level statements) so another script -- e.g.
+# tool/measure_presets_ci.sh -- can `source` this file for its functions/watchdog logic
+# without also running this suite loop, then call `run_suites` itself once it has set its
+# own $SUITES/$UDID. Guarded below so running this file directly is unchanged.
+run_suites() {
+  reset_device || true
+  for suite in "${SUITES[@]}"; do
+    # macOS only: kill any leftover app instance BEFORE every suite, not just after a failed
+    # attempt. This is the actual fix for CI run 36195780910 -- suite 1 can succeed and still
+    # leave its app process running (kill_tree cannot reach a process `open` handed off to
+    # launchd), and an existing instance is exactly what makes the NEXT suite's `open` call
+    # re-activate it instead of launching fresh. iOS is left untouched here: a simulator
+    # reboot before every suite would cost real minutes against the 90-minute step budget, and
+    # nothing in the observed iOS failures (all six suites passed in run 36195780910) shows a
+    # need for it.
+    if [ "$UDID" = "macos" ]; then
+      reset_device || true
     fi
-    if [ "$status" -ne 99 ]; then
-      echo "::error::$suite failed with real test output on attempt $attempt (exit $status) -- a genuine failure, not a launch hang; failing fast with no further retry"
-      exit "$status"
-    fi
-    if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
-      echo "::error::$suite hung at launch on all $attempt attempts (last: $WATCHDOG_NOTE)"
-      exit 1
-    fi
-    echo "::warning::$suite hung at launch on attempt $attempt -- $WATCHDOG_NOTE; resetting and retrying"
-    reset_device || true
-    attempt=$((attempt + 1))
+    attempt=1
+    while :; do
+      attempt_log=$(mktemp)
+      status=0
+      run_attempt "$suite" "$attempt_log" || status=$?
+      cat "$attempt_log" | tee -a "$LOG"
+      rm -f "$attempt_log"
+      if [ "$status" -eq 0 ]; then
+        break
+      fi
+      if [ "$status" -ne 99 ]; then
+        echo "::error::$suite failed with real test output on attempt $attempt (exit $status) -- a genuine failure, not a launch hang; failing fast with no further retry"
+        exit "$status"
+      fi
+      if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+        echo "::error::$suite hung at launch on all $attempt attempts (last: $WATCHDOG_NOTE)"
+        exit 1
+      fi
+      echo "::warning::$suite hung at launch on attempt $attempt -- $WATCHDOG_NOTE; resetting and retrying"
+      reset_device || true
+      attempt=$((attempt + 1))
+    done
   done
-done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_suites
+fi
