@@ -730,7 +730,6 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(seconds: 30)),
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
@@ -748,7 +747,6 @@ void main() {
         expect(result.audioCodec, 'aac');
       },
       timeout: const Timeout(Duration(seconds: 30)),
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
@@ -771,7 +769,6 @@ void main() {
         expect(outputInfo.hasAudio, isFalse);
       },
       timeout: const Timeout(Duration(seconds: 30)),
-      skip: !Platform.isAndroid,
     );
 
     testWidgets(
@@ -803,7 +800,6 @@ void main() {
         }
       },
       timeout: const Timeout(Duration(seconds: 120)),
-      skip: !Platform.isAndroid,
     );
   });
 

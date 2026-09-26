@@ -371,6 +371,33 @@ Carries `codec` (ffprobe's raw `codec_name`, unnormalized — there is no audio 
 these two clips because they are the ones whose whole point is an unusual audio codec/channel
 count; every other clip's audio is already covered by `crossPlatform.hasAudio`.
 
+## Apple parity on Phase 4's hard inputs (04-04)
+
+04-04 brought the Apple engine to parity on every `hard_inputs_test.dart` case and removed the
+`skip: !Platform.isAndroid` guards 04-02/04-03 added, but — like the HDR fidelity assertion
+above — this repository has no Apple hardware to run the suite on locally (`.claude/CLAUDE.md`'s
+lane notes: no CocoaPods/Homebrew on the Mac, no reachable-Mac guarantee). CI's `apple` job (the
+iOS simulator and the `macos-latest` host) is therefore the first real observation of these cases
+on Apple, not a local one, and this section records what CI actually measured once that run
+lands — following the same "documented and, where appropriate, deliberately excluded from the
+parity records rather than forced to agree" style as the `truncated_mdat.mp4` divergence above,
+rather than widening an assertion to force agreement.
+
+**Known, pre-authorised risk (04-RESEARCH.md Pitfall 5):** `AVAssetReader`'s acceptance of an
+ffmpeg-authored LPCM-in-MP4 track is unverified on real Apple hardware; `pcm_audio_480p` is
+already muxed as `.mov` rather than `.mp4` for the Android side's own container reason (see
+"Files" above). If the CI run shows the `.mov` container is ALSO the fix (or is insufficient) on
+Apple, that finding is recorded here once observed, per 04-04-PLAN.md task 3's own instruction —
+this paragraph is the placeholder for that measurement, not the measurement itself.
+
+**Tone-mapped output characteristics:** whether Apple's system tone-map (Phase 3's D-08 decision:
+8-bit BGRA reader, no explicit tone-map shader) and Android's Media3 OpenGL/MediaCodec chain
+agree on the produced HDR-clip characteristics is likewise an open, CI-only observation at the
+time this plan was authored — the danserver emulator's own tone-map attempts both fail before
+producing a comparable file (see the HDR section above), so there has never been an Android-side
+measurement to compare against locally either. Update this paragraph once a CI run reports real
+values from both an Apple leg and a capable Android device/emulator.
+
 ## Reserved slots
 
 `hdr_dolbyvision_p8.mp4` (Dolby Vision profile 8) is a **reserved name, not a generated file**.

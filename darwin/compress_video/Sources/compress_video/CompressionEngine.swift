@@ -200,8 +200,15 @@ final class CompressionEngine {
     // the reader/writer pipeline is built, and is what `finishJob` below reports as
     // `audioReencoded` -- from the branch that actually ran, never from the request.
     let sourceIsAAC = inputAudioCodec == "aac"
+    // AUDO-03: a source with more than two channels must be forced to re-encode too, exactly
+    // like a non-AAC source is -- a 5.1 AAC track is not "already AAC-compatible" for a
+    // passthrough request in the sense this plugin cares about (mirrors
+    // TransformerEngine.audioForcedReencode's own third condition).
+    let sourceChannelsExceedStereo =
+      (sourceAudioChannelCount ?? 0) > Self.forcedAudioReencodeMaxChannels
     let includeAudio = inputInfo.hasAudio && audioTrack != nil && request.audioMode != .strip
-    let audioWillReencode = includeAudio && (request.audioMode == .reencode || !sourceIsAAC)
+    let audioWillReencode =
+      includeAudio && (request.audioMode == .reencode || !sourceIsAAC || sourceChannelsExceedStereo)
 
     // Coded/displayed swap (D-03): SizeGuard's plan speaks in DISPLAYED dimensions (the same
     // space `inputInfo.widthPx`/`heightPx` are already in); both AVFoundation surfaces this
@@ -363,25 +370,39 @@ final class CompressionEngine {
       if audioWillReencode {
         // An explicit `reencode` request uses the caller's own channel count (validated
         // non-nil, 1 or 2, by Arguments.requireValidCompressRequest before this engine is ever
-        // called); the AAC fallback for a non-AAC source under a passthrough request preserves
-        // the source's own channel count instead -- no channel change was asked for there, only
-        // a codec change (D-07).
-        let targetChannels =
-          request.audioMode == .reencode
+        // called). The engine-forced case (a non-AAC source, or more than two channels, under a
+        // passthrough request) targets the source's own channel count capped at two -- a mono
+        // non-AAC source must not be upmixed, and a 5.1 or LPCM source downmixes to stereo, not
+        // however many channels it started with (AUDO-03, mirrors
+        // TransformerEngine.targetAudioChannels exactly). An unreadable source channel count on
+        // a path already forcing a re-encode falls back to this plugin's own 2-channel default.
+        let isExplicitReencode = request.audioMode == .reencode
+        let targetChannels: Int =
+          isExplicitReencode
           ? Int(request.audioChannels!)
-          : (sourceAudioChannelCount ?? 2)
+          : min(
+            sourceAudioChannelCount ?? Self.forcedAudioReencodeMaxChannels,
+            Self.forcedAudioReencodeMaxChannels)
+        // The engine-forced case's own bitrate target (AUDO-03, 04-RESEARCH.md Pitfall 1): a
+        // fixed, named constant -- matching Android's TransformerEngine.FORCED_AUDIO_REENCODE_
+        // BITRATE_BPS exactly -- rather than plan.audioBitrateBps (SizeGuard rule 5's
+        // resolution), because a 5.1 track's own bitrate describes six channels and an LPCM
+        // track's describes raw samples; neither is a sensible thing to ask a 1-or-2-channel AAC
+        // encoder for. The explicit-reencode branch keeps trusting plan.audioBitrateBps (the
+        // caller's own validated request) unchanged.
+        let baseBitrate = isExplicitReencode ? plan.audioBitrateBps : Self.forcedAudioReencodeBitrateBps
         // iOS/macOS's built-in AAC-LC encoder rejects (-11861 AVError.unsupportedOutputSettings
         // / "Cannot Encode Media", confirmed live in CI run 35809012150) a bitrate far below its
         // own practical per-channel minimum, even though writer.canApply(...) below -- a
         // coarser, static compatibility check -- accepted the dictionary shape. SizeGuard's
         // shared 8,000-960,000bps range mirrors Android's own measured c2.android.aac.encoder
         // floor and is too low for Apple's encoder, so an ADDITIONAL platform-specific floor is
-        // applied here on top of SizeGuard's resolution (plan.audioBitrateBps), never by
-        // changing the shared cross-platform port. The same CI run also measured the requested
-        // bitrate going un-honoured (e.g. 64,000bps requested, ~24,182bps measured) whenever no
-        // AVSampleRateKey/AVChannelLayoutKey was supplied -- both are now always set below.
+        // applied here on top of `baseBitrate`, never by changing the shared cross-platform port.
+        // The same CI run also measured the requested bitrate going un-honoured (e.g. 64,000bps
+        // requested, ~24,182bps measured) whenever no AVSampleRateKey/AVChannelLayoutKey was
+        // supplied -- both are now always set below.
         let targetBitrate = max(
-          plan.audioBitrateBps, Self.appleAacMinBitratePerChannelBps * Int64(targetChannels))
+          baseBitrate, Self.appleAacMinBitratePerChannelBps * Int64(targetChannels))
         let aacOutputSettings: [String: Any] = [
           AVFormatIDKey: kAudioFormatMPEG4AAC,
           AVNumberOfChannelsKey: targetChannels,
@@ -510,13 +531,10 @@ final class CompressionEngine {
 
     onProgress(100.0)
 
-    // hevcFallback is always false until task 2 adds the hardware-HEVC/keep-HDR gate -- wired
-    // as a real parameter now so task 2 is a value change here, not another signature change
-    // (04-04 task 1).
     let result = try await finishJob(
       tempURL: tempURL, inputURL: inputURL, destinationURL: destinationURL,
       inputBytes: inputBytes, startedAt: startedAt, attemptedTransmux: false,
-      audioReencoded: audioWillReencode, inputWasHdr: inputInfo.isHdr, hevcFallback: false)
+      audioReencoded: audioWillReencode, inputWasHdr: inputInfo.isHdr, hevcFallback: hevcFallback)
     await MainActor.run { JobRegistry.remove(jobId: jobId) }
     return result
   }
@@ -1106,6 +1124,18 @@ final class CompressionEngine {
   /// floor was sized to fix (CI run 35809012150's 1000bps/2-channel case); a lower value that
   /// still succeeds on real hardware may exist.
   private static let appleAacMinBitratePerChannelBps: Int64 = 32000
+
+  /// The channel count the engine-forced audio re-encode path (AUDO-03) caps its target at --
+  /// matches `SizeGuard.swift`'s own `maxTransmuxAudioChannels` and Android's
+  /// `TransformerEngine.FORCED_AUDIO_REENCODE_MAX_CHANNELS`, both named `2` for the same reason.
+  private static let forcedAudioReencodeMaxChannels = 2
+
+  /// The engine-forced audio re-encode path's own fixed target bitrate (AUDO-03,
+  /// 04-RESEARCH.md Pitfall 1) -- matches Android's
+  /// `TransformerEngine.FORCED_AUDIO_REENCODE_BITRATE_BPS` exactly. Never `plan.audioBitrateBps`
+  /// for this path: a 5.1 track's own bitrate describes six channels and an LPCM track's
+  /// describes raw samples, neither a sensible thing to ask a 1-or-2-channel AAC encoder for.
+  private static let forcedAudioReencodeBitrateBps: Int64 = 128000
 
   /// Sample rates AAC-LC actually supports (ISO/IEC 14496-3 Table 1.16, the standard AAC
   /// sampling-frequency table). `AVSampleRateKey` must be one of these -- an arbitrary value
