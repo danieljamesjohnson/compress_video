@@ -10,14 +10,14 @@
     "heightPx": 480,
     "isHdr": false,
     "rotationDegrees": 0,
-    "sizeBytes": 115552,
+    "sizeBytes": 1001466,
     "videoCodec": "h264",
     "widthPx": 854
   },
   "tolerant": {
     "frameRateFps": 30.000,
     "frameRateToleranceFps": 0.5,
-    "videoBitrateBps": 60076,
+    "videoBitrateBps": 3603704,
     "videoBitrateTolerancePct": 25
   }
 }

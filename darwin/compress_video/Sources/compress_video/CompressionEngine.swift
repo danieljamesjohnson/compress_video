@@ -816,6 +816,13 @@ final class CompressionEngine {
     // unchanged; this is new REPORTING of a mechanism that already existed, not a new one.
     let toneMapped = !usedOriginal && inputWasHdr && !outputInfo.isHdr
     let resolvedHevcFallback = !usedOriginal && hevcFallback
+    // `audioReencoded` was NOT actually gated by `!usedOriginal` before this fix, despite the
+    // comment above already (incorrectly) claiming it was -- a real bug, found via
+    // surround51_480p.mp4 reporting `audioReencoded: true` with a 6-channel esds on Apple (CI
+    // run 36275676001): when the never-larger POST-check substitutes the original, the caller's
+    // file is the untouched original -- no re-encode reached it, whatever `audioWillReencode`
+    // decided going in. Mirrors `TransformerEngine.finishSuccess`'s own identical guard.
+    let resolvedAudioReencoded = !usedOriginal && audioReencoded
 
     return CompressResultMessage(
       outputPath: destinationURL.path.precomposedStringWithCanonicalMapping,
@@ -830,7 +837,7 @@ final class CompressionEngine {
       usedOriginal: usedOriginal,
       toneMapped: toneMapped,
       hevcFallback: resolvedHevcFallback,
-      audioReencoded: audioReencoded,
+      audioReencoded: resolvedAudioReencoded,
       elapsedMs: elapsedMs
     )
   }

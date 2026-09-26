@@ -557,17 +557,30 @@ echo "OK: $PCM (1 video + 1 pcm_s16le/sowt audio, $(stat -c%s "$PCM") bytes)"
 # Clip J: surround51_480p.mp4
 # ---------------------------------------------------------------------------
 # 6-channel (5.1) AAC audio built with the pan=5.1 filter graph (D-09).
+#
+# High-entropy (mandelbrot) video source at ~3Mbps, not the original low-entropy `testsrc` at
+# `-crf 30` (04-04, coordinator-directed after two rounds of Apple-side downmix fixes produced
+# no observable change against CI's own evidence: the produced file's own esds still declared 6
+# channels with no error of any kind, on BOTH fix attempts). Root cause was never the encoder
+# settings -- it was this fixture: `testsrc`+`crf 30` measured a real source video bitrate of
+# only ~60kbps (`surround51_480p.expected.json`'s own `tolerant.videoBitrateBps`), which
+# SizeGuard's rule 6 input-bitrate cap then forced the RESOLVED target down to that same ~60kbps
+# -- a bitrate low enough that Apple's real H.264 encoder's actual output apparently exceeds it
+# by enough to tip the unconditional never-larger POST-check into substituting the untouched
+# original (still 6-channel) for the downmixed re-encode, exactly the failure mode 04-02 already
+# fixed for the HDR fixtures the same way. Same reasoning, same fix: a source genuinely too
+# simple to need real compression is not a useful fixture for testing that compression happens.
 echo "Generating surround51_480p.mp4..."
 
 SURROUND=surround51_480p.mp4
 SURROUND_TMP=surround51_480p.tmp.mp4
 
 ffmpeg -y -loglevel error \
-  -f lavfi -i "testsrc=size=854x480:rate=30:duration=2" \
+  -f lavfi -i "mandelbrot=size=854x480:rate=30" \
   -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" \
   -filter_complex "[1:a]pan=5.1|c0=c0|c1=c0|c2=c0|c3=c0|c4=c0|c5=c0[a51]" \
   -map 0:v -map "[a51]" \
-  -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 30 \
+  -c:v libx264 -pix_fmt yuv420p -preset veryfast -b:v 3M -maxrate 3M -bufsize 3M \
   -threads 1 -x264-params threads=1:sliced_threads=0 \
   -c:a aac -b:a 384k \
   -shortest \

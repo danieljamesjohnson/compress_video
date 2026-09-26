@@ -405,6 +405,29 @@ Future<int?> _readMp4AudioChannelCount(String path) async {
   return null;
 }
 
+/// Prints a single, self-explanatory `HARD_INPUT_RESULT` line for [result] under [name] --
+/// BEFORE any `expect` call in the caller, so the log is informative on any outcome (pass,
+/// assertion failure, or an uncaught exception further down), not only when the case fails.
+/// Mirrors the `KEEP_HDR_BRANCH`/`HEVC_BRANCH` print idiom already used elsewhere in this file,
+/// generalised to every case that produces a [CompressResult] rather than only the codec/HDR
+/// branch-shaped ones -- this is what makes a future CI failure here self-diagnosing without a
+/// follow-up log pull (04-04, coordinator-directed after two rounds of blind Apple-side fixes).
+Future<void> _printHardInputResult(String name, CompressResult result) async {
+  int? channels;
+  try {
+    channels = await _readMp4AudioChannelCount(result.outputPath);
+  } catch (_) {
+    channels = null;
+  }
+  // ignore: avoid_print
+  print(
+    'HARD_INPUT_RESULT name=$name usedOriginal=${result.usedOriginal} '
+    'transmuxed=${result.transmuxed} audioReencoded=${result.audioReencoded} '
+    'inputBytes=${result.inputBytes} outputBytes=${result.outputBytes} '
+    'channels=$channels',
+  );
+}
+
 /// Asserts CDEC-01/CDEC-03's cross-cutting reporting invariant (04-03-PLAN.md task 1): applied
 /// to every codec/HDR case in this suite, exactly one coherent combination of
 /// [CompressResult.hevcFallback]/[CompressResult.videoCodec] may hold. When [result.usedOriginal]
@@ -546,6 +569,7 @@ void main() {
 
       try {
         final CompressResult result = await job.result;
+        await _printHardInputResult(clipName, result);
 
         // Asserted first, and loudly: if usedOriginal is true here the fixture is not
         // compressible enough for the tone-map path to have ever run at all -- a fixture bug
@@ -627,6 +651,7 @@ void main() {
 
       try {
         final CompressResult result = await job.result;
+        await _printHardInputResult(clipName, result);
 
         expect(
           result.usedOriginal,
@@ -707,6 +732,7 @@ void main() {
         );
         final CompressJob job = compressVideo.compress(path);
         final CompressResult result = await job.result;
+        await _printHardInputResult('surround51_480p', result);
 
         expect(result.audioReencoded, isTrue);
         expect(
@@ -742,6 +768,7 @@ void main() {
         );
         final CompressJob job = compressVideo.compress(path);
         final CompressResult result = await job.result;
+        await _printHardInputResult('pcm_audio_480p', result);
 
         expect(result.audioReencoded, isTrue);
         expect(result.audioCodec, 'aac');
@@ -759,6 +786,7 @@ void main() {
         );
         final CompressJob job = compressVideo.compress(path);
         final CompressResult result = await job.result;
+        await _printHardInputResult('noaudio_720p', result);
 
         expect(result.audioCodec, isNull);
         expect(result.audioReencoded, isFalse);
@@ -783,6 +811,7 @@ void main() {
         final CompressJob job = compressVideo.compress(path);
         final CompressResult result = await job.result;
         stopwatch.stop();
+        await _printHardInputResult('uhd_4k60', result);
         // ignore: avoid_print
         print(
           'UHD_4K60_MEASURED elapsedMs=${stopwatch.elapsedMilliseconds} '
@@ -818,6 +847,7 @@ void main() {
           options: const CompressOptions(codec: VideoCodec.hevc),
         );
         final CompressResult result = await job.result;
+        await _printHardInputResult('portrait_hibitrate_1080p60', result);
 
         // Asserted first, and loudly, exactly like the HDR tone-map cases above: if
         // usedOriginal is true here the codec gate never ran a real encode at all -- a

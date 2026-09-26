@@ -374,29 +374,52 @@ count; every other clip's audio is already covered by `crossPlatform.hasAudio`.
 ## Apple parity on Phase 4's hard inputs (04-04)
 
 04-04 brought the Apple engine to parity on every `hard_inputs_test.dart` case and removed the
-`skip: !Platform.isAndroid` guards 04-02/04-03 added, but — like the HDR fidelity assertion
-above — this repository has no Apple hardware to run the suite on locally (`.claude/CLAUDE.md`'s
-lane notes: no CocoaPods/Homebrew on the Mac, no reachable-Mac guarantee). CI's `apple` job (the
-iOS simulator and the `macos-latest` host) is therefore the first real observation of these cases
-on Apple, not a local one, and this section records what CI actually measured once that run
-lands — following the same "documented and, where appropriate, deliberately excluded from the
-parity records rather than forced to agree" style as the `truncated_mdat.mp4` divergence above,
-rather than widening an assertion to force agreement.
+Android-only skip guards 04-02/04-03 added. This repository has no Apple hardware to run the
+suite on locally (`.claude/CLAUDE.md`'s lane notes: no CocoaPods/Homebrew on the Mac, no
+reachable-Mac guarantee), so CI's `apple` job (the iOS simulator) was the first real observation
+of these cases on Apple, across three pushed attempts plus two coordinator-granted phase-level
+retries:
 
-**Known, pre-authorised risk (04-RESEARCH.md Pitfall 5):** `AVAssetReader`'s acceptance of an
-ffmpeg-authored LPCM-in-MP4 track is unverified on real Apple hardware; `pcm_audio_480p` is
-already muxed as `.mov` rather than `.mp4` for the Android side's own container reason (see
-"Files" above). If the CI run shows the `.mov` container is ALSO the fix (or is insufficient) on
-Apple, that finding is recorded here once observed, per 04-04-PLAN.md task 3's own instruction —
-this paragraph is the placeholder for that measurement, not the measurement itself.
+- **HDR tone-map (default options) and keep-HDR fallback, both HLG and PQ:** passed on attempt 3,
+  after fixing a real bug (not a fixture issue) — see "H.264 output colour tagging" below.
+- **LPCM (`pcm_audio_480p.mov`), no-audio, and 4K60:** passed on every attempt from the point the
+  suite ran at all. The `.mov`-container pre-authorised contingency (04-RESEARCH.md Pitfall 5)
+  was never needed: AVAssetReader accepted the ffmpeg-authored LPCM-in-`.mov` track without
+  issue.
+- **5.1 AAC downmix (`surround51_480p.mp4`):** failed on every attempt through the second
+  coordinator-granted retry, always the same way (the output's own `esds` still declared 6
+  channels) despite two independent, correct engine-side downmix fixes — see "The 5.1 downmix
+  fixture" below for the real root cause and its fix.
 
-**Tone-mapped output characteristics:** whether Apple's system tone-map (Phase 3's D-08 decision:
-8-bit BGRA reader, no explicit tone-map shader) and Android's Media3 OpenGL/MediaCodec chain
-agree on the produced HDR-clip characteristics is likewise an open, CI-only observation at the
-time this plan was authored — the danserver emulator's own tone-map attempts both fail before
-producing a comparable file (see the HDR section above), so there has never been an Android-side
-measurement to compare against locally either. Update this paragraph once a CI run reports real
-values from both an Apple leg and a capable Android device/emulator.
+**H.264 output colour tagging (real bug, not a fixture issue).** `CompressionEngine.swift`'s
+H.264 output settings never set `AVVideoColorPropertiesKey`, so `AVAssetWriter` inferred colour
+properties from the first appended `CVPixelBuffer`'s own attachments — and a decoded HDR source's
+buffer can still carry its ORIGINAL HLG/PQ transfer-function attachment even after the pixel
+values are tone-mapped to SDR range by the system (Phase 3's D-08 reader path). The produced file
+was genuinely mistagged HDR despite holding SDR pixel data, which `toneMapped`'s own re-probe
+(input was HDR, output is not) correctly reported as `false`. Fixed by tagging every H.264 output
+explicitly BT.709 SDR, regardless of source.
+
+**The 5.1 downmix fixture: never-larger substitution, not a downmix bug.** The original
+`surround51_480p.mp4` used a low-entropy `testsrc` pattern at `-crf 30`, measuring a real video
+bitrate of only ~60kbps. SizeGuard's rule 6 input-bitrate cap then forced the RESOLVED encode
+target down to that same ~60kbps — low enough that Apple's real H.264 encoder's actual output
+apparently exceeded it by enough to tip the unconditional never-larger POST-check into
+substituting the untouched original (still 6-channel) for the downmixed re-encode. This is the
+exact same failure mode 04-02 already fixed for the HDR fixtures (see that section above) — a
+source too simple to need real compression is not a useful fixture for testing that compression
+happens. Fixed by regenerating the clip with a high-entropy `mandelbrot` source at ~3Mbps
+(`corpus/generate_corpus.sh`), the same treatment `portrait_hibitrate_1080p60.mp4`/`hdr_hlg10.mp4`
+already got. Confirmed on the Android emulator after regeneration: `usedOriginal=false`,
+`outputBytes=319886` against `inputBytes=1001466` — over 3x headroom, matching the hand-computed
+SizeGuard prediction (`~319,300` bytes) almost exactly.
+
+A real, independent second bug was found along the way: `CompressionEngine.buildResult`'s
+`audioReencoded` flag was NOT gated by `!usedOriginal` (unlike `toneMapped`/`hevcFallback`/
+`transmuxed`, which already were) — so a never-larger substitution reported `audioReencoded: true`
+for a file that was actually the untouched original, masking exactly this failure mode behind a
+dishonest flag. Fixed to match `TransformerEngine.finishSuccess`'s own identical guard on
+Android.
 
 ## Reserved slots
 
