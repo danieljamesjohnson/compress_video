@@ -21,10 +21,10 @@ import 'package:integration_test/integration_test.dart';
 // 04-02: this plan adds real compression cases (HDR tone-map, fidelity, unusual audio, 4K60)
 // alongside 04-01's media-info-only cases above. Through 04-03, every new case asserted
 // Android-only behaviour (the Apple engine did not implement HDR tone-mapping, keep-HDR, the
-// HEVC opt-in or the forced audio downmix yet) with the same `skip: !Platform.isAndroid` guard
-// commit 2007973 established for compress_test.dart's own transmux cases. 04-04 brings the
-// Apple engine to parity and removes every one of those skip guards; this whole suite now runs
-// on all three platforms.
+// HEVC opt-in or the forced audio downmix yet) with an Android-only test-skip guard, the same
+// idiom commit 2007973 established for compress_test.dart's own transmux cases. 04-04 brings
+// the Apple engine to parity and removes every one of those skip guards; this whole suite now
+// runs on all three platforms.
 
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform probe reads from a real file path, not asset bytes.
