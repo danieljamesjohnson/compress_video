@@ -105,6 +105,34 @@ resolution (640 < 854 < 1280 < 1920 long side) and output size (445,104 < 512,21
   for an attempted transmux, but the attempt lands at exactly the input's own byte count, and
   CORE-05's equality-counts-as-larger reading means the original still wins.
 
+## HEVC and HDR (04-03, CDEC-01/03)
+
+**The bitrate ladder above was measured for H.264.** Every row in the Android and Apple tables
+above is an H.264 encode; requesting `VideoCodec.hevc` or `HdrMode.keepHdr` at the SAME nominal
+preset bitrate is not the same quality point. HEVC and H.264 are different codecs with different
+rate-distortion curves at a given bitrate, and HEVC typically reaches comparable perceptual
+quality at a meaningfully lower bitrate than H.264 for the same content. A caller requesting
+HEVC at `p720`'s nominal 2,500,000bps should not expect the same file size or quality as the
+H.264 `p720` row above; this project has not re-derived a separate HEVC bitrate ladder.
+
+**No HEVC or keep-HDR bitrate has been measured yet.** Both `compress_video_api35` (the danserver
+Android emulator) and the iOS Simulator report zero hardware HEVC encoders of any kind
+(04-RESEARCH.md, verified live), so every HEVC opt-in and keep-HDR case in `hard_inputs_test.dart`
+exercises the fallback branch on both CI targets, never a genuine HEVC encode. The numbers this
+section would need — real HEVC output size, real keep-HDR output size, both against the same
+corpus clips the H.264 tables above use — do not exist yet. Do not invent them.
+
+**Where the real numbers will come from:**
+- The macOS CI host (an Apple Silicon runner with a genuine hardware HEVC encoder,
+  04-RESEARCH.md) is expected to exercise the HEVC-success and keep-HDR-success paths for the
+  first time once 04-04 lands the Apple engine side of this opt-in.
+- `doc/HARDWARE_CHECKLIST.md` owns the physical-Android-phone measurement (QUESTIONS.md #3):
+  HEVC hardware encode, keep-HDR output, and a re-measured bitrate ladder for both once a
+  physical device with a hardware HEVC encoder is available.
+
+This section will be filled in with real measured numbers once either source produces them —
+matching this file's own "measured, not assumed" convention for every other table above.
+
 ## Apple
 
 **Measured on two distinct devices, published separately, never combined** (03-RESEARCH.md

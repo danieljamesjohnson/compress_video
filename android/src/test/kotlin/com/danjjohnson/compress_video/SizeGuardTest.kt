@@ -479,6 +479,26 @@ internal class SizeGuardTest {
         assertTrue(plan.wouldTransmux)
     }
 
+    // --- wouldTransmux outputCodecIsHevc (04-03, CDEC-01/03) ---
+    //
+    // The qualifying transmuxOptions() baseline defaults outputCodecIsHevc to false; setting it
+    // true disqualifies transmux even though every other condition still holds, and setting it
+    // explicitly false still qualifies (the default is not merely "happens to be false").
+
+    @Test
+    fun wouldTransmux_outputCodecIsHevc_disqualifies() {
+        val options = transmuxOptions().copy(outputCodecIsHevc = true)
+        val plan = SizeGuard.resolve(transmuxInput(), options)
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_outputCodecIsNotHevc_stillQualifies() {
+        val options = transmuxOptions().copy(outputCodecIsHevc = false)
+        val plan = SizeGuard.resolve(transmuxInput(), options)
+        assertTrue(plan.wouldTransmux)
+    }
+
     // --- estimate()/compress() can never disagree (plan 02-07, D-19, INFO-03) ---
     //
     // Compression.estimate() and TransformerEngine.compress() both resolve through
