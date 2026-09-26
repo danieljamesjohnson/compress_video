@@ -1,6 +1,6 @@
 ---
 phase: 03-apple-compression-to-parity
-reviewed: 2026-09-26T02:42:27Z
+reviewed: 2026-09-26T03:20:00Z
 depth: standard
 files_reviewed: 30
 files_reviewed_list:
@@ -18,6 +18,8 @@ files_reviewed_list:
   - darwin/compress_video/Sources/compress_video/PluginFiles.swift
   - darwin/compress_video/Sources/compress_video/SizeGuard.swift
   - darwin/compress_video/Sources/compress_video/Thumbnails.swift
+  - android/src/main/kotlin/com/danjjohnson/compress_video/Arguments.kt
+  - android/src/test/kotlin/com/danjjohnson/compress_video/ArgumentsTest.kt
   - example/integration_test/compress_audio_test.dart
   - example/integration_test/compress_jobs_test.dart
   - example/integration_test/compress_output_test.dart
@@ -36,196 +38,131 @@ files_reviewed_list:
   - tool/run_ios_integration_suites.sh
   - tool/run_ios_integration_suites_test.sh
 findings:
-  critical: 1
-  warning: 2
-  info: 1
-  total: 4
-status: issues_found
+  critical: 0
+  warning: 0
+  info: 2
+  total: 2
+status: clean
 ---
 
-# Phase 03: Code Review Report
+# Phase 03: Code Review Report (Iteration 2 — verifying fixes)
 
-**Reviewed:** 2026-09-26T02:42:27Z
+**Reviewed:** 2026-09-26T03:20:00Z
 **Depth:** standard
 **Files Reviewed:** 30
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-This phase ports the Apple compression pipeline (AVAssetReader/AVAssetWriter + AVAssetExportSession
-transmux) to parity with Android's Media3 Transformer. The engineering is unusually disciplined:
-the never-larger post-check in `CompressionEngine.finishJob` is genuinely the single unconditional
-site both the encode and transmux branches funnel through, `JobRegistry`'s terminal/cancelled race
-window is closed exactly as documented, `ErrorMapping`'s `knownAVErrorCodes` size is pinned by a
-test so a future code silently degrading to `"unknown"` fails loud, the NFC-normalisation fix at
-both reporting boundaries (`CompressionEngine.buildResult`, `Thumbnails.writeJpegAtomically`) is
-applied at the correct choke point with regression tests proving the underlying Darwin behaviour,
-and the CI/shell tooling (`check_parity.sh`, `run_ios_integration_suites.sh`, the corpus generator)
-is self-tested against fixtures rather than merely "runs and doesn't crash." `SizeGuard.swift`'s
-port of the shared resolver is line-for-line traceable against its own rule numbering.
+This is a re-review of iteration 1's three in-scope findings (CR-01, WR-01, WR-02), fixed on
+`main` by commits `bb8968c`, `cf218ac`, `1def170`. All three are verified correct by direct
+reading of the diffed code (no Swift toolchain is available on this machine either, so the
+Swift changes were verified the same way the fixer verified them — by tracing the logic against
+known-correct language semantics — plus cross-checking the Kotlin mirror, which *was* compiled
+and unit-tested per the fix report).
 
-Against that backdrop, one real gap was found: neither `Arguments.requireWritableOutputParent` nor
-`PluginFiles.moveIntoPlace` guards against a caller-supplied `outputPath` that already names an
-existing directory, and `moveIntoPlace`'s `removeItem(at:)` call will silently recurse-delete that
-directory's entire contents before the rename. This is a genuine data-loss path reachable on both
-the real-encode/transmux success path and the never-larger copy-original path, and it has no test
-coverage anywhere in the corpus or `RunnerTests.swift`. Two lower-severity findings (an unstructured
-per-progress-tick `Task` with no ordering guarantee, and an unguarded `abs()` call that traps on
-`Int.min`) round out the report.
+**CR-01 (directory `outputPath` recursively deleted) — verified fixed on both platforms.**
+`Arguments.requireWritableOutputParent` (Swift) and `Arguments.kt`'s Kotlin twin now both check
+`isDirectory`/`isOutputPathDirectory` before any parent-directory check and reject with a typed
+`"io"` error; `PluginFiles.moveIntoPlace` additionally refuses to `removeItem` a directory
+destination as defence in depth. All three new regression tests (`ArgumentsTest.kt`'s JVM case,
+and byte-identical XCTest cases in both `example/ios/RunnerTests/RunnerTests.swift` and
+`example/macos/RunnerTests/RunnerTests.swift`, confirmed with `diff`) assert the right thing, and
+the platform-neutral `compress_output_test.dart` case plants a sentinel file inside the directory
+and asserts both the directory and the sentinel survive the rejected request — a real proof the
+old recursive-delete path cannot fire, not just that an error is thrown. No gaps found.
 
-## Critical Issues
+**WR-02 (`abs(Int.min)` trap) — verified fixed.** `CompressionEngine.swift:949` now reads
+`nsError.code.magnitude` (a `UInt`, which cannot trap for any `Int` input), used only in a string
+interpolation immediately below. Single-line, mechanical, low-risk.
 
-### CR-01: A pre-existing directory at `outputPath` is silently deleted (recursively) instead of rejected
+**WR-01 (unordered progress delivery) — verified fixed for the problem it targeted, with one
+residual, pre-existing timing caveat noted below (not a regression from this fix).** The
+`AsyncStream<Double>` replacement in `Compression.swift:59-77` is the standard, documented Swift
+concurrency idiom (`var continuation: AsyncStream<T>.Continuation!; let stream = AsyncStream<T> {
+continuation = $0 }`), and traced line-by-line it is sound:
+- The build closure runs synchronously inside `AsyncStream.init`, so `progressContinuation` is
+  guaranteed non-nil before `onProgress`'s closure (which force-unwraps it implicitly) can ever be
+  invoked — no crash risk from the implicitly-unwrapped-optional pattern.
+- `progressContinuation.yield(percent)` in `onProgress` is a synchronous, ordering-preserving
+  enqueue; the single `for await percent in progressStream { try? await flutterApi.onProgress(...)
+  }` consumer processes one value fully (including its own `await`) before pulling the next, so
+  values are delivered to Dart in the exact order they were yielded regardless of how long any
+  individual `flutterApi.onProgress` call suspends. This is precisely the ordering guarantee
+  WR-01 asked for, and it is a real structural guarantee, not a scheduling coincidence.
+- `defer { progressContinuation.finish() }` is registered once, right after the stream is created,
+  and Swift's `defer` fires on every exit from `startCompress` — normal return, or a thrown error
+  from any point including `engine.compress`'s `cancelled`/mapped-error paths. The stream is
+  therefore always finished (never leaked, never left open) on the success, cancel, and error
+  paths alike. Traced all three (`compress()`'s never-larger pre-check return, its real-encode
+  throw/cancel branches, and `runTransmux`'s throw/cancel branch) — all propagate up through the
+  single `return try await engine.compress(...)` call site the `defer` guards.
+- `swift-tools-version: 5.9` (`darwin/compress_video/Package.swift`) with no strict-concurrency
+  settings means the `Task { @MainActor [flutterApi] in ... }` capture (the same capture shape the
+  pre-fix code already used at the same call site, so not a newly-introduced pattern) does not
+  hit a Sendable-checking wall this project's toolchain enables.
 
-**File:** `darwin/compress_video/Sources/compress_video/PluginFiles.swift:51-64`
-**Issue:**
-`Arguments.requireWritableOutputParent` (`Arguments.swift:76-100`) only validates that
-`outputPath`'s *parent* directory exists and is writable — it never checks whether `outputPath`
-itself already exists as a directory. `PluginFiles.moveIntoPlace`, which every success path in
-`CompressionEngine` funnels through (the real encode and transmux paths via `finishJob`, and the
-never-larger path via `copyOriginalAtomically`), does this before renaming the temp file into
-place:
+No test-invalidating defect was found in this change. **Verification caveat carried over from the
+fix report applies unchanged:** CI run 36212964031 (the push containing all three fixes) was still
+in progress (Apple job not yet complete) at the time of this review — this is the first time the
+AsyncStream code will actually be compiled. Nothing in this re-review found reason to expect a
+compile failure, but that remains empirically unconfirmed until that run finishes.
 
-```swift
-static func moveIntoPlace(tempFile: URL, destination: URL) throws {
-  do {
-    if FileManager.default.fileExists(atPath: destination.path) {
-      try FileManager.default.removeItem(at: destination)
-    }
-    try FileManager.default.moveItem(at: tempFile, to: destination)
-  } ...
-}
-```
-
-`FileManager.fileExists(atPath:)` returns `true` for a directory just as readily as a file, and
-`FileManager.removeItem(at:)` recursively deletes a non-empty directory's entire contents with no
-distinction from removing a single file. A host app that passes an existing directory as
-`CompressOptions.outputPath` (a plausible caller mistake — e.g. accidentally passing a directory
-the app meant to write *into*, or a path that used to be a file and is now a directory due to
-unrelated app state) causes this plugin to silently wipe that directory and everything under it,
-with no error and no typed `CompressVideoError` warning the caller beforehand. This is exactly the
-class of native side effect this file's own module doc says validation exists to prevent
-("turning a traversal attempt into a typed `CompressVideoError` instead of an unexpected native
-failure") — but the directory case is not covered by that validation.
-
-This is reachable on every success path (`finishJob`'s two branches and
-`copyOriginalAtomically`), and is untested: `RunnerTests.swift`'s `Arguments
-.requireWritableOutputParent` tests (lines 224-266) only cover a missing parent directory, an
-existing writable parent, and the NFC round-trip — none construct an `outputPath` that is itself
-an existing directory. No `compress_output_test.dart` case does either (checked: only "parent does
-not exist" and "parent exists and is writable" outputPath cases are exercised).
-
-**Fix:** Reject an `outputPath` that already exists as a directory in `Arguments
-.requireWritableOutputParent`, before any encode is attempted:
-
-```swift
-static func requireWritableOutputParent(_ outputPath: String) throws -> String {
-  let standardizedPath = standardizedAbsolutePath(outputPath)
-  let parentPath = (standardizedPath as NSString).deletingLastPathComponent
-  let fileManager = FileManager.default
-
-  var isDirectory: ObjCBool = false
-  if fileManager.fileExists(atPath: standardizedPath, isDirectory: &isDirectory), isDirectory.boolValue {
-    throw CompressVideoError(
-      code: "io",
-      message: "outputPath already exists as a directory",
-      details: nil
-    )
-  }
-  ... // existing parent-directory checks unchanged
-}
-```
-
-As defence in depth, `PluginFiles.moveIntoPlace` should also refuse to `removeItem` a directory
-rather than trusting every call site to have validated this upstream:
-
-```swift
-if fileManager.fileExists(atPath: destination.path, isDirectory: &isDir), isDir.boolValue {
-  throw CompressVideoError(code: "io", message: "destination exists and is a directory", details: nil)
-}
-```
-
-## Warnings
-
-### WR-01: Progress percentages are forwarded via unstructured per-call `Task`s with no ordering guarantee
-
-**File:** `darwin/compress_video/Sources/compress_video/Compression.swift:57-61`
-**Issue:** `startCompress` wires `CompressionEngine`'s `onProgress` callback like this:
-
-```swift
-onProgress: { [flutterApi] percent in
-  Task { @MainActor in
-    try? await flutterApi.onProgress(jobId: jobId, percent: percent)
-  }
-}
-```
-
-The native copy loop already guarantees the *values* passed to this closure are monotonically
-non-decreasing (`CompressionEngine.runCopyLoop`'s `lastSentProgress` gate), but each invocation
-spawns a brand-new, independent, unstructured `Task`. Nothing serializes these tasks relative to
-each other beyond "each happens to be `@MainActor`-isolated" — if an earlier task's `await
-flutterApi.onProgress(...)` call suspends (e.g. waiting on the binary messenger round trip) while a
-later task's call does not, the later percentage can reach the Dart side before the earlier one,
-producing an out-of-order progress stream on the Dart side even though native emission order was
-correct. `compress_jobs_test.dart` (`example/integration_test/compress_jobs_test.dart:150-152`)
-asserts the received stream is sorted, so this would be caught if it manifested during a test run,
-but the code has no structural guarantee preventing it — it currently relies on scheduling
-happening to preserve order on the tested runners.
-
-**Fix:** Serialize delivery explicitly, e.g. by awaiting each call directly against the
-already-`@MainActor`-isolated context that `CompressHostApiSetup.setUp` establishes (removing the
-manual `Task {}` wrapper) or by funnelling all progress sends for a job through a single
-job-scoped async sequence/actor that guarantees FIFO delivery regardless of individual call
-suspension points.
-
-### WR-02: `abs(nsError.code)` traps if `nsError.code == Int.min`
-
-**File:** `darwin/compress_video/Sources/compress_video/CompressionEngine.swift:945`
-**Issue:**
-
-```swift
-let magnitude = abs(nsError.code)
-```
-
-`Int.magnitude`/`abs(_:)` on a signed integer traps (crashes) when applied to `Int.min`, because
-its positive counterpart is not representable. `nsError.code` here comes from an `NSError` in the
-`AVFoundationErrorDomain`; in practice every documented `AVError` code is a small negative number
-nowhere near `Int.min`, so this is unlikely to fire — but it is a native crash path with no upstream
-validation guarding it, in code whose entire purpose (per its own comment two lines above) is to
-turn every underlying failure into a typed `CompressVideoError` rather than crash. A malformed or
-unexpected `NSError` (e.g. from a future OS version, a different domain incorrectly routed here, or
-a fuzzed/corrupted error object) reaching this line with `code == Int.min` would crash the host app
-instead of surfacing an `"io"`/`"unknown"` typed error.
-
-**Fix:** Use the overflow-safe form:
-
-```swift
-let magnitude = nsError.code.magnitude
-```
-and format `magnitude` (a `UInt`) instead of relying on `abs`'s trapping `Int` result — this can
-never trap for any `Int` input.
+The rest of the phase's scope (all files not touched by the three fix commits — `ErrorMapping.swift`,
+`JobRegistry.swift`, `MediaMath.swift`, `SizeGuard.swift`, `Thumbnails.swift`,
+`CompressVideoPlugin.swift`, the CI workflow, corpus/tool shell scripts, and the example/lib/test
+Dart files) was re-scanned at standard depth and shows no new issues: no hardcoded secrets, no
+dangerous functions, no empty catch blocks, no debug artifacts, and no logic changes since the
+version already reviewed clean in iteration 1.
 
 ## Info
 
-### IN-01: `CompressionEngine.resolvePlan(inputURL:inputInfo:request:)` re-reads the input's audio codec independently for the free-space pre-check and the real compress call
+### IN-01: `CompressionEngine.resolvePlan` re-reads the input's audio codec independently for the free-space pre-check and the real compress call (carried forward, unchanged, no action required)
 
 **File:** `darwin/compress_video/Sources/compress_video/CompressionEngine.swift:553-558`, `darwin/compress_video/Sources/compress_video/Compression.swift:126-146`
-**Issue:** `Compression.requireSufficientFreeSpace` and `CompressionEngine.compress` both resolve a
-`SizeGuard.Plan` for the same job, and each resolution independently calls `CompressionEngine
-.readAudioCodec(at:)`, which opens a fresh `AVURLAsset` and loads its audio track's format
-description from disk. This is a correctness non-issue (the same deterministic input produces the
-same codec both times, so the two `Plan`s cannot disagree) but it is two extra asset loads and one
-extra track/format-description read per compress call purely to keep the free-space check and the
-real encode "unable to disagree" — a documented, deliberate tradeoff (the comment at
-`CompressionEngine.swift:546-552` calls this out explicitly as the reason the function is not
-`private`). Flagging only because a future change to `resolvePlan`'s call sites should preserve
-this "exposed on purpose" contract rather than "simplify" it into a shared cached codec read that
-could silently reintroduce the disagreement risk this design avoids.
-**Fix:** No action required; this is a documented tradeoff, noted here only so it isn't
-"simplified" away by a future refactor without re-reading the rationale in the doc comment.
+**Issue:** Unchanged from iteration 1's IN-01. `Compression.requireSufficientFreeSpace` and
+`CompressionEngine.compress` each independently resolve a `SizeGuard.Plan`, and each resolution
+re-reads the audio codec via a fresh `AVURLAsset`/track load. This is a documented, deliberate
+tradeoff (see the doc comment at `CompressionEngine.swift:546-552`): the function is exposed
+non-`private` specifically so the two call sites can never predict/produce different plans. Not a
+defect. Flagged again only so a future refactor does not "simplify" it into a shared cached codec
+read without re-reading that rationale.
+**Fix:** No action required.
+
+### IN-02: The terminal progress-100 tick and the `startCompress` reply race on MainActor scheduling — pre-existing, not introduced by the WR-01 fix
+
+**File:** `darwin/compress_video/Sources/compress_video/Compression.swift:59-77`, `darwin/compress_video/Sources/compress_video/CompressionEngine.swift:419-427`
+**Issue:** The WR-01 fix guarantees strict FIFO ordering *among* progress ticks relative to each
+other, but it does not (and was not asked to) guarantee ordering between the final `onProgress(100.0)`
+tick and the `CompressResultMessage` reply that completes the Dart-side `startCompress` future.
+`engine.compress()` calls `onProgress(100.0)` (a synchronous `yield` into the stream) and then does
+additional async work (`finishJob` → `buildResult`'s re-probe of the output file) before returning;
+only once it returns does `startCompress`'s own `Task { @MainActor in ... }` context (per Pigeon's
+generated wrapper) resume to send the reply. Meanwhile the stream's single consumer `Task` also
+needs to be scheduled onto `MainActor` to actually call `flutterApi.onProgress(jobId:100.0)`. Both
+are ordinary queued work on the same serial `MainActor` executor, and nothing in the code
+establishes a happens-before relationship between "the final onProgress message is sent over the
+channel" and "the startCompress reply is sent over the channel" — the `buildResult` async work
+happening to take non-zero time after the yield is what biases this to resolve correctly in
+practice, not a structural guarantee. `compress_jobs_test.dart`'s "ends with exactly one terminal
+100" assertion would be immune to this specific race regardless (Dart's `compress_job.dart` closes
+its progress stream in a `finally` block gated on the `startCompress` reply arriving, independent
+of whether the native 100 tick won or lost the race — so a lost race would simply mean
+`progressValues.last` is not `100.0`, i.e. the test *would* catch a regression here, it just isn't
+proof one can't occur under different scheduling). This exact race (a fresh `Task` needing to be
+scheduled onto `MainActor` for the final tick, competing with the outer call's own resumption) was
+equally present in the pre-fix code at the same call site, so this is not a regression the WR-01
+fix introduced — it is an orthogonal, pre-existing property of delivering progress and the result
+over the same actor via independent Task scheduling, outside WR-01's stated scope (ordering
+*among* progress ticks).
+**Fix:** No action required for this iteration's scope. If this ever surfaces as a real flake,
+the fix would be to have `engine.compress` explicitly await the progress stream's last delivery
+(e.g. join on the last progress `Task`, or send the terminal 100 through the same reply path)
+before constructing the `CompressResultMessage`, rather than relying on `buildResult`'s incidental
+extra latency.
 
 ---
 
-_Reviewed: 2026-09-26T02:42:27Z_
+_Reviewed: 2026-09-26T03:20:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
