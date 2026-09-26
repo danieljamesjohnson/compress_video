@@ -65,7 +65,16 @@ LOG="${LOG:-/tmp/apple_integration.log}"
 # Budgets are overridable so the self-test (tool/run_ios_integration_suites_test.sh) can run
 # the same code path in seconds.
 BUILD_BUDGET="${BUILD_BUDGET:-900}"    # seconds to see "Xcode build done."
-LAUNCH_BUDGET="${LAUNCH_BUDGET:-150}"  # seconds after the build for the first real test line
+# Raised from 150 to 240 (04-01, CI run 36219080189): the split step covering only
+# media_info_test.dart/thumbnail_test.dart/compress_test.dart/compress_audio_test.dart still
+# absorbed 11 "no test output within 150s of the build finishing" launch hangs (media_info took
+# 5 attempts, thumbnail took 6, ~5 min apiece) before exhausting its step budget -- every one of
+# those was the SILENT kind (no log-reader-died marker) that then passed on retry. Hypothesis:
+# on a slow hosted runner a cold app launch can legitimately take longer than 150s, and today's
+# runs are consistent with that (a launch that would have succeeded at, say, 200s gets killed at
+# 150s and simply looks like a hang), not with a genuinely dead launch every time. 240s gives a
+# slow-but-real launch room to finish before the watchdog gives up on it.
+LAUNCH_BUDGET="${LAUNCH_BUDGET:-240}"  # seconds after the build for the first real test line
 RUN_BUDGET="${RUN_BUDGET:-600}"        # seconds for a launched suite to finish
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-8}"
 POLL="${POLL:-5}"

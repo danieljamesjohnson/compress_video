@@ -410,8 +410,16 @@ jobs:
         # array) and gets its OWN `$LOG` path: the script truncates `$LOG` on start (`: > "$LOG"`),
         # so two invocations sharing one path would silently discard the first step's own
         # PARITY_JSON lines before the extraction step below ever runs.
+        #
+        # `timeout-minutes: 90` on BOTH split steps, not a smaller share of the original 90: CI
+        # run 36219080189 measured part 1 (four suites) alone absorbing 11 launch hangs (~5 min
+        # each, "no test output within 150s" -- see run_ios_integration_suites.sh's LAUNCH_BUDGET
+        # comment) and timing out at a shrunk 60-minute budget with every suite that DID run
+        # green. The split is for the SUITE COUNT per step, not a reason to shrink the per-step
+        # backstop; the `apple` job's own 6-hour default ceiling is what actually bounds the
+        # worst case across both steps.
         working-directory: example
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: |
           LOG=/tmp/apple_integration.log bash ../tool/run_ios_integration_suites.sh \
             "${{ steps.ios_sim.outputs.udid }}" \
@@ -421,11 +429,12 @@ jobs:
             integration_test/compress_audio_test.dart
 
       - name: Run corpus integration tests on the iOS simulator (part 2)
-        # Second disjoint subset (see the step above for the full rationale): the remaining
-        # three suites, including hard_inputs_test.dart, into their own log so both steps'
-        # PARITY_JSON lines survive to the extraction step below.
+        # Second disjoint subset (see the step above for the full rationale, including why this
+        # step also keeps a full 90-minute budget): the remaining three suites, including
+        # hard_inputs_test.dart, into their own log so both steps' PARITY_JSON lines survive to
+        # the extraction step below.
         working-directory: example
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: |
           LOG=/tmp/apple_integration_2.log bash ../tool/run_ios_integration_suites.sh \
             "${{ steps.ios_sim.outputs.udid }}" \
@@ -511,8 +520,13 @@ jobs:
         # same log-truncation hazard as the iOS split above: hard_inputs_test.dart is the
         # seventh suite, split rather than raise `timeout-minutes` again, each step gets its
         # own `$LOG` path since the script truncates it on start.
+        #
+        # `timeout-minutes: 90` here too (CI run 36219080189): the split is for the suite count
+        # per step, not a reason to shrink the per-step backstop, matching the iOS steps above
+        # even though macOS suites normally finish in single-digit minutes -- the backstop only
+        # matters on the rare run that needs it.
         working-directory: example
-        timeout-minutes: 20
+        timeout-minutes: 90
         run: |
           LOG=/tmp/macos_integration.log bash ../tool/run_ios_integration_suites.sh macos \
             integration_test/media_info_test.dart \
@@ -521,10 +535,11 @@ jobs:
             integration_test/compress_audio_test.dart
 
       - name: Run corpus integration tests on macOS (part 2)
-        # Second disjoint subset (see the step above for the full rationale): the remaining
-        # three suites, including hard_inputs_test.dart, into their own log.
+        # Second disjoint subset (see the step above for the full rationale, including the
+        # 90-minute budget): the remaining three suites, including hard_inputs_test.dart, into
+        # their own log.
         working-directory: example
-        timeout-minutes: 20
+        timeout-minutes: 90
         run: |
           LOG=/tmp/macos_integration_2.log bash ../tool/run_ios_integration_suites.sh macos \
             integration_test/compress_jobs_test.dart \
