@@ -200,7 +200,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-03-PLAN.md — Android codecs: `CodecCapabilities` over Media3's `EncoderUtil`, the HEVC opt-in gated independently of `HdrMode`, keep-HDR with a coherent tone-mapped-SDR-H.264 fallback, and the two reserved enum values activated across the Dart and Kotlin validators
+- [x] 04-03-PLAN.md — Android codecs: `CodecCapabilities` over Media3's `EncoderUtil`, the HEVC opt-in gated independently of `HdrMode`, keep-HDR with a coherent tone-mapped-SDR-H.264 fallback, and the two reserved enum values activated across the Dart and Kotlin validators — complete; HEVC and keep-HDR fallback branches both proven live on this emulator (zero HEVC encoders of any kind), keep branch unproven pending 04-04's macOS leg or a physical phone
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -256,6 +256,6 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
-| 4. Codecs, HDR and Hard Inputs | 1/5 | In Progress | - |
+| 4. Codecs, HDR and Hard Inputs | 3/5 | In Progress | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
