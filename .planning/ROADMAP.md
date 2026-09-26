@@ -192,7 +192,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Five new corpus fixtures (HLG10, PQ10, LPCM, 5.1, 4K60) with derived `hdr`/`hdrProbe`/`audio` sidecar blocks, the reserved Dolby Vision slot, the phase's single new `hard_inputs_test.dart` suite, and the Apple CI steps split so a seventh suite fits the existing budget
+- [x] 04-01-PLAN.md — Five new corpus fixtures (HLG10, PQ10, LPCM, 5.1, 4K60) with derived `hdr`/`hdrProbe`/`audio` sidecar blocks, the reserved Dolby Vision slot, the phase's single new `hard_inputs_test.dart` suite, and the Apple CI steps split so a seventh suite fits the existing budget — complete, CI run 36222965357
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -256,6 +256,6 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
-| 4. Codecs, HDR and Hard Inputs | 0/TBD | Not started | - |
+| 4. Codecs, HDR and Hard Inputs | 1/5 | In Progress | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
