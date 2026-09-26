@@ -105,21 +105,23 @@ void main() {
   });
 
   group('Unusual audio and 4K60 clips report correct media info', () {
-    testWidgets('pcm_audio_480p.mov (LPCM audio) reports hasAudio and dimensions', (
-      WidgetTester tester,
-    ) async {
-      await _expectMediaInfoMatchesSidecar(
-        compressVideo,
-        'pcm_audio_480p',
-        extension: 'mov',
-      );
-    });
+    testWidgets(
+      'pcm_audio_480p.mov (LPCM audio) reports hasAudio and dimensions',
+      (WidgetTester tester) async {
+        await _expectMediaInfoMatchesSidecar(
+          compressVideo,
+          'pcm_audio_480p',
+          extension: 'mov',
+        );
+      },
+    );
 
-    testWidgets('surround51_480p.mp4 (5.1 AAC audio) reports hasAudio and dimensions', (
-      WidgetTester tester,
-    ) async {
-      await _expectMediaInfoMatchesSidecar(compressVideo, 'surround51_480p');
-    });
+    testWidgets(
+      'surround51_480p.mp4 (5.1 AAC audio) reports hasAudio and dimensions',
+      (WidgetTester tester) async {
+        await _expectMediaInfoMatchesSidecar(compressVideo, 'surround51_480p');
+      },
+    );
 
     testWidgets('uhd_4k60.mp4 reports 3840x2160 with hasAudio: false', (
       WidgetTester tester,
