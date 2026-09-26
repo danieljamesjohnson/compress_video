@@ -187,7 +187,29 @@ Plans:
   3. The 5.1-audio, PCM-audio and no-audio corpus clips and the 4K60 clip all compress successfully on the Android emulator and the iOS simulator, by downmixing or re-encoding, without an error.
   4. CI runs the full committed corpus (Dolby Vision, HLG10, portrait, 4K60, PCM, no audio, 5.1, already-small) through integration tests on the Android emulator and iOS simulator. A documented hardware checklist covers HEVC hardware encode and HDR tone-map fidelity on physical devices and has been run once.
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Five new corpus fixtures (HLG10, PQ10, LPCM, 5.1, 4K60) with derived `hdr`/`hdrProbe`/`audio` sidecar blocks, the reserved Dolby Vision slot, the phase's single new `hard_inputs_test.dart` suite, and the Apple CI steps split so a seventh suite fits the existing budget
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — Android HDR: `Composition`-based `HdrMode` with the OpenGL→MediaCodec fallback chain, `toneMapped` computed from the export's own colour info, the not-washed-out pixel proof, and the forced 5.1/PCM downmix that closes AUDO-03
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-03-PLAN.md — Android codecs: `CodecCapabilities` over Media3's `EncoderUtil`, the HEVC opt-in gated independently of `HdrMode`, keep-HDR with a coherent tone-mapped-SDR-H.264 fallback, and the two reserved enum values activated across the Dart and Kotlin validators
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-04-PLAN.md — Apple parity: `CodecCapabilities.swift` over VideoToolbox, HEVC Main10 keep-HDR writer settings, the same forced audio downmix, the `SizeGuard.swift` port catch-up, and the macOS Apple Silicon CI leg proving the HEVC success branch the emulator and simulator structurally cannot
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-05-PLAN.md — Compression parity records for the hard inputs with documented exclusions, `doc/HARDWARE_CHECKLIST.md`, public documentation matching the real codec/HDR contract, and the phase's evidence-backed requirement accounting
+
 **Research**: Needed. Topics: Media3 `HdrMode` behaviour by API level and device, Apple keep-HDR writer settings, and HEVC capability probing on both platforms.
 **Notes**: Hardware HEVC/HDR checks need a physical Android phone (QUESTIONS.md #3) and an Apple device through the Mac (QUESTIONS.md #1).
 
