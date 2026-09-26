@@ -1,21 +1,22 @@
 # Corpus
 
-Six ffmpeg-generated clips that mirror real phone video structurally (five healthy, one
+Eleven ffmpeg-generated clips that mirror real phone video structurally (ten healthy, one
 deliberately damaged), plus a machine-derived `*.expected.json` sidecar per healthy clip. The
 same sidecar is asserted against by one integration test file run on both the Android emulator
 and the iOS simulator, so "media info is correct" is a single cross-platform assertion instead
 of an opinion re-derived twice.
 
 Real phone clips (iPhone Dolby Vision, Pixel HLG) are requested from Dan in `QUESTIONS.md` #4 and
-join this corpus in Phase 4 — these synthetic clips cover Phase 1's rotation/unit/null bug classes
-in the meantime, and the generation script stays committed so they are always reproducible.
+join this corpus once he provides them — these synthetic clips cover Phase 1's rotation/unit/null
+bug classes and Phase 4's codec/HDR/hard-input bug classes in the meantime, and the generation
+script stays committed so they are always reproducible. See "Reserved slots" below.
 
 ## Files
 
 | File | What it is |
 |---|---|
 | `patch_rotation.py` | Direct `tkhd` display-matrix patcher. Stdlib-only (`struct`). |
-| `generate_corpus.sh` | Reproducible ffmpeg generation of all five clips; self-asserts every structural property before declaring success. |
+| `generate_corpus.sh` | Reproducible ffmpeg generation of all ten healthy clips; self-asserts every structural property before declaring success. |
 | `verify_corpus.sh` | The single producer of `*.expected.json`. `--write` regenerates the sidecars; default mode diffs derived content against the committed sidecars and fails on any drift. |
 | `sync_to_example.sh` | Mirrors clips + sidecars into `example/assets/corpus/`, verified by `sha256sum`. Fails loudly if `example/` doesn't exist yet. |
 | `portrait_rot90.mp4` | 1920x1080 coded, H.264 + AAC stereo, ~4s, 90° clockwise `tkhd` display matrix (phone-portrait structure), burnt-in ms timecode, 8-bucket colour-patch schedule for the thumbnail probe. |
@@ -24,7 +25,12 @@ in the meantime, and the generation script stays committed so they are always re
 | `portrait_hibitrate_1080p60.mp4` | 1920x1080 coded, 60fps, high-entropy (`mandelbrot` source) H.264 at ~8.7Mbps + AAC stereo, ~4s, 90° clockwise `tkhd` display matrix, same colour-patch schedule as `portrait_rot90.mp4` plus a 24px pure-white border. Proves genuine compression, the 30fps frame-rate cap, upright output and no letterboxing all in one fixture (Phase 2). |
 | `truncated_mdat.mp4` | 854x480, H.264 + AAC, faststart-encoded then truncated to 60% of its byte length. `moov` (and duration) survive; the media data does not — drives a real platform-codec decode failure (Phase 2). |
 | `trim_source_10s.mp4` | 1280x720 coded, 30fps, H.264 + AAC stereo (128kbps/48kHz), no display matrix, ~1Mbps, 10s, burnt-in ms timecode, explicit 30-frame GOP. The only clip long enough to express a 2000ms→7000ms trim (Phase 3, D-13) — see "Why `trim_source_10s.mp4` exists" below. |
-| `*.expected.json` | Ground-truth sidecar per healthy clip, in platform-facing units (see below). `truncated_mdat.mp4` has none — see below. `trim_source_10s.expected.json` additionally carries a `trim` block (see "The `trim` sidecar block" below). |
+| `hdr_hlg10.mp4` | 1280x720, 2s, HEVC Main10 (`yuv420p10le`), HLG (`arib-std-b67`) transfer, BT.2020 primaries, no audio, four 160x160 red/green/blue/white colour patches at y=40/x=40,240,440,640. Synthetic stand-in for a real HLG10 phone clip until Dan drops one (Phase 4, D-01). |
+| `hdr_pq10.mp4` | Same geometry and colour patches as `hdr_hlg10.mp4`, but PQ/SMPTE-2084 (`smpte2084`) transfer with mastering-display and max-CLL side data (Phase 4, D-01). |
+| `pcm_audio_480p.mov` | 854x480, H.264 + LPCM (`pcm_s16le`) stereo audio, muxed as `.mov` (not `.mp4`) — ffmpeg's ISO-MP4 PCM sample entry (`ipcm` fourcc) isn't recognized by Android's `MediaExtractor` as an audio track at all (confirmed live, 04-RESEARCH.md Pitfall 5); `.mov` gets the classic QuickTime `sowt` fourcc instead, same codec (Phase 4, D-10). |
+| `surround51_480p.mp4` | 854x480, H.264 + 6-channel (5.1) AAC audio at 384kbps, built with ffmpeg's `pan=5.1` filter graph (Phase 4, D-09). |
+| `uhd_4k60.mp4` | 3840x2160 at 60fps, 2s, no audio, high-entropy (`mandelbrot` source) H.264 capped to a few MB (Phase 4, D-12). |
+| `*.expected.json` | Ground-truth sidecar per healthy clip, in platform-facing units (see below). `truncated_mdat.mp4` has none — see below. `trim_source_10s.expected.json` additionally carries a `trim` block; `hdr_hlg10.expected.json`/`hdr_pq10.expected.json` additionally carry `hdr`/`hdrProbe` blocks; `pcm_audio_480p.expected.json`/`surround51_480p.expected.json` additionally carry an `audio` block (see "New Phase 4 sidecar blocks" below). |
 
 ## Regenerating
 
@@ -315,3 +321,39 @@ tests ALREADY assert are identical on every platform (`fileNotFound` for a missi
 `unsupportedInput` for a zero-byte file) are recorded and gated. This mirrors `small_480p`'s
 duration-delta resolution above: a platform is only "fixed" to match the other when one is
 demonstrably wrong, and here neither is.
+
+## New Phase 4 sidecar blocks
+
+`verify_corpus.sh`'s `derive_sidecar` scopes each of these to a named clip list
+(`HDR_CLIPS`/`AUDIO_PROBE_CLIPS`), so the seven pre-existing sidecars stay byte-identical.
+
+### `hdr` and `hdrProbe` (HDR_CLIPS: `hdr_hlg10.mp4`, `hdr_pq10.mp4`)
+
+`hdr` carries `colorTransfer`, `colorPrimaries` and `bitDepth`, read directly from ffprobe — the
+same facts `crossPlatform.isHdr` is derived from, kept alongside it for a later plan's
+diagnostics.
+
+`hdrProbe` carries `patches` (an array of `{xPx, yPx, dominantChannel}` in DISPLAYED coordinates
+— neither HDR clip carries a rotation matrix, so displayed coordinates equal coded coordinates),
+plus `minSaturation`, `minWhiteLuma` and `dominanceMargin`. These are documented threshold
+constants, **not** an expected RGB triple: ffmpeg cannot author a reference tone-map (a naive
+ffmpeg decode of an HLG/PQ stream produces exactly the washed-out values this phase exists to
+prevent), so recording an ffmpeg-sampled colour as "the answer" would encode the bug as the
+contract. A later plan samples the REAL tone-mapped output from a real platform compression and
+checks it against these thresholds instead.
+
+### `audio` (AUDIO_PROBE_CLIPS: `pcm_audio_480p.mov`, `surround51_480p.mp4`)
+
+Carries `codec` (ffprobe's raw `codec_name`, unnormalized — there is no audio entry in
+`normalize_codec`, and this block is about what the source really is) and `channels`. Scoped to
+these two clips because they are the ones whose whole point is an unusual audio codec/channel
+count; every other clip's audio is already covered by `crossPlatform.hasAudio`.
+
+## Reserved slots
+
+`hdr_dolbyvision_p8.mp4` (Dolby Vision profile 8) is a **reserved name, not a generated file**.
+ffmpeg cannot author Dolby Vision RPU metadata, so this fixture can only come from a real Dolby
+Vision-encoding device (an iPhone). It is requested from Dan in `QUESTIONS.md` #4 and, until it
+exists, lives as a real-device-only case in `doc/HARDWARE_CHECKLIST.md`. Do not attempt to
+synthesize it with ffmpeg — a fixture claiming to be Dolby Vision without a genuine RPU would
+make the DV-specific test pass for the wrong reason.

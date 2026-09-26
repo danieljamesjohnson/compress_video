@@ -94,7 +94,7 @@ is_hdr_clip() {
 # Clips carrying an `audio` sidecar block (Phase 4, D-09/D-10): the source's real codec and
 # channel count, read directly from ffprobe rather than normalized, since this block is about
 # what the source really is, not the normalize_codec() bucket used for cross-platform video.
-AUDIO_PROBE_CLIPS=(pcm_audio_480p.mp4 surround51_480p.mp4)
+AUDIO_PROBE_CLIPS=(pcm_audio_480p.mov surround51_480p.mp4)
 
 is_audio_probe_clip() {
   local needle="$1" c
@@ -397,14 +397,18 @@ check_damaged_clip() {
   echo "CHECK: $clip still probes as video (duration ${duration}s), no sidecar by design"
 }
 
-CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4 hdr_hlg10.mp4)
+CLIPS=(portrait_rot90.mp4 small_480p.mp4 noaudio_720p.mp4 portrait_hibitrate_1080p60.mp4 trim_source_10s.mp4 hdr_hlg10.mp4 hdr_pq10.mp4 pcm_audio_480p.mov surround51_480p.mp4 uhd_4k60.mp4)
 STATUS=0
 
 for clip in "${CLIPS[@]}"; do
   if [ ! -f "$clip" ]; then
     fail "$clip not found - run generate_corpus.sh first"
   fi
-  sidecar_path="${clip%.mp4}.expected.json"
+  # Strip whatever video extension the clip has (.mp4 or .mov -- pcm_audio_480p.mov is the one
+  # fixture that isn't .mp4, see its own comment in generate_corpus.sh) to get the sidecar name.
+  clip_stem="${clip%.mp4}"
+  clip_stem="${clip_stem%.mov}"
+  sidecar_path="${clip_stem}.expected.json"
   derived=$(derive_sidecar "$clip")
 
   if [ "$WRITE_MODE" = true ]; then

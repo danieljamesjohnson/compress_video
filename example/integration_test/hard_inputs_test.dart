@@ -42,41 +42,89 @@ Future<Map<String, dynamic>> _loadSidecar(String clipName) async {
   return jsonDecode(raw) as Map<String, dynamic>;
 }
 
+/// Runs `getMediaInfo` against [clipName] and asserts the sidecar's `crossPlatform` block:
+/// width/height/codec/hasAudio/isHdr exactly, duration within its stated tolerance. Every case
+/// below is a metadata read only -- no compression happens in this plan.
+///
+/// [extension] defaults to `mp4`; `pcm_audio_480p` is `mov` -- ffmpeg's ISO-MP4 PCM sample
+/// entry isn't recognized by Android's MediaExtractor as an audio track (confirmed live during
+/// this plan), so that one fixture is muxed as `.mov` instead (04-RESEARCH.md Pitfall 5's
+/// pre-authorised contingency; same codec, different container/fourcc).
+Future<void> _expectMediaInfoMatchesSidecar(
+  CompressVideo compressVideo,
+  String clipName, {
+  String extension = 'mp4',
+}) async {
+  final String path = await _copyAssetToTempFile(
+    'assets/corpus/$clipName.$extension',
+    '$clipName.$extension',
+  );
+  final Map<String, dynamic> sidecar = await _loadSidecar(clipName);
+  final Map<String, dynamic> expected =
+      sidecar['crossPlatform'] as Map<String, dynamic>;
+
+  final MediaInfo info = await compressVideo.getMediaInfo(path);
+
+  expect(info.widthPx, expected['widthPx']);
+  expect(info.heightPx, expected['heightPx']);
+  expect(info.videoCodec, expected['videoCodec']);
+  expect(info.hasAudio, expected['hasAudio']);
+  expect(info.isHdr, expected['isHdr']);
+  expect(
+    info.durationMs.toDouble(),
+    closeTo(
+      (expected['durationMs'] as int).toDouble(),
+      (expected['durationToleranceMs'] as int).toDouble(),
+    ),
+  );
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   const CompressVideo compressVideo = CompressVideo();
 
   group('HDR clips report isHdr from a real platform media-info call', () {
-    testWidgets('hdr_hlg10.mp4 (HEVC Main10, HLG) reports isHdr, dimensions and codec', (
+    testWidgets(
+      'hdr_hlg10.mp4 (HEVC Main10, HLG) reports isHdr, dimensions and codec',
+      (WidgetTester tester) async {
+        // A metadata read does not decode: a pass here proves MediaMetadataRetriever reports
+        // the HDR transfer characteristic correctly, not that the goldfish HEVC decoder can
+        // actually decode a Main10 stream (04-RESEARCH.md Open Question 1) -- that is a
+        // separate, unproven risk this test does not exercise.
+        await _expectMediaInfoMatchesSidecar(compressVideo, 'hdr_hlg10');
+      },
+    );
+
+    testWidgets(
+      'hdr_pq10.mp4 (HEVC Main10, PQ/HDR10) reports isHdr, dimensions and codec',
+      (WidgetTester tester) async {
+        await _expectMediaInfoMatchesSidecar(compressVideo, 'hdr_pq10');
+      },
+    );
+  });
+
+  group('Unusual audio and 4K60 clips report correct media info', () {
+    testWidgets('pcm_audio_480p.mov (LPCM audio) reports hasAudio and dimensions', (
       WidgetTester tester,
     ) async {
-      const String clipName = 'hdr_hlg10';
-      final String path = await _copyAssetToTempFile(
-        'assets/corpus/$clipName.mp4',
-        '$clipName.mp4',
+      await _expectMediaInfoMatchesSidecar(
+        compressVideo,
+        'pcm_audio_480p',
+        extension: 'mov',
       );
-      final Map<String, dynamic> sidecar = await _loadSidecar(clipName);
-      final Map<String, dynamic> expected =
-          sidecar['crossPlatform'] as Map<String, dynamic>;
+    });
 
-      final MediaInfo info = await compressVideo.getMediaInfo(path);
+    testWidgets('surround51_480p.mp4 (5.1 AAC audio) reports hasAudio and dimensions', (
+      WidgetTester tester,
+    ) async {
+      await _expectMediaInfoMatchesSidecar(compressVideo, 'surround51_480p');
+    });
 
-      // A metadata read does not decode: a pass here proves MediaMetadataRetriever reports the
-      // HDR transfer characteristic correctly, not that the goldfish HEVC decoder can actually
-      // decode a Main10 stream (04-RESEARCH.md Open Question 1) -- that is a separate, unproven
-      // risk this test does not exercise.
-      expect(info.isHdr, expected['isHdr']);
-      expect(info.widthPx, expected['widthPx']);
-      expect(info.heightPx, expected['heightPx']);
-      expect(info.videoCodec, expected['videoCodec']);
-      expect(
-        info.durationMs.toDouble(),
-        closeTo(
-          (expected['durationMs'] as int).toDouble(),
-          (expected['durationToleranceMs'] as int).toDouble(),
-        ),
-      );
+    testWidgets('uhd_4k60.mp4 reports 3840x2160 with hasAudio: false', (
+      WidgetTester tester,
+    ) async {
+      await _expectMediaInfoMatchesSidecar(compressVideo, 'uhd_4k60');
     });
   });
 }

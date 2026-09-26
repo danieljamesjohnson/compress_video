@@ -1,0 +1,19 @@
+{
+  "crossPlatform": {
+    "durationMs": 2000,
+    "durationToleranceMs": 34,
+    "hasAudio": false,
+    "heightPx": 2160,
+    "isHdr": false,
+    "rotationDegrees": 0,
+    "sizeBytes": 1656437,
+    "videoCodec": "h264",
+    "widthPx": 3840
+  },
+  "tolerant": {
+    "frameRateFps": 60.000,
+    "frameRateToleranceFps": 0.5,
+    "videoBitrateBps": 6616428,
+    "videoBitrateTolerancePct": 25
+  }
+}

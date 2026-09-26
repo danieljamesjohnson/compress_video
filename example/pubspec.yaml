@@ -86,6 +86,14 @@ flutter:
     - assets/corpus/trim_source_10s.expected.json
     - assets/corpus/hdr_hlg10.mp4
     - assets/corpus/hdr_hlg10.expected.json
+    - assets/corpus/hdr_pq10.mp4
+    - assets/corpus/hdr_pq10.expected.json
+    - assets/corpus/pcm_audio_480p.mov
+    - assets/corpus/pcm_audio_480p.expected.json
+    - assets/corpus/surround51_480p.mp4
+    - assets/corpus/surround51_480p.expected.json
+    - assets/corpus/uhd_4k60.mp4
+    - assets/corpus/uhd_4k60.expected.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

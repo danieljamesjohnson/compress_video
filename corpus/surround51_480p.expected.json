@@ -1,0 +1,23 @@
+{
+  "audio": {
+    "channels": 6,
+    "codec": "aac"
+  },
+  "crossPlatform": {
+    "durationMs": 2000,
+    "durationToleranceMs": 34,
+    "hasAudio": true,
+    "heightPx": 480,
+    "isHdr": false,
+    "rotationDegrees": 0,
+    "sizeBytes": 115552,
+    "videoCodec": "h264",
+    "widthPx": 854
+  },
+  "tolerant": {
+    "frameRateFps": 30.000,
+    "frameRateToleranceFps": 0.5,
+    "videoBitrateBps": 60076,
+    "videoBitrateTolerancePct": 25
+  }
+}

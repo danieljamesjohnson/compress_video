@@ -1,0 +1,23 @@
+{
+  "audio": {
+    "channels": 2,
+    "codec": "pcm_s16le"
+  },
+  "crossPlatform": {
+    "durationMs": 2000,
+    "durationToleranceMs": 34,
+    "hasAudio": true,
+    "heightPx": 480,
+    "isHdr": false,
+    "rotationDegrees": 0,
+    "sizeBytes": 402110,
+    "videoCodec": "h264",
+    "widthPx": 854
+  },
+  "tolerant": {
+    "frameRateFps": 30.000,
+    "frameRateToleranceFps": 0.5,
+    "videoBitrateBps": 60076,
+    "videoBitrateTolerancePct": 25
+  }
+}
