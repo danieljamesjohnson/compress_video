@@ -165,7 +165,7 @@ Plans:
 
 **Wave 7** *(blocked on Waves 2 and 6 completion)*
 
-- [ ] 03-08-PLAN.md — `tool/verify_fresh_app.sh`, the widened CI `apple` job (every suite on the simulator and on macOS, both install paths) and compression records in the parity gate
+- [ ] 03-08-PLAN.md — `status: partial`. Compression records added to the parity gate (all four suites, two-comparison `parity` job) and CI's `apple` job widened with a macOS `integration_test` run, a fixed macOS launch-flake watchdog, and a macOS SPM build — all green on CI run 36202392709. `tool/verify_fresh_app.sh` (task 1, BULD-02's fresh-app CocoaPods/SPM proof) not yet written: blocked on the MacBook Air being unreachable (QUESTIONS.md #8)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
