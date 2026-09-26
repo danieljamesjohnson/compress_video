@@ -602,6 +602,104 @@ void main() {
     );
   });
 
+  group('HdrMode.keepHdr either keeps genuine HDR HEVC on a capable device, or falls back to '
+      'tone-mapped SDR H.264 with both flags saying so (04-03, CDEC-03, D-07/D-08)', () {
+    /// Compresses [clipName] with `hdr: HdrMode.keepHdr` and asserts EXACTLY one of THREE
+    /// legitimate outcomes: the keep branch (HEVC HDR preserved, `toneMapped: false`,
+    /// `hevcFallback: false`), the tone-map fallback branch (tone-mapped SDR H.264,
+    /// `toneMapped: true`, `hevcFallback: true`), or -- when keep-HDR is not achievable, an
+    /// unachievable keep-HDR request takes the SAME OpenGL-then-MediaCodec fallback chain the
+    /// plain `toneMapToSdr` HDR cases above do, and 04-02 already proved BOTH attempts exhaust
+    /// on this specific emulator's software GL/decoder -- the exhausted-chain branch
+    /// (`CompressVideoException` reason `unsupportedInput`, matching
+    /// `expectToneMapOrExhaustedFallback`'s own dual-outcome idiom above). On the emulator the
+    /// exhausted-chain branch is what executes; the keep branch exists so a capable device --
+    /// the macOS host in 04-04, or a physical phone from the hardware checklist -- proves that
+    /// half without a test rewrite.
+    Future<void> expectKeepHdrOrFallback(String clipName) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/$clipName.mp4',
+        '${clipName}_keephdr_${DateTime.now().microsecondsSinceEpoch}.mp4',
+      );
+      final CompressJob job = compressVideo.compress(
+        path,
+        options: const CompressOptions(hdr: HdrMode.keepHdr),
+      );
+
+      try {
+        final CompressResult result = await job.result;
+
+        expect(
+          result.usedOriginal,
+          isFalse,
+          reason:
+              'usedOriginal:true means the keep-HDR gate never ran a real encode -- a fixture '
+              'bug, not a result to accept',
+        );
+        expect(result.transmuxed, isFalse);
+        // requestedCodec: 'hevc' -- a keep-HDR request's own non-fallback outcome is always
+        // HEVC (D-07: keep-HDR output is HEVC Main10), so that is the codec the invariant
+        // checks the keep branch against.
+        _expectCodecFallbackInvariant(result, requestedCodec: 'hevc');
+
+        if (result.hevcFallback) {
+          // ignore: avoid_print
+          print('KEEP_HDR_BRANCH=fallback');
+          expect(result.toneMapped, isTrue);
+          expect(result.videoCodec, 'h264');
+          final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+            result.outputPath,
+          );
+          expect(outputInfo.isHdr, isFalse);
+
+          final Map<String, dynamic> sidecar = await _loadSidecar(clipName);
+          await _expectHdrFidelity(compressVideo, result, sidecar);
+        } else {
+          // ignore: avoid_print
+          print('KEEP_HDR_BRANCH=keep');
+          expect(result.toneMapped, isFalse);
+          expect(result.videoCodec, 'hevc');
+          final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+            result.outputPath,
+          );
+          expect(outputInfo.isHdr, isTrue);
+        }
+      } on CompressVideoException catch (e) {
+        // ignore: avoid_print
+        print('KEEP_HDR_BRANCH=exhausted');
+        expect(
+          e.reason,
+          CompressVideoErrorReason.unsupportedInput,
+          reason:
+              'the only other legitimate outcome is an exhausted OpenGL-then-MediaCodec '
+              'fallback chain reporting unsupportedInput -- any other reason is a real bug',
+        );
+        expect(
+          e.message,
+          contains('exhausted'),
+          reason:
+              'the exhausted-chain message names the chain it tried, per '
+              'hdrFallbackExhaustedError',
+        );
+      }
+    }
+
+    testWidgets(
+      'hdr_hlg10.mp4 (HLG) with HdrMode.keepHdr',
+      (WidgetTester tester) => expectKeepHdrOrFallback('hdr_hlg10'),
+      timeout: const Timeout(Duration(seconds: 60)),
+      // The Apple engine does not implement keep-HDR until 04-04.
+      skip: !Platform.isAndroid,
+    );
+
+    testWidgets(
+      'hdr_pq10.mp4 (PQ/HDR10) with HdrMode.keepHdr',
+      (WidgetTester tester) => expectKeepHdrOrFallback('hdr_pq10'),
+      timeout: const Timeout(Duration(seconds: 60)),
+      skip: !Platform.isAndroid,
+    );
+  });
+
   group('Unusual audio and 4K60 sources compress instead of failing (04-02 task 3)', () {
     testWidgets(
       'surround51_480p.mp4 (5.1 AAC) with default options downmixes to 2-channel AAC '

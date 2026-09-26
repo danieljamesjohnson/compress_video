@@ -4,11 +4,13 @@ import android.content.Context
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import androidx.media3.common.C
 import androidx.media3.common.ColorInfo
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -91,24 +93,33 @@ class TransformerEngine(
 
         val target = resolvePlan(inputFile, inputInfo, request)
 
-        // HEVC opt-in gate (CDEC-01), computed once, up front, independent of whether an encode
-        // ever runs and independent of HdrMode (04-RESEARCH.md Pattern 4 -- Media3's own
-        // automatic HdrMode step-down changes only the HDR mode, never the requested video MIME
-        // type, so this probe -- not that step-down -- is what decides H.264-vs-HEVC output).
-        // hasHardwareHevcEncoder() is the SAME function resolvePlan calls (via
-        // buildSizeGuardOptions) to resolve SizeGuard.Options.outputCodecIsHevc, so this job and
-        // estimate() can never disagree about which codec would really be produced (02-07's own
-        // estimate()/compress() agreement invariant).
+        // HEVC opt-in (CDEC-01) and keep-HDR (CDEC-03) capability gates, computed once, up
+        // front, independent of whether an encode ever runs and independent of each other's
+        // OWN success -- both feed into the SAME outputIsHevc decision below (04-RESEARCH.md
+        // Pattern 4 -- Media3's own automatic HdrMode step-down changes only the HDR mode,
+        // never the requested video MIME type, so this probe -- not that step-down -- is what
+        // decides H.264-vs-HEVC output). hasHardwareHevcEncoder()/resolveKeepHdrAchievable() are
+        // the SAME functions resolvePlan calls (via buildSizeGuardOptions) to resolve
+        // SizeGuard.Options.outputCodecIsHevc, so this job and estimate() can never disagree
+        // about which codec would really be produced (02-07's own estimate()/compress()
+        // agreement invariant).
         val requestedHevc = request.videoCodec == "hevc"
+        val requestedKeepHdr = request.hdrMode == "keepHdr"
         val hasHardwareHevc = requestedHevc && hasHardwareHevcEncoder()
-        val resolvedVideoMimeType = if (hasHardwareHevc) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
+        val keepHdrAchievable =
+            resolveKeepHdrAchievable(inputFile, inputInfo.isHdr, requestedKeepHdr)
+        val outputIsHevc = hasHardwareHevc || keepHdrAchievable
+        val resolvedVideoMimeType = if (outputIsHevc) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
 
-        // D-06: true when the caller asked for HEVC and this device has no hardware HEVC
-        // encoder -- threaded as a real parameter now, all the way through finishSuccess into
+        // D-06/D-08: true when the caller asked for HEVC and this device has no hardware HEVC
+        // encoder, OR asked for keep-HDR and keep-HDR is not achievable -- a keep-HDR request
+        // that comes back with toneMapped:true is how a caller learns the fallback happened.
+        // Threaded as a real parameter now, all the way through finishSuccess into
         // buildResultFromDestination, guarded there by the same !usedOriginal check
         // toneMapped/transmuxed/audioReencoded already use: a substituted original or a skipped
         // encode never "fell back" to anything, whatever this raw value says.
-        val hevcFallback = requestedHevc && !hasHardwareHevc
+        val hevcFallback =
+            (requestedHevc && !hasHardwareHevc) || (requestedKeepHdr && !keepHdrAchievable)
 
         // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
         // knows encoding would not help, skip building a Transformer at all rather than running
@@ -297,11 +308,12 @@ class TransformerEngine(
             }
 
         // Whether this job's tone-map decision might need the OpenGL->MediaCodec fallback chain
-        // at all (04-RESEARCH.md Pattern 2/Pitfall 3): only ever true for a genuinely HDR source
-        // under the default tone-map request -- `Arguments.kt` does not yet accept any other
-        // `hdrMode` value, so this is exactly "the input was HDR." A non-HDR job never attempts
-        // the retry and never sees the exhausted-chain error message below.
-        val isHdrToneMapAttempt = inputInfo.isHdr && request.hdrMode == "toneMapToSdr"
+        // at all (04-RESEARCH.md Pattern 2/Pitfall 3): true for a genuinely HDR source whenever
+        // keep-HDR is not achievable -- which covers both the default toneMapToSdr request AND a
+        // keepHdr request this device cannot honour (D-08's fallback is tone-mapped SDR H.264,
+        // via the same chain). A non-HDR job, or an HDR job whose keep-HDR IS achievable, never
+        // attempts the retry and never sees the exhausted-chain error message below.
+        val isHdrToneMapAttempt = inputInfo.isHdr && !keepHdrAchievable
 
         // Shared across every attempt of THIS job (never reset to 0.0 on a retry): the poller
         // below already refuses to forward a value smaller than the last one actually sent, so a
@@ -458,7 +470,7 @@ class TransformerEngine(
         }
 
         var (outcome, tempFile) =
-            attemptExport(resolveHdrMode(request.hdrMode, inputInfo.isHdr))
+            attemptExport(resolveHdrMode(inputInfo.isHdr, keepHdrAchievable))
         var triedMediaCodecFallback = false
 
         // The retry chain (04-RESEARCH.md Pattern 2): only for a genuinely HDR source under the
@@ -542,15 +554,13 @@ class TransformerEngine(
     }
 
     /**
-     * Resolves the request's [hdrMode] string plus the probed input's own [inputIsHdr] flag into
-     * the [Composition] HdrMode int Transformer actually understands (04-RESEARCH.md Pattern 1).
-     * `Arguments.kt` validates this plan's only accepted [hdrMode] value is `"toneMapToSdr"`, so
-     * for a genuinely HDR input this resolves to
-     * [Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL] -- the first attempt in 04-02
-     * task 2's OpenGL-then-MediaCodec fallback chain.
+     * Resolves the probed input's own [inputIsHdr] flag plus [keepHdrAchievable] (04-03,
+     * CDEC-03 -- computed once in [compress] via [resolveKeepHdrAchievable], the SAME shared
+     * decision that also gates [compress]'s own video-MIME choice) into the [Composition]
+     * HdrMode int Transformer actually understands (04-RESEARCH.md Pattern 1).
      *
      * For a NON-HDR input this MUST resolve to [Composition.HDR_MODE_KEEP_HDR] (`0`), not the
-     * tone-map mode -- found live this task, not assumed: `TransformerUtil.shouldTranscodeVideo`
+     * tone-map mode -- found live in 04-02, not assumed: `TransformerUtil.shouldTranscodeVideo`
      * (confirmed via `javap` against the installed media3-transformer-1.11.1 AAR) forces a
      * transcode whenever `TransformationRequest.hdrMode` is non-zero, REGARDLESS of whether the
      * input is actually HDR. Requesting the tone-map mode unconditionally silently broke the
@@ -560,17 +570,26 @@ class TransformerEngine(
      * `shouldTranscodeVideo`'s decision to the ordinary mime-type/effects comparison, so this
      * function is not a cosmetic default -- it is what keeps CDEC-02 from regressing CORE-06.
      *
+     * For an HDR input, [Composition.HDR_MODE_KEEP_HDR] is ALSO the right value when
+     * [keepHdrAchievable] is true (04-03, CDEC-03): a genuine keep-HDR encode, not the harmless
+     * no-op above. Otherwise this resolves to
+     * [Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL] -- the first attempt in 04-02
+     * task 2's OpenGL-then-MediaCodec fallback chain, which covers both the default
+     * `toneMapToSdr` request and an unachievable `keepHdr` request (D-08's fallback).
+     *
      * Media3's own automatic step-down from `HDR_MODE_KEEP_HDR` for a device that cannot honour
-     * it (04-RESEARCH.md Pattern 4) is never relied on here as a fallback mechanism either way:
-     * it silently changes only the HDR mode, never the requested video MIME type, so a future
-     * keep-HDR request would still need an independent hardware-capability gate to decide
-     * H.264-vs-H.265 output -- a later plan's job, not this one's.
+     * it (04-RESEARCH.md Pattern 4) is never relied on here as a fallback mechanism: it silently
+     * changes only the HDR mode, never the requested video MIME type, which on an incapable
+     * device would produce HEVC 8-bit SDR instead of the required H.264 SDR fallback. It stays
+     * as defence in depth against [keepHdrAchievable] disagreeing with reality, not as the
+     * fallback -- [resolveKeepHdrAchievable]'s own hardware-capability gate is what decides
+     * H.264-vs-HEVC output, independently and before this function ever runs.
      */
     private fun resolveHdrMode(
-        hdrMode: String,
         inputIsHdr: Boolean,
+        keepHdrAchievable: Boolean,
     ): Int {
-        if (!inputIsHdr) {
+        if (!inputIsHdr || keepHdrAchievable) {
             return Composition.HDR_MODE_KEEP_HDR
         }
         return Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL
@@ -895,12 +914,16 @@ class TransformerEngine(
         // the real job -- both of which call resolvePlan and nothing else to get a Plan -- can
         // never resolve a different answer about whether a 5.1 source would remux.
         val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
-        // The SAME hardware-HEVC decision [compress] itself computes for its own MIME gate (04-03,
-        // CDEC-01) -- calling it here too, rather than threading a value in from [compress],
-        // means resolvePlan alone (as [Compression]'s free-space pre-check and estimate() both
-        // call it) can independently resolve the identical SizeGuard.Options.outputCodecIsHevc
-        // [compress] resolves, with no risk of the two ever drifting apart.
-        val outputCodecIsHevc = request.videoCodec == "hevc" && hasHardwareHevcEncoder()
+        // The SAME hardware-HEVC/keep-HDR decisions [compress] itself computes for its own MIME
+        // gate (04-03, CDEC-01/03) -- calling them here too, rather than threading a value in
+        // from [compress], means resolvePlan alone (as [Compression]'s free-space pre-check and
+        // estimate() both call it) can independently resolve the identical
+        // SizeGuard.Options.outputCodecIsHevc [compress] resolves, with no risk of the two ever
+        // drifting apart.
+        val requestedHevc = request.videoCodec == "hevc"
+        val outputCodecIsHevc =
+            (requestedHevc && hasHardwareHevcEncoder()) ||
+                resolveKeepHdrAchievable(inputFile, inputInfo.isHdr, request.hdrMode == "keepHdr")
         return SizeGuard.resolve(
             buildSizeGuardInput(inputInfo, inputAudioCodec, inputAudioChannels),
             buildSizeGuardOptions(request, outputCodecIsHevc),
@@ -918,6 +941,77 @@ class TransformerEngine(
      */
     private suspend fun hasHardwareHevcEncoder(): Boolean =
         withContext(Dispatchers.IO) { CodecCapabilities.hasHardwareEncoder(MimeTypes.VIDEO_H265) }
+
+    /**
+     * Whether a keep-HDR request (04-03, CDEC-03) is genuinely achievable: `false` immediately
+     * when [requestedKeepHdr] is `false` or [inputIsHdr] is `false` (nothing to keep), otherwise
+     * `true` only when [inputFile]'s own colour transfer is readable AND
+     * [CodecCapabilities.supportsHdrEditing] finds a hardware encoder that can keep it. Called
+     * identically from [compress]'s own MIME/HdrMode/hevcFallback gates and from [resolvePlan]
+     * (for [SizeGuard.Options.outputCodecIsHevc]), so a request's keep-HDR decision can never
+     * disagree between the two call sites -- the same invariant [hasHardwareHevcEncoder]'s own
+     * doc comment states, extended to cover keep-HDR.
+     */
+    private suspend fun resolveKeepHdrAchievable(
+        inputFile: File,
+        inputIsHdr: Boolean,
+        requestedKeepHdr: Boolean,
+    ): Boolean {
+        if (!requestedKeepHdr || !inputIsHdr) {
+            return false
+        }
+        val colorTransfer = readColorTransfer(inputFile) ?: return false
+        return hasHardwareHdrEditingSupport(colorTransfer)
+    }
+
+    /**
+     * Reads [file]'s own colour transfer characteristic as a Media3 [C.COLOR_TRANSFER_*] int, or
+     * `null` when unavailable (below API 30, no HDR transfer characteristic reported, or any
+     * exception) -- mirrors [Probe.isHdr]'s own [MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER]
+     * read and its `Build.VERSION_CODES.R` gate exactly (04-RESEARCH.md Pattern 3: the platform's
+     * own `MediaFormat.COLOR_TRANSFER_HLG`/`_ST2084` ints are the SAME values as Media3's
+     * `C.COLOR_TRANSFER_HLG`/`_ST2084`, verified via `javap`, so the raw int passes straight
+     * through into a [ColorInfo] with no translation needed). Runs on [Dispatchers.IO] (WR-04),
+     * same rationale as [readAudioCodec]/[readAudioChannelCount].
+     */
+    private suspend fun readColorTransfer(file: File): Int? =
+        withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                return@withContext null
+            }
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.path)
+                retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)
+                    ?.toIntOrNull()
+            } catch (e: Exception) {
+                null
+            } finally {
+                retriever.release()
+            }
+        }
+
+    /**
+     * Whether this device can genuinely keep HDR (CDEC-03, D-07) for a source whose colour
+     * transfer is [colorTransfer] (HLG or PQ, read via [readColorTransfer]): builds the
+     * [ColorInfo] [CodecCapabilities.supportsHdrEditing] needs from [colorTransfer] plus
+     * [C.COLOR_SPACE_BT2020]/[C.COLOR_RANGE_LIMITED] -- every HDR clip this plugin's own corpus
+     * carries is BT.2020/limited-range (04-RESEARCH.md Pattern 3), and [Probe.isHdr]'s own
+     * detection is scoped to exactly the two transfer functions [colorTransfer] can be here
+     * (HLG, PQ). Dispatched to [Dispatchers.IO] (WR-04), same rationale as
+     * [hasHardwareHevcEncoder].
+     */
+    private suspend fun hasHardwareHdrEditingSupport(colorTransfer: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            val colorInfo =
+                ColorInfo.Builder()
+                    .setColorSpace(C.COLOR_SPACE_BT2020)
+                    .setColorTransfer(colorTransfer)
+                    .setColorRange(C.COLOR_RANGE_LIMITED)
+                    .build()
+            CodecCapabilities.supportsHdrEditing(colorInfo)
+        }
 
     /**
      * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] itself has no
