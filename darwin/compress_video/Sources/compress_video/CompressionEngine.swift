@@ -209,6 +209,30 @@ final class CompressionEngine {
     let includeAudio = inputInfo.hasAudio && audioTrack != nil && request.audioMode != .strip
     let audioWillReencode =
       includeAudio && (request.audioMode == .reencode || !sourceIsAAC || sourceChannelsExceedStereo)
+    // Resolved once, here, so the READER can decode straight to this channel count (AVFoundation
+    // downmixes/upmixes during a Linear PCM decode when a target AVNumberOfChannelsKey is given)
+    // and the WRITER's own AAC settings ask for the identical count -- appending a 6-channel PCM
+    // buffer to a 2-channel AAC writer input without this reader-side downmix fails outright
+    // (AVFoundation error -11800 "the operation could not be completed", confirmed live on CI
+    // against surround51_480p.mp4: unlike Android's Media3, AVAssetWriterInput does not itself
+    // remix a mismatched channel count on append). An explicit `reencode` request uses the
+    // caller's own channel count (validated non-nil, 1 or 2, by
+    // Arguments.requireValidCompressRequest before this engine is ever called). The engine-forced
+    // case (a non-AAC source, or more than two channels, under a passthrough request) targets the
+    // source's own channel count capped at two -- a mono non-AAC source must not be upmixed, and
+    // a 5.1 or LPCM source downmixes to stereo, not however many channels it started with
+    // (AUDO-03, mirrors TransformerEngine.targetAudioChannels exactly). An unreadable source
+    // channel count on a path already forcing a re-encode falls back to this plugin's own
+    // 2-channel default.
+    let isExplicitAudioReencode = request.audioMode == .reencode
+    let audioTargetChannels: Int? =
+      audioWillReencode
+      ? (isExplicitAudioReencode
+        ? Int(request.audioChannels!)
+        : min(
+          sourceAudioChannelCount ?? Self.forcedAudioReencodeMaxChannels,
+          Self.forcedAudioReencodeMaxChannels))
+      : nil
 
     // Coded/displayed swap (D-03): SizeGuard's plan speaks in DISPLAYED dimensions (the same
     // space `inputInfo.widthPx`/`heightPx` are already in); both AVFoundation surfaces this
@@ -264,6 +288,20 @@ final class CompressionEngine {
         // A hint only -- the reader loop below still drops frames by presentation timestamp;
         // this key does not cap the frame rate by itself (D-04).
         AVVideoExpectedSourceFrameRateKey: plan.effectiveFps,
+      ] as [String: Any],
+      // Explicit SDR (BT.709) colour properties -- without this, AVAssetWriter infers colour
+      // properties from the FIRST appended CVPixelBuffer's own attachments, and a decoded HDR
+      // source's buffer can still carry its ORIGINAL HLG/PQ transfer-function attachment even
+      // after the pixel VALUES have been tone-mapped down to SDR by the system (Phase 3's D-08
+      // reader path, 8-bit BGRA). Left unset, the produced file gets tagged HDR despite holding
+      // tone-mapped SDR-range pixel data -- confirmed live on CI (run 36267489006): the tone-map
+      // cases failed `toneMapped: true` because the re-probed OUTPUT still reported `isHdr:
+      // true`. Explicit BT.709 here makes every H.264 output's own colour tagging match its
+      // actual pixel data, for an SDR source and a tone-mapped HDR source alike.
+      AVVideoColorPropertiesKey: [
+        AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+        AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+        AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
       ] as [String: Any],
     ]
 
@@ -345,14 +383,15 @@ final class CompressionEngine {
 
     var audioReaderOutput: AVAssetReaderTrackOutput?
     if includeAudio, let audioTrack {
-      // outputSettings: nil for passthrough (compressed samples, D-07); a plain linear-PCM
-      // decode request (native channel count/sample rate, no explicit downmix at the reader)
-      // for a re-encode -- the writer's own AAC outputSettings below (channel count, bitrate)
-      // is what actually drives any channel up/downmix, via AVAssetWriterInput's documented
-      // ability to mix appended PCM samples up or down to the channel count named in its own
-      // compression settings dictionary.
+      // outputSettings: nil for passthrough (compressed samples, D-07); a linear-PCM decode
+      // request for a re-encode, EXPLICITLY downmixed/upmixed to `audioTargetChannels` at the
+      // reader itself -- AVFoundation's Linear PCM decode honours AVNumberOfChannelsKey as a
+      // real channel remix, which is what makes the writer's own AAC settings below able to
+      // accept the appended samples at all (see `audioTargetChannels`'s own comment).
       let readerSettings: [String: Any]? =
-        audioWillReencode ? [AVFormatIDKey: kAudioFormatLinearPCM] : nil
+        audioWillReencode
+        ? [AVFormatIDKey: kAudioFormatLinearPCM, AVNumberOfChannelsKey: audioTargetChannels!]
+        : nil
       let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: readerSettings)
       output.alwaysCopiesSampleData = false
       reader.add(output)
@@ -368,21 +407,7 @@ final class CompressionEngine {
     if includeAudio {
       let input: AVAssetWriterInput
       if audioWillReencode {
-        // An explicit `reencode` request uses the caller's own channel count (validated
-        // non-nil, 1 or 2, by Arguments.requireValidCompressRequest before this engine is ever
-        // called). The engine-forced case (a non-AAC source, or more than two channels, under a
-        // passthrough request) targets the source's own channel count capped at two -- a mono
-        // non-AAC source must not be upmixed, and a 5.1 or LPCM source downmixes to stereo, not
-        // however many channels it started with (AUDO-03, mirrors
-        // TransformerEngine.targetAudioChannels exactly). An unreadable source channel count on
-        // a path already forcing a re-encode falls back to this plugin's own 2-channel default.
-        let isExplicitReencode = request.audioMode == .reencode
-        let targetChannels: Int =
-          isExplicitReencode
-          ? Int(request.audioChannels!)
-          : min(
-            sourceAudioChannelCount ?? Self.forcedAudioReencodeMaxChannels,
-            Self.forcedAudioReencodeMaxChannels)
+        let targetChannels = audioTargetChannels!
         // The engine-forced case's own bitrate target (AUDO-03, 04-RESEARCH.md Pitfall 1): a
         // fixed, named constant -- matching Android's TransformerEngine.FORCED_AUDIO_REENCODE_
         // BITRATE_BPS exactly -- rather than plan.audioBitrateBps (SizeGuard rule 5's
@@ -390,7 +415,8 @@ final class CompressionEngine {
         // track's describes raw samples; neither is a sensible thing to ask a 1-or-2-channel AAC
         // encoder for. The explicit-reencode branch keeps trusting plan.audioBitrateBps (the
         // caller's own validated request) unchanged.
-        let baseBitrate = isExplicitReencode ? plan.audioBitrateBps : Self.forcedAudioReencodeBitrateBps
+        let baseBitrate =
+          isExplicitAudioReencode ? plan.audioBitrateBps : Self.forcedAudioReencodeBitrateBps
         // iOS/macOS's built-in AAC-LC encoder rejects (-11861 AVError.unsupportedOutputSettings
         // / "Cannot Encode Media", confirmed live in CI run 35809012150) a bitrate far below its
         // own practical per-channel minimum, even though writer.canApply(...) below -- a
