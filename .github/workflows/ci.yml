@@ -401,14 +401,48 @@ jobs:
         # it does not change the watchdog script's own per-suite/per-phase budgets.
         # tool/run_ios_integration_suites_test.sh replays all of these shapes against a fake
         # `flutter` and is the place to prove any change to the watchdog before pushing it.
+        #
+        # Split into two steps with disjoint suite subsets (04-01, D-16): hard_inputs_test.dart
+        # (Phase 4's seventh suite) pushed the six-suite step close enough to its budget that
+        # the instruction is to split suites across steps rather than raise any timeout again --
+        # raising `timeout-minutes` a second time was explicitly rejected. Each step passes an
+        # explicit suite subset (the script already accepts `$@` to override its own default
+        # array) and gets its OWN `$LOG` path: the script truncates `$LOG` on start (`: > "$LOG"`),
+        # so two invocations sharing one path would silently discard the first step's own
+        # PARITY_JSON lines before the extraction step below ever runs.
         working-directory: example
-        timeout-minutes: 90
-        run: bash ../tool/run_ios_integration_suites.sh "${{ steps.ios_sim.outputs.udid }}"
+        timeout-minutes: 60
+        run: |
+          LOG=/tmp/apple_integration.log bash ../tool/run_ios_integration_suites.sh \
+            "${{ steps.ios_sim.outputs.udid }}" \
+            integration_test/media_info_test.dart \
+            integration_test/thumbnail_test.dart \
+            integration_test/compress_test.dart \
+            integration_test/compress_audio_test.dart
+
+      - name: Run corpus integration tests on the iOS simulator (part 2)
+        # Second disjoint subset (see the step above for the full rationale): the remaining
+        # three suites, including hard_inputs_test.dart, into their own log so both steps'
+        # PARITY_JSON lines survive to the extraction step below.
+        working-directory: example
+        timeout-minutes: 60
+        run: |
+          LOG=/tmp/apple_integration_2.log bash ../tool/run_ios_integration_suites.sh \
+            "${{ steps.ios_sim.outputs.udid }}" \
+            integration_test/compress_jobs_test.dart \
+            integration_test/compress_output_test.dart \
+            integration_test/hard_inputs_test.dart
 
       - name: Extract cross-platform parity records (Apple)
         # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
         # for the `parity` job (01-07) to diff against the same records from the `android` job.
-        run: grep '^PARITY_JSON ' /tmp/apple_integration.log > /tmp/parity-apple.txt
+        # Reads BOTH split logs (04-01, D-16/T-04-06): today only step 1's suites
+        # (media_info_test.dart, thumbnail_test.dart) emit PARITY_JSON at all, so
+        # apple_integration_2.log contributes nothing yet, but reading both means a future
+        # plan (04-05 adds a PARITY_JSON emitter to hard_inputs_test.dart, which lives in step
+        # 2) is picked up automatically instead of silently dropped because this step still
+        # only looked at one log path.
+        run: grep -h '^PARITY_JSON ' /tmp/apple_integration.log /tmp/apple_integration_2.log > /tmp/parity-apple.txt
 
       - name: Upload Apple parity artifact
         uses: actions/upload-artifact@v4
@@ -472,14 +506,37 @@ jobs:
         # failed attempt. `timeout-minutes` is a backstop, not an expected budget: six suites of
         # real encodes on this runner's own Apple Silicon measured in single-digit minutes
         # locally, before this failure mode was found.
+        #
+        # Split into two steps with disjoint suite subsets (04-01, D-16), same rationale and
+        # same log-truncation hazard as the iOS split above: hard_inputs_test.dart is the
+        # seventh suite, split rather than raise `timeout-minutes` again, each step gets its
+        # own `$LOG` path since the script truncates it on start.
         working-directory: example
-        timeout-minutes: 30
-        run: LOG=/tmp/macos_integration.log bash ../tool/run_ios_integration_suites.sh macos
+        timeout-minutes: 20
+        run: |
+          LOG=/tmp/macos_integration.log bash ../tool/run_ios_integration_suites.sh macos \
+            integration_test/media_info_test.dart \
+            integration_test/thumbnail_test.dart \
+            integration_test/compress_test.dart \
+            integration_test/compress_audio_test.dart
+
+      - name: Run corpus integration tests on macOS (part 2)
+        # Second disjoint subset (see the step above for the full rationale): the remaining
+        # three suites, including hard_inputs_test.dart, into their own log.
+        working-directory: example
+        timeout-minutes: 20
+        run: |
+          LOG=/tmp/macos_integration_2.log bash ../tool/run_ios_integration_suites.sh macos \
+            integration_test/compress_jobs_test.dart \
+            integration_test/compress_output_test.dart \
+            integration_test/hard_inputs_test.dart
 
       - name: Extract cross-platform parity records (macOS)
-        # Captures the PARITY_JSON lines the macOS run above emitted, for the `parity` job
+        # Captures the PARITY_JSON lines the macOS runs above emitted, for the `parity` job
         # (03-08, D-22) to diff against the iOS simulator's own record from the same shared core.
-        run: grep '^PARITY_JSON ' /tmp/macos_integration.log > /tmp/parity-macos.txt
+        # Reads BOTH split logs (04-01, D-16/T-04-06) for the same forward-compatibility reason
+        # as the Apple extraction step above.
+        run: grep -h '^PARITY_JSON ' /tmp/macos_integration.log /tmp/macos_integration_2.log > /tmp/parity-macos.txt
 
       - name: Upload macOS parity artifact
         uses: actions/upload-artifact@v4

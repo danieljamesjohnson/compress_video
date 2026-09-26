@@ -57,6 +57,7 @@ else
     integration_test/compress_audio_test.dart
     integration_test/compress_jobs_test.dart
     integration_test/compress_output_test.dart
+    integration_test/hard_inputs_test.dart
   )
 fi
 
