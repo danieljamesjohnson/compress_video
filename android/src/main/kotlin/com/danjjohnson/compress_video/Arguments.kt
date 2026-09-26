@@ -197,19 +197,27 @@ object Arguments {
     }
 
     /**
-     * Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` -- the
-     * only accepted value in this phase; HEVC opt-in is Phase 4 -- or `null` if it is valid.
+     * Returns `"unsupportedInput"` if `videoCodec` is anything other than `"h264"` or
+     * `"hevc"`, or `null` if it is valid. This validator only checks the STRING is one of the
+     * two known tokens -- it says nothing about whether HEVC is actually achievable on this
+     * device. HEVC is honoured only when [CodecCapabilities.hasHardwareEncoder] finds a
+     * hardware HEVC encoder (CDEC-01); otherwise the engine falls back to H.264 and the result
+     * reports `hevcFallback: true`.
      */
     fun validateVideoCodec(videoCodec: String): String? =
-        if (videoCodec != "h264") "unsupportedInput" else null
+        if (videoCodec != "h264" && videoCodec != "hevc") "unsupportedInput" else null
 
     /**
-     * Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` --
-     * the only accepted value in this phase; keep-HDR opt-in is Phase 4 -- or `null` if it is
-     * valid.
+     * Returns `"unsupportedInput"` if `hdrMode` is anything other than `"toneMapToSdr"` or
+     * `"keepHdr"`, or `null` if it is valid. This validator only checks the STRING is one of
+     * the two known tokens -- it says nothing about whether keep-HDR is actually achievable on
+     * this device. Keep-HDR is honoured only when [CodecCapabilities.supportsHdrEditing] finds
+     * a hardware HEVC encoder that can keep the source's own transfer function (CDEC-03);
+     * otherwise the engine falls back to tone-mapped SDR H.264 and the result reports both
+     * `toneMapped: true` and `hevcFallback: true`.
      */
     fun validateHdrMode(hdrMode: String): String? =
-        if (hdrMode != "toneMapToSdr") "unsupportedInput" else null
+        if (hdrMode != "toneMapToSdr" && hdrMode != "keepHdr") "unsupportedInput" else null
 
     /**
      * Returns `"unsupportedInput"` when `audioMode` is [AudioModeMessage.REENCODE] and either

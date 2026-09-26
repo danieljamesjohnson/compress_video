@@ -20,24 +20,28 @@ enum CompressPreset {
   p1080,
 }
 
-/// Output video codec. Reserved field: only [h264] is accepted until Phase 4 adds HEVC opt-in
-/// with a hardware-only encode and automatic fallback.
+/// Output video codec.
 enum VideoCodec {
-  /// H.264/AVC. The only accepted value in this phase.
+  /// H.264/AVC. The default, and always available.
   h264,
 
-  /// H.265/HEVC. Reserved; not yet accepted -- Phase 4 implements this.
+  /// H.265/HEVC. Opt-in, hardware-only: honoured only when the device reports a hardware HEVC
+  /// encoder. When it does not, the engine falls back to [h264] and
+  /// `CompressResult.hevcFallback` reports `true`.
   hevc,
 }
 
-/// Output HDR handling. Reserved field: only [toneMapToSdr] is accepted until Phase 4 adds
-/// keep-HDR opt-in.
+/// Output HDR handling.
 enum HdrMode {
-  /// Tone-map HDR input down to SDR. The only accepted value in this phase, and the default.
+  /// Tone-map HDR input down to SDR. The default.
   toneMapToSdr,
 
-  /// Keep the input's HDR characteristics in the output. Reserved; not yet accepted -- Phase 4
-  /// implements this.
+  /// Keep the input's HDR characteristics (HEVC 10-bit, the source's own transfer function) in
+  /// the output. Opt-in, hardware-only: honoured only when the device can genuinely keep HDR
+  /// for the source. When it cannot, the engine falls back to tone-mapped SDR H.264 and the
+  /// result reports both `CompressResult.toneMapped: true` and `CompressResult.hevcFallback:
+  /// true` -- a keep-HDR request answered with `toneMapped: true` is how a caller learns the
+  /// fallback happened.
   keepHdr,
 }
 
@@ -244,12 +248,16 @@ class CompressOptions {
   /// reason [CompressVideoErrorReason.io] before any bytes are written.
   final String? outputPath;
 
-  /// Requested output video codec. Reserved: only [VideoCodec.h264] is accepted in this phase;
-  /// HEVC opt-in is Phase 4.
+  /// Requested output video codec. Defaults to [VideoCodec.h264]. [VideoCodec.hevc] is honoured
+  /// only where a hardware HEVC encoder exists; otherwise the engine falls back to H.264 and the
+  /// result reports [VideoCodec] via `CompressResult.videoCodec` plus
+  /// `CompressResult.hevcFallback: true`.
   final VideoCodec codec;
 
-  /// Requested HDR handling. Reserved: only [HdrMode.toneMapToSdr] is accepted in this phase;
-  /// keep-HDR opt-in is Phase 4.
+  /// Requested HDR handling. Defaults to [HdrMode.toneMapToSdr]. [HdrMode.keepHdr] is honoured
+  /// only where the device can genuinely keep HDR for the source; otherwise the engine falls
+  /// back to tone-mapped SDR H.264 and the result reports both `CompressResult.toneMapped: true`
+  /// and `CompressResult.hevcFallback: true`.
   final HdrMode hdr;
 
   /// Throws a [CompressVideoException] with reason
@@ -285,12 +293,6 @@ class CompressOptions {
     }
     if (outputPath != null && outputPath!.trim().isEmpty) {
       reject('outputPath must not be blank when given');
-    }
-    if (codec != VideoCodec.h264) {
-      reject('codec: only VideoCodec.h264 is accepted in this phase');
-    }
-    if (hdr != HdrMode.toneMapToSdr) {
-      reject('hdr: only HdrMode.toneMapToSdr is accepted in this phase');
     }
     final AudioOptions audioValue = audio;
     if (audioValue is AudioReencode) {

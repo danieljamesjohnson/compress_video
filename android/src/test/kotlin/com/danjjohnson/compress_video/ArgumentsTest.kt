@@ -286,23 +286,30 @@ internal class ArgumentsTest {
     }
 
     @Test
-    fun validateVideoCodec_notH264_rejectedAsUnsupportedInput() {
-        assertEquals("unsupportedInput", Arguments.validateVideoCodec("hevc"))
+    fun validateVideoCodec_unknownValue_rejectedAsUnsupportedInput() {
+        // "hevc" used to be the rejected case here (Phase 4 activates it) -- an unrelated,
+        // still-unsupported token is what the host-side validator must keep rejecting for any
+        // caller that reaches the generated API another way.
+        assertEquals("unsupportedInput", Arguments.validateVideoCodec("vp9"))
     }
 
     @Test
-    fun validateVideoCodec_h264_isValid() {
+    fun validateVideoCodec_h264OrHevc_isValid() {
         assertEquals(null, Arguments.validateVideoCodec("h264"))
+        assertEquals(null, Arguments.validateVideoCodec("hevc"))
     }
 
     @Test
-    fun validateHdrMode_notToneMapToSdr_rejectedAsUnsupportedInput() {
-        assertEquals("unsupportedInput", Arguments.validateHdrMode("keepHdr"))
+    fun validateHdrMode_unknownValue_rejectedAsUnsupportedInput() {
+        // "keepHdr" used to be the rejected case here (Phase 4 activates it) -- an unrelated,
+        // still-unsupported token is what the host-side validator must keep rejecting.
+        assertEquals("unsupportedInput", Arguments.validateHdrMode("dolbyVision"))
     }
 
     @Test
-    fun validateHdrMode_toneMapToSdr_isValid() {
+    fun validateHdrMode_toneMapToSdrOrKeepHdr_isValid() {
         assertEquals(null, Arguments.validateHdrMode("toneMapToSdr"))
+        assertEquals(null, Arguments.validateHdrMode("keepHdr"))
     }
 
     @Test

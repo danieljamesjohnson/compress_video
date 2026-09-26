@@ -403,6 +403,57 @@ Future<int?> _readMp4AudioChannelCount(String path) async {
   return null;
 }
 
+/// Asserts CDEC-01/CDEC-03's cross-cutting reporting invariant (04-03-PLAN.md task 1): applied
+/// to every codec/HDR case in this suite, exactly one coherent combination of
+/// [CompressResult.hevcFallback]/[CompressResult.videoCodec] may hold. When [result.usedOriginal]
+/// is true, no Transformer ever ran, so every conversion flag ([CompressResult.hevcFallback],
+/// [CompressResult.toneMapped], [CompressResult.transmuxed]) must be false. Otherwise: either the
+/// request's own codec was honoured ([CompressResult.hevcFallback] false,
+/// [CompressResult.videoCodec] equal to [requestedCodec]), or it fell back
+/// ([CompressResult.hevcFallback] true, [CompressResult.videoCodec] `'h264'`) -- a fallback can
+/// never produce anything but H.264, and honouring the request can never itself be reported as a
+/// fallback.
+void _expectCodecFallbackInvariant(
+  CompressResult result, {
+  required String requestedCodec,
+}) {
+  if (result.usedOriginal) {
+    expect(
+      result.hevcFallback,
+      isFalse,
+      reason:
+          'usedOriginal means no Transformer ever ran -- every conversion flag must be false',
+    );
+    expect(
+      result.toneMapped,
+      isFalse,
+      reason:
+          'usedOriginal means no Transformer ever ran -- every conversion flag must be false',
+    );
+    expect(
+      result.transmuxed,
+      isFalse,
+      reason: 'usedOriginal and transmuxed are mutually exclusive outcomes',
+    );
+    return;
+  }
+  if (result.hevcFallback) {
+    expect(
+      result.videoCodec,
+      'h264',
+      reason:
+          'a fallback always produces H.264 -- never HEVC 8-bit or any other codec',
+    );
+  } else {
+    expect(
+      result.videoCodec,
+      requestedCodec,
+      reason:
+          'no fallback reported means the requested codec was honoured exactly',
+    );
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -505,8 +556,10 @@ void main() {
               'result to accept',
         );
         expect(result.transmuxed, isFalse);
-        expect(result.videoCodec, 'h264');
         expect(result.toneMapped, isTrue);
+        // requestedCodec: 'h264' -- this case uses default options (VideoCodec.h264), so the
+        // invariant's only legitimate branch is "no fallback, videoCodec matches the request".
+        _expectCodecFallbackInvariant(result, requestedCodec: 'h264');
 
         final MediaInfo outputInfo = await compressVideo.getMediaInfo(
           result.outputPath,
@@ -656,6 +709,59 @@ void main() {
         }
       },
       timeout: const Timeout(Duration(seconds: 120)),
+      skip: !Platform.isAndroid,
+    );
+  });
+
+  group('HEVC opt-in reports an honest hardware-only outcome, never a silent substitution '
+      '(04-03, CDEC-01)', () {
+    testWidgets(
+      'portrait_hibitrate_1080p60.mp4 with VideoCodec.hevc either honours HEVC on a '
+      'hardware encoder or reports the fallback to H.264',
+      (WidgetTester tester) async {
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/portrait_hibitrate_1080p60.mp4',
+          'portrait_hibitrate_hevc_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: const CompressOptions(codec: VideoCodec.hevc),
+        );
+        final CompressResult result = await job.result;
+
+        // Asserted first, and loudly, exactly like the HDR tone-map cases above: if
+        // usedOriginal is true here the codec gate never ran a real encode at all -- a
+        // fixture bug, not a result to accept.
+        expect(
+          result.usedOriginal,
+          isFalse,
+          reason:
+              'usedOriginal:true means the codec gate never ran a real encode -- a fixture '
+              'bug, not a result to accept',
+        );
+        _expectCodecFallbackInvariant(result, requestedCodec: 'hevc');
+
+        if (result.hevcFallback) {
+          // ignore: avoid_print
+          print('HEVC_BRANCH=fallback');
+          expect(result.videoCodec, 'h264');
+          expect(
+            result.outputBytes,
+            lessThan(result.inputBytes),
+            reason:
+                'a genuine H.264 re-encode of this hi-bitrate clip must still be smaller '
+                'than the input',
+          );
+        } else {
+          // ignore: avoid_print
+          print('HEVC_BRANCH=success');
+          final MediaInfo outputInfo = await compressVideo.getMediaInfo(
+            result.outputPath,
+          );
+          expect(outputInfo.videoCodec, 'hevc');
+        }
+      },
+      timeout: const Timeout(Duration(seconds: 30)),
       skip: !Platform.isAndroid,
     );
   });

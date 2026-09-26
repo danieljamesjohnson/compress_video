@@ -136,19 +136,30 @@ void main() {
       },
     );
 
-    test('a codec other than h264 is rejected', () {
+    test('h264 and hevc are both accepted codecs (04-03, CDEC-01)', () {
+      expect(
+        () => const CompressOptions(codec: VideoCodec.h264).validate(),
+        returnsNormally,
+      );
       expect(
         () => const CompressOptions(codec: VideoCodec.hevc).validate(),
-        throwsUnsupportedInput(),
+        returnsNormally,
       );
     });
 
-    test('an hdr mode other than toneMapToSdr is rejected', () {
-      expect(
-        () => const CompressOptions(hdr: HdrMode.keepHdr).validate(),
-        throwsUnsupportedInput(),
-      );
-    });
+    test(
+      'toneMapToSdr and keepHdr are both accepted hdr modes (04-03, CDEC-03)',
+      () {
+        expect(
+          () => const CompressOptions(hdr: HdrMode.toneMapToSdr).validate(),
+          returnsNormally,
+        );
+        expect(
+          () => const CompressOptions(hdr: HdrMode.keepHdr).validate(),
+          returnsNormally,
+        );
+      },
+    );
 
     test('an AudioReencode with a non-positive bitrateBps is rejected', () {
       expect(
@@ -334,27 +345,13 @@ void main() {
       },
     );
 
-    test('the reserved codec field rejects anything but h264', () {
-      expect(
-        () => const CompressOptions(codec: VideoCodec.hevc).validate(),
-        throwsUnsupportedInput(),
-      );
-      expect(
-        () => const CompressOptions(codec: VideoCodec.h264).validate(),
-        returnsNormally,
-      );
-    });
-
-    test('the reserved hdr field rejects anything but toneMapToSdr', () {
-      expect(
-        () => const CompressOptions(hdr: HdrMode.keepHdr).validate(),
-        throwsUnsupportedInput(),
-      );
-      expect(
-        () => const CompressOptions(hdr: HdrMode.toneMapToSdr).validate(),
-        returnsNormally,
-      );
-    });
+    test(
+      'the default codec is h264, so a default-options request never asks for HEVC and can '
+      'never report a hevcFallback for a request that did not ask for it',
+      () {
+        expect(const CompressOptions().codec, VideoCodec.h264);
+      },
+    );
 
     test('the default options are valid', () {
       expect(() => const CompressOptions().validate(), returnsNormally);

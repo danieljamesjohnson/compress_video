@@ -107,6 +107,16 @@ object SizeGuard {
         val trimStartMs: Long?,
         /** End of the trim range, in milliseconds, or `null` for the end of the input. */
         val trimEndMs: Long?,
+        /**
+         * Whether the REAL job's own resolved output video codec is HEVC (04-03, CDEC-01/03):
+         * either an HEVC opt-in request with a hardware encoder, or an achievable keep-HDR
+         * request. Defaults to `false` so every pre-existing call site that constructs an
+         * [Options] without this field keeps compiling unchanged. Feeds [wouldTransmux]'s
+         * codec condition: a remux copies the INPUT's own video track unchanged, so a resolved
+         * HEVC output can never be produced by the remux fast path regardless of what the
+         * input's own codec is.
+         */
+        val outputCodecIsHevc: Boolean = false,
     )
 
     /**
@@ -260,6 +270,9 @@ object SizeGuard {
                 // matching this file's existing unknown-input-bitrate handling, since an
                 // unreadable channel count is not evidence of a 5.1 track.
                 (input.audioChannelCount == null || input.audioChannelCount <= MAX_TRANSMUX_AUDIO_CHANNELS) &&
+                // 04-03 (CDEC-01/03): a request that will really resolve to HEVC output must
+                // never be silently answered with a remuxed H.264 copy of the input.
+                !options.outputCodecIsHevc &&
                 options.audioPassthroughRequested &&
                 noTrimRequested &&
                 inputLongSidePx <= effectiveLongSidePx &&

@@ -91,13 +91,24 @@ class TransformerEngine(
 
         val target = resolvePlan(inputFile, inputInfo, request)
 
-        // Reserved for a later plan's hardware-HEVC probe (CDEC-01/03): whether a requested HEVC
-        // output fell back to H.264 because no hardware encoder exists on this device.
-        // `Arguments.kt` does not yet accept a request other than H.264, so there is nothing to
-        // fall back FROM yet -- threaded as a real parameter now, all the way through
-        // finishSuccess into buildResultFromDestination, rather than hardcoded independently in
-        // each, so that later plan changes this one line instead of every signature again.
-        val hevcFallback = false
+        // HEVC opt-in gate (CDEC-01), computed once, up front, independent of whether an encode
+        // ever runs and independent of HdrMode (04-RESEARCH.md Pattern 4 -- Media3's own
+        // automatic HdrMode step-down changes only the HDR mode, never the requested video MIME
+        // type, so this probe -- not that step-down -- is what decides H.264-vs-HEVC output).
+        // hasHardwareHevcEncoder() is the SAME function resolvePlan calls (via
+        // buildSizeGuardOptions) to resolve SizeGuard.Options.outputCodecIsHevc, so this job and
+        // estimate() can never disagree about which codec would really be produced (02-07's own
+        // estimate()/compress() agreement invariant).
+        val requestedHevc = request.videoCodec == "hevc"
+        val hasHardwareHevc = requestedHevc && hasHardwareHevcEncoder()
+        val resolvedVideoMimeType = if (hasHardwareHevc) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
+
+        // D-06: true when the caller asked for HEVC and this device has no hardware HEVC
+        // encoder -- threaded as a real parameter now, all the way through finishSuccess into
+        // buildResultFromDestination, guarded there by the same !usedOriginal check
+        // toneMapped/transmuxed/audioReencoded already use: a substituted original or a skipped
+        // encode never "fell back" to anything, whatever this raw value says.
+        val hevcFallback = requestedHevc && !hasHardwareHevc
 
         // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
         // knows encoding would not help, skip building a Transformer at all rather than running
@@ -115,10 +126,11 @@ class TransformerEngine(
                 usedOriginal = true,
                 audioReencoded = false,
                 // No Transformer ever runs on this fast path -- nothing could have been
-                // tone-mapped. finishSuccess's own !usedOriginal guard would compute the same
-                // answer, but there is no ExportResult here to compute it from.
+                // tone-mapped or have fallen back to anything. finishSuccess's own !usedOriginal
+                // guard would compute the same answer for both flags, but there is no
+                // ExportResult here to compute it from.
                 toneMapped = NO_TRANSFORM_ATTEMPTED,
-                hevcFallback = hevcFallback,
+                hevcFallback = NO_TRANSFORM_ATTEMPTED,
             )
         }
 
@@ -347,10 +359,11 @@ class TransformerEngine(
             // per-EditedMediaItem knobs 02-RESEARCH.md Pattern 2 names are ignored for a
             // single-item composition, so there is no reachable code path here where setting
             // them would do anything). When target.wouldTransmux is true, videoEffects above is
-            // already empty and requesting H.264/AAC output already matches the input's own
-            // codecs (the predicate requires exactly that), so Media3's own "transcode only if
-            // necessary" behaviour transmuxes both tracks without any extra wiring on this
-            // builder.
+            // already empty and resolvedVideoMimeType is guaranteed H.264 (04-03,
+            // SizeGuard.Options.outputCodecIsHevc disqualifies transmux for any request that
+            // would really resolve to HEVC output), matching the input's own codecs (the
+            // predicate requires exactly that) so Media3's own "transcode only if necessary"
+            // behaviour transmuxes both tracks without any extra wiring on this builder.
             //
             // setAudioMimeType(AUDIO_AAC) is unconditional, for every audio mode -- deliberately
             // not branched the way the encoder-factory settings above are. It is what makes
@@ -381,7 +394,7 @@ class TransformerEngine(
             // written, so that cost is not a real one here.
             val transformer =
                 Transformer.Builder(context)
-                    .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .setVideoMimeType(resolvedVideoMimeType)
                     .setAudioMimeType(MimeTypes.AUDIO_AAC)
                     .setEncoderFactory(encoderFactory)
                     .setMuxerFactory(InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(false))
@@ -492,7 +505,7 @@ class TransformerEngine(
                     inputBytes,
                     startElapsedMs,
                     inputWasHdr = inputInfo.isHdr,
-                    hevcFallback = hevcFallback,
+                    hevcFallbackFromRequest = hevcFallback,
                     audioEncodeForced =
                         request.audioMode == AudioModeMessage.REENCODE || audioForcedReencode,
                 )
@@ -643,7 +656,7 @@ class TransformerEngine(
         inputBytes: Long,
         startElapsedMs: Long,
         inputWasHdr: Boolean,
-        hevcFallback: Boolean,
+        hevcFallbackFromRequest: Boolean,
         audioEncodeForced: Boolean,
     ): CompressResultMessage {
         val tempBytes = tempFile.length()
@@ -701,6 +714,11 @@ class TransformerEngine(
         // case this formula needs to reconcile.
         val outputIsHdr = exportResult.colorInfo?.let { ColorInfo.isTransferHdr(it) } ?: false
         val toneMapped = !usedOriginal && inputWasHdr && !outputIsHdr
+
+        // Guarded by !usedOriginal exactly like transmuxed/audioReencoded/toneMapped above: a
+        // substituted original never "fell back" to anything, whatever [hevcFallbackFromRequest]
+        // (computed in [compress], before this export even ran) says.
+        val hevcFallback = !usedOriginal && hevcFallbackFromRequest
 
         return buildResultFromDestination(
             destinationFile = destinationFile,
@@ -877,11 +895,29 @@ class TransformerEngine(
         // the real job -- both of which call resolvePlan and nothing else to get a Plan -- can
         // never resolve a different answer about whether a 5.1 source would remux.
         val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
+        // The SAME hardware-HEVC decision [compress] itself computes for its own MIME gate (04-03,
+        // CDEC-01) -- calling it here too, rather than threading a value in from [compress],
+        // means resolvePlan alone (as [Compression]'s free-space pre-check and estimate() both
+        // call it) can independently resolve the identical SizeGuard.Options.outputCodecIsHevc
+        // [compress] resolves, with no risk of the two ever drifting apart.
+        val outputCodecIsHevc = request.videoCodec == "hevc" && hasHardwareHevcEncoder()
         return SizeGuard.resolve(
             buildSizeGuardInput(inputInfo, inputAudioCodec, inputAudioChannels),
-            buildSizeGuardOptions(request),
+            buildSizeGuardOptions(request, outputCodecIsHevc),
         )
     }
+
+    /**
+     * Whether this device has a hardware-accelerated encoder for [MimeTypes.VIDEO_H265]
+     * (CDEC-01), dispatched to [Dispatchers.IO] (WR-04) since [CodecCapabilities.hasHardwareEncoder]
+     * enumerates the platform's own codec list -- a real native probe. Called identically from
+     * [compress]'s own MIME/hevcFallback gate and from [resolvePlan] (for
+     * [SizeGuard.Options.outputCodecIsHevc]), so a request's HEVC decision can never disagree
+     * between the two call sites (04-RESEARCH.md Pattern 3/4; the estimate()/compress()
+     * agreement invariant established in 02-07).
+     */
+    private suspend fun hasHardwareHevcEncoder(): Boolean =
+        withContext(Dispatchers.IO) { CodecCapabilities.hasHardwareEncoder(MimeTypes.VIDEO_H265) }
 
     /**
      * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] itself has no
@@ -920,7 +956,10 @@ class TransformerEngine(
      * `presetVideoBitrateBps` are always the selected preset's own nominal values, independent
      * of any override -- the reference SizeGuard's bitrate-scaling formula divides by.
      */
-    private fun buildSizeGuardOptions(request: CompressRequestMessage): SizeGuard.Options =
+    private fun buildSizeGuardOptions(
+        request: CompressRequestMessage,
+        outputCodecIsHevc: Boolean,
+    ): SizeGuard.Options =
         SizeGuard.Options(
             maxLongSidePx = request.maxLongSidePx,
             videoBitrateBps = request.videoBitrateBps,
@@ -933,6 +972,7 @@ class TransformerEngine(
             requestedAudioBitrateBps = request.audioBitrateBps,
             trimStartMs = request.trimStartMs,
             trimEndMs = request.trimEndMs,
+            outputCodecIsHevc = outputCodecIsHevc,
         )
 
     /**
@@ -977,11 +1017,12 @@ class TransformerEngine(
         private const val PROGRESS_POLL_INTERVAL_MS = 250L
 
         /**
-         * The value of `toneMapped` when [compress]'s never-larger pre-check short-circuits
-         * before a [Transformer] is ever built: tone-mapping cannot have happened when no
-         * encode ran at all. Named rather than a bare literal so this file's own real
-         * [ColorInfo.isTransferHdr]-derived computation (see [finishSuccess]) is never mistaken
-         * for another leftover hardcoded value.
+         * The value of `toneMapped` AND `hevcFallback` when [compress]'s never-larger pre-check
+         * short-circuits before a [Transformer] is ever built: neither tone-mapping nor an HEVC
+         * fallback can have happened when no encode ran at all. Named rather than a bare literal
+         * so this file's own real [ColorInfo.isTransferHdr]-derived (see [finishSuccess]) and
+         * request-derived (04-03, CDEC-01) computations are never mistaken for another leftover
+         * hardcoded value.
          */
         private const val NO_TRANSFORM_ATTEMPTED = false
 
