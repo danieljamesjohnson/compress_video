@@ -350,6 +350,10 @@ void main() {
   // override, an explicit bitrate override, and the frame-rate cap, all on the 60fps
   // high-bitrate clip so genuine-encode and real-shrink assertions can never pass through the
   // never-larger/usedOriginal branch by accident.
+  // Every real-encode case below carries a 120s (not 20s) explicit Timeout: CI run 36245705733
+  // saw four of these time out at 20s on a slow hosted iOS simulator even though the same
+  // cases finish in 11-27s on a normal run -- an explicit per-test Timeout overrides the
+  // runner's own 120s default, so it has to be raised here directly.
   group('SizeGuard: presets, explicit targets and the frame-rate cap', () {
     Future<String> copyHiBitrateClip() => _copyAssetToTempFile(
       'assets/corpus/portrait_hibitrate_1080p60.mp4',
@@ -387,26 +391,26 @@ void main() {
       (WidgetTester tester) async {
         await expectPreset(tester, CompressPreset.p1080, 1080, 1920);
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets('p720 scales the long side down to 1280', (
       WidgetTester tester,
     ) async {
       await expectPreset(tester, CompressPreset.p720, 720, 1280);
-    }, timeout: const Timeout(Duration(seconds: 20)));
+    }, timeout: const Timeout(Duration(seconds: 120)));
 
     testWidgets('p480 scales the long side down to 854', (
       WidgetTester tester,
     ) async {
       await expectPreset(tester, CompressPreset.p480, 480, 854);
-    }, timeout: const Timeout(Duration(seconds: 20)));
+    }, timeout: const Timeout(Duration(seconds: 120)));
 
     testWidgets('p360 scales the long side down to 640', (
       WidgetTester tester,
     ) async {
       await expectPreset(tester, CompressPreset.p360, 360, 640);
-    }, timeout: const Timeout(Duration(seconds: 20)));
+    }, timeout: const Timeout(Duration(seconds: 120)));
 
     testWidgets(
       'an explicit maxLongSidePx of 960 produces an output whose displayed long side is '
@@ -421,7 +425,7 @@ void main() {
         expect(result.heightPx, 960);
         expect(result.widthPx.isEven, isTrue);
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets(
@@ -454,7 +458,7 @@ void main() {
             100;
         expect(deviationPct, lessThanOrEqualTo(tolerancePct.toDouble()));
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets(
@@ -481,7 +485,7 @@ void main() {
         expect(outputInfo.frameRateFps, isNotNull);
         expect(outputInfo.frameRateFps!, closeTo(30.0, fpsToleranceFps));
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets(
@@ -497,7 +501,7 @@ void main() {
         expect(result.widthPx, 1080);
         expect(result.heightPx, 1920);
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets(
@@ -630,6 +634,7 @@ void main() {
     // encoder, tracked in QUESTIONS.md.
     const double emulatorSoftwareEncoderTolerance = 0.55;
 
+    // 120s (not 20s): the same slow-hosted-simulator exposure CI run 36245705733 found.
     testWidgets(
       'a targetSizeMb of 1.0 lands within the emulator software encoder\'s measured tolerance '
       'of the requested size',
@@ -640,7 +645,7 @@ void main() {
             (outputBytes - requestedBytes).abs() / requestedBytes;
         expect(deviation, lessThanOrEqualTo(emulatorSoftwareEncoderTolerance));
       },
-      timeout: const Timeout(Duration(seconds: 20)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     testWidgets(
@@ -959,7 +964,9 @@ void main() {
   });
 
   // Upright, no-letterbox, adjacency and trim (02-05-PLAN.md task 2). All four sample the
-  // compressed OUTPUT's own pixels/duration, never the source's.
+  // compressed OUTPUT's own pixels/duration, never the source's. Every case here is a real
+  // encode on the high-bitrate clip, so each carries a 120s (not 20s) explicit Timeout for the
+  // same reason as the SizeGuard group above (CI run 36245705733).
   group(
     'Orientation, framing and trim: proven by sampling the compressed output itself',
     () {
@@ -983,7 +990,7 @@ void main() {
           expect(result.heightPx, 1280);
           await _expectUprightAndUnpadded(compressVideo, result, sidecar);
         },
-        timeout: const Timeout(Duration(seconds: 20)),
+        timeout: const Timeout(Duration(seconds: 120)),
       );
 
       testWidgets(
@@ -1011,7 +1018,7 @@ void main() {
           expect(result.heightPx, crossPlatform['heightPx']);
           await _expectUprightAndUnpadded(compressVideo, result, sidecar);
         },
-        timeout: const Timeout(Duration(seconds: 20)),
+        timeout: const Timeout(Duration(seconds: 120)),
       );
 
       testWidgets(
@@ -1045,7 +1052,7 @@ void main() {
 
           expect(deltaMs, lessThanOrEqualTo(toleranceMs));
         },
-        timeout: const Timeout(Duration(seconds: 20)),
+        timeout: const Timeout(Duration(seconds: 120)),
       );
 
       testWidgets(
@@ -1104,7 +1111,7 @@ void main() {
             elapsedMs: result.elapsedMs,
           );
         },
-        timeout: const Timeout(Duration(seconds: 20)),
+        timeout: const Timeout(Duration(seconds: 120)),
       );
     },
   );
