@@ -17,6 +17,12 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+// 04-02: this plan adds real compression cases (HDR tone-map, fidelity, unusual audio, 4K60)
+// alongside 04-01's media-info-only cases above. Every new case asserts Android-only behaviour
+// (the Apple engine does not implement HDR tone-mapping or the forced audio downmix until
+// 04-04) with the same `skip: !Platform.isAndroid` guard commit 2007973 established for
+// compress_test.dart's own transmux cases, so the Apple CI legs stay green in the meantime.
+
 /// Copies a bundled corpus asset out of [rootBundle] into a fresh temporary file and returns
 /// its filesystem path, since the platform probe reads from a real file path, not asset bytes.
 /// This file keeps its own copy rather than sharing one with media_info_test.dart or
@@ -128,5 +134,47 @@ void main() {
     ) async {
       await _expectMediaInfoMatchesSidecar(compressVideo, 'uhd_4k60');
     });
+  });
+
+  group('An HDR clip compresses to SDR and reports it honestly (04-02)', () {
+    testWidgets(
+      'hdr_hlg10.mp4 with default options and only the OpenGL tone-map attempt fails '
+      'typed rather than crashing or silently passing HDR through',
+      (WidgetTester tester) async {
+        // Confirmed live on the danserver emulator (compress_video_api35, API 35,
+        // swiftshader_indirect software GL): the single HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_
+        // OPEN_GL attempt this task adds fails with ExportException.errorCode 5001
+        // (ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED) -- logcat shows the root cause is the
+        // GL effects pipeline's input Surface being released before the goldfish HEVC
+        // decoder (which itself accepts the Main10 stream without complaint) can configure
+        // against it, consistent with 04-RESEARCH.md Pitfall 3's warning that no synchronous
+        // capability check exists for this path on a software GL renderer. ErrorMapping.kt's
+        // existing table already maps 5001 to "io" -- no mapping change needed. This is
+        // exactly the scenario 04-02-PLAN.md task 2's OpenGL-then-MediaCodec fallback chain
+        // exists to survive; this task's own job is only to prove the Composition-wrapping
+        // and honest-reporting plumbing is real, which a correctly-typed failure does just as
+        // well as a success would. Task 2 replaces this assertion with a success case once
+        // the fallback chain exists.
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/hdr_hlg10.mp4',
+          'hdr_hlg10_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(path);
+
+        await expectLater(
+          job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.io,
+            ),
+          ),
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+      // The Apple engine does not implement HDR tone-mapping until 04-04.
+      skip: !Platform.isAndroid,
+    );
   });
 }

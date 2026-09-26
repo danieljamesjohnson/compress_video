@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import androidx.media3.common.ColorInfo
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -20,6 +21,7 @@ import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
@@ -87,6 +89,14 @@ class TransformerEngine(
 
         val target = resolvePlan(inputFile, inputInfo, request)
 
+        // Reserved for a later plan's hardware-HEVC probe (CDEC-01/03): whether a requested HEVC
+        // output fell back to H.264 because no hardware encoder exists on this device.
+        // `Arguments.kt` does not yet accept a request other than H.264, so there is nothing to
+        // fall back FROM yet -- threaded as a real parameter now, all the way through
+        // finishSuccess into buildResultFromDestination, rather than hardcoded independently in
+        // each, so that later plan changes this one line instead of every signature again.
+        val hevcFallback = false
+
         // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
         // knows encoding would not help, skip building a Transformer at all rather than running
         // a real encode only to discard it. The post-check in finishSuccess below is the
@@ -102,6 +112,11 @@ class TransformerEngine(
                 transmuxed = false,
                 usedOriginal = true,
                 audioReencoded = false,
+                // No Transformer ever runs on this fast path -- nothing could have been
+                // tone-mapped. finishSuccess's own !usedOriginal guard would compute the same
+                // answer, but there is no ExportResult here to compute it from.
+                toneMapped = NO_TRANSFORM_ATTEMPTED,
+                hevcFallback = hevcFallback,
             )
         }
 
@@ -348,8 +363,20 @@ class TransformerEngine(
             ),
         )
 
+        // Every export starts through the Composition overload, unconditionally, rather than
+        // branching between start(EditedMediaItem, ...) and start(Composition, ...): a
+        // Composition wrapping a single item changes nothing for a non-HDR clip, so one code
+        // path is worth more than a micro-optimisation for the common case (04-RESEARCH.md
+        // Pattern 1). This is also the only way to set HdrMode at all -- it lives on
+        // Composition.Builder, with no equivalent on the EditedMediaItem overload.
+        val sequence = EditedMediaItemSequence.Builder(editedMediaItem).build()
+        val composition =
+            Composition.Builder(sequence)
+                .setHdrMode(resolveHdrMode(request.hdrMode, inputInfo.isHdr))
+                .build()
+
         mainHandler.post(progressRunnable)
-        transformer.start(editedMediaItem, tempFile.path)
+        transformer.start(composition, tempFile.path)
 
         val outcome = deferred.await()
         JobRegistry.remove(jobId)
@@ -366,9 +393,53 @@ class TransformerEngine(
             }
             is ExportOutcome.Success -> {
                 onProgress(100.0)
-                finishSuccess(outcome.exportResult, tempFile, destinationFile, inputFile, inputBytes, startElapsedMs)
+                finishSuccess(
+                    outcome.exportResult,
+                    tempFile,
+                    destinationFile,
+                    inputFile,
+                    inputBytes,
+                    startElapsedMs,
+                    inputWasHdr = inputInfo.isHdr,
+                    hevcFallback = hevcFallback,
+                )
             }
         }
+    }
+
+    /**
+     * Resolves the request's [hdrMode] string plus the probed input's own [inputIsHdr] flag into
+     * the [Composition] HdrMode int Transformer actually understands (04-RESEARCH.md Pattern 1).
+     * `Arguments.kt` validates this plan's only accepted [hdrMode] value is `"toneMapToSdr"`, so
+     * for a genuinely HDR input this resolves to
+     * [Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL] -- the first attempt in 04-02
+     * task 2's OpenGL-then-MediaCodec fallback chain.
+     *
+     * For a NON-HDR input this MUST resolve to [Composition.HDR_MODE_KEEP_HDR] (`0`), not the
+     * tone-map mode -- found live this task, not assumed: `TransformerUtil.shouldTranscodeVideo`
+     * (confirmed via `javap` against the installed media3-transformer-1.11.1 AAR) forces a
+     * transcode whenever `TransformationRequest.hdrMode` is non-zero, REGARDLESS of whether the
+     * input is actually HDR. Requesting the tone-map mode unconditionally silently broke the
+     * transmux fast path for every ordinary H.264 clip (`small_480p.mp4` stopped transmuxing
+     * when this was first written that way). `HDR_MODE_KEEP_HDR` is a harmless no-op for a
+     * non-HDR source (04-RESEARCH.md Pattern 1) and is the only value that leaves
+     * `shouldTranscodeVideo`'s decision to the ordinary mime-type/effects comparison, so this
+     * function is not a cosmetic default -- it is what keeps CDEC-02 from regressing CORE-06.
+     *
+     * Media3's own automatic step-down from `HDR_MODE_KEEP_HDR` for a device that cannot honour
+     * it (04-RESEARCH.md Pattern 4) is never relied on here as a fallback mechanism either way:
+     * it silently changes only the HDR mode, never the requested video MIME type, so a future
+     * keep-HDR request would still need an independent hardware-capability gate to decide
+     * H.264-vs-H.265 output -- a later plan's job, not this one's.
+     */
+    private fun resolveHdrMode(
+        hdrMode: String,
+        inputIsHdr: Boolean,
+    ): Int {
+        if (!inputIsHdr) {
+            return Composition.HDR_MODE_KEEP_HDR
+        }
+        return Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL
     }
 
     /**
@@ -396,6 +467,8 @@ class TransformerEngine(
         inputFile: File,
         inputBytes: Long,
         startElapsedMs: Long,
+        inputWasHdr: Boolean,
+        hevcFallback: Boolean,
     ): CompressResultMessage {
         val tempBytes = tempFile.length()
         val usedOriginal = tempBytes >= inputBytes
@@ -426,6 +499,19 @@ class TransformerEngine(
                         ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
                 )
 
+        // Computed from the export's OWN output colour info via ColorInfo.isTransferHdr, never
+        // from what the request asked for (04-RESEARCH.md Pattern 5) -- the caller is told
+        // whether the file they RECEIVED is tone-mapped, not whether tone-mapping was requested.
+        // Guarded by !usedOriginal exactly like transmuxed/audioReencoded above: a substituted
+        // original was never tone-mapped, whatever Media3 did to the temp file this job
+        // discarded. An HDR input can never reach the transmux fast path either way --
+        // SizeGuard's wouldTransmux predicate requires an H.264 video codec, and every HDR
+        // source in this corpus is HEVC -- so the only two paths an HDR clip can take are a
+        // real encode (this branch) or the never-larger substitution above; there is no third
+        // case this formula needs to reconcile.
+        val outputIsHdr = exportResult.colorInfo?.let { ColorInfo.isTransferHdr(it) } ?: false
+        val toneMapped = !usedOriginal && inputWasHdr && !outputIsHdr
+
         return buildResultFromDestination(
             destinationFile = destinationFile,
             inputBytes = inputBytes,
@@ -433,6 +519,8 @@ class TransformerEngine(
             transmuxed = transmuxed,
             usedOriginal = usedOriginal,
             audioReencoded = audioReencoded,
+            toneMapped = toneMapped,
+            hevcFallback = hevcFallback,
         )
     }
 
@@ -452,6 +540,8 @@ class TransformerEngine(
         transmuxed: Boolean,
         usedOriginal: Boolean,
         audioReencoded: Boolean,
+        toneMapped: Boolean,
+        hevcFallback: Boolean,
     ): CompressResultMessage {
         val outputInfo = Probe(context).getMediaInfo(destinationFile.path)
         val audioCodec = if (outputInfo.hasAudio) readAudioCodec(destinationFile) else null
@@ -467,8 +557,8 @@ class TransformerEngine(
             audioCodec = audioCodec,
             transmuxed = transmuxed,
             usedOriginal = usedOriginal,
-            toneMapped = false,
-            hevcFallback = false,
+            toneMapped = toneMapped,
+            hevcFallback = hevcFallback,
             audioReencoded = audioReencoded,
             elapsedMs = SystemClock.elapsedRealtime() - startElapsedMs,
         )
@@ -687,6 +777,15 @@ class TransformerEngine(
 
     internal companion object {
         private const val PROGRESS_POLL_INTERVAL_MS = 250L
+
+        /**
+         * The value of `toneMapped` when [compress]'s never-larger pre-check short-circuits
+         * before a [Transformer] is ever built: tone-mapping cannot have happened when no
+         * encode ran at all. Named rather than a bare literal so this file's own real
+         * [ColorInfo.isTransferHdr]-derived computation (see [finishSuccess]) is never mistaken
+         * for another leftover hardcoded value.
+         */
+        private const val NO_TRANSFORM_ATTEMPTED = false
 
         /**
          * Builds the video effects list in one fixed, documented order: geometry
