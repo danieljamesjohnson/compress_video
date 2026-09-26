@@ -48,6 +48,16 @@ object SizeGuard {
         val audioCodec: String?,
         /** Average audio-track bitrate, in bits per second, or `null` when unknown. */
         val audioBitrateBps: Long?,
+        /**
+         * The input's own audio channel count, or `null` when [hasAudio] is `false` or the
+         * platform could not determine it. Defaults to `null` so every pre-existing call site
+         * that constructs an [InputInfo] without this field keeps compiling unchanged (04-02).
+         * Feeds [wouldTransmux]'s channel-count condition (AUDO-03): a `null` value is treated
+         * as "unknown, assume safe to remux" exactly like [videoBitrateBps]'s own unknown-input
+         * handling elsewhere in this file, since a genuinely-unknown channel count is not
+         * evidence of a six-channel track.
+         */
+        val audioChannelCount: Int? = null,
     )
 
     /** The video codec token that satisfies [wouldTransmux]'s codec condition (D-10). */
@@ -55,6 +65,9 @@ object SizeGuard {
 
     /** The audio codec token that satisfies [wouldTransmux]'s audio-codec condition (D-10). */
     private const val AUDIO_CODEC_AAC = "aac"
+
+    /** The channel count that satisfies [wouldTransmux]'s audio-channel-count condition (AUDO-03). */
+    private const val MAX_TRANSMUX_AUDIO_CHANNELS = 2
 
     /**
      * The resolved request [SizeGuard] resolves against an [InputInfo].
@@ -241,6 +254,12 @@ object SizeGuard {
         val wouldTransmux =
             input.videoCodec == VIDEO_CODEC_H264 &&
                 (!input.hasAudio || input.audioCodec == AUDIO_CODEC_AAC) &&
+                // AUDO-03 (04-RESEARCH.md Pitfall 1): a six-channel AAC source otherwise
+                // satisfying every other condition must NOT take the remux fast path with its
+                // six channels intact -- `null` (unknown) is treated as "assume safe to remux",
+                // matching this file's existing unknown-input-bitrate handling, since an
+                // unreadable channel count is not evidence of a 5.1 track.
+                (input.audioChannelCount == null || input.audioChannelCount <= MAX_TRANSMUX_AUDIO_CHANNELS) &&
                 options.audioPassthroughRequested &&
                 noTrimRequested &&
                 inputLongSidePx <= effectiveLongSidePx &&

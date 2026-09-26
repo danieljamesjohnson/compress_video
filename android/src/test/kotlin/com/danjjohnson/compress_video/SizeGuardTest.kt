@@ -445,6 +445,40 @@ internal class SizeGuardTest {
         assertTrue(plan.wouldTransmux)
     }
 
+    // --- wouldTransmux audio channel count (AUDO-03, plan 04-02 task 3) ---
+    //
+    // A six-channel AAC input that otherwise satisfies every other transmux condition must NOT
+    // take the remux fast path with its six channels intact; the same input at two channels
+    // still qualifies, and an unknown (null) count is treated as safe-to-remux.
+
+    @Test
+    fun wouldTransmux_sixChannelAudio_disqualifies() {
+        val input = transmuxInput().copy(audioChannelCount = 6)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_twoChannelAudio_stillQualifies() {
+        val input = transmuxInput().copy(audioChannelCount = 2)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_threeChannelAudio_disqualifies() {
+        val input = transmuxInput().copy(audioChannelCount = 3)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(!plan.wouldTransmux)
+    }
+
+    @Test
+    fun wouldTransmux_unknownAudioChannelCount_stillQualifies() {
+        val input = transmuxInput().copy(audioChannelCount = null)
+        val plan = SizeGuard.resolve(input, transmuxOptions())
+        assertTrue(plan.wouldTransmux)
+    }
+
     // --- estimate()/compress() can never disagree (plan 02-07, D-19, INFO-03) ---
     //
     // Compression.estimate() and TransformerEngine.compress() both resolve through

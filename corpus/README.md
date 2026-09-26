@@ -342,6 +342,28 @@ prevent), so recording an ffmpeg-sampled colour as "the answer" would encode the
 contract. A later plan samples the REAL tone-mapped output from a real platform compression and
 checks it against these thresholds instead.
 
+**What the floors mean (04-02):** `minSaturation` is `(max channel - min channel) / max channel`,
+expressed on a 0-255 scale (not 0-1 and not a percentage) — a correctly-saturated primary-colour
+patch should read comfortably above this floor; a washed-out passthrough reads near 0.
+`dominanceMargin` is the minimum raw channel-value gap (0-255) the patch's own painted dominant
+channel must hold over each of the other two channels — this is what actually distinguishes "a
+red patch" from "a grey patch with a faint red tint." `minWhiteLuma` is the minimum value the
+white patch's darkest channel may read — proving the patch is bright rather than merely
+"not-colourful."
+
+**Not yet exercised against a real successful tone-map.** `example/integration_test/
+hard_inputs_test.dart`'s `_expectHdrFidelity` helper (04-02 task 2) implements exactly this
+assertion and is wired into both HDR clips' test cases, but on the `compress_video_api35`
+emulator the tone-map pipeline itself fails on BOTH the OpenGL and MediaCodec paths (see
+`doc/HARDWARE_CHECKLIST.md`'s HDR section) — a confirmed environment limitation, not a code bug.
+The fidelity assertion has therefore never run against a real tone-mapped file; these three
+constants (`40`, `120`, `20`, unchanged from 04-01) remain unvalidated starting points. **To
+re-derive them once real tone-mapped output exists** (a physical Android phone, or a future
+emulator/OS update that makes the tone-map pipeline work here): compress `hdr_hlg10.mp4` with
+default options, sample the four patch coordinates from the produced file's own thumbnail, and
+set each floor comfortably below the measured value (not equal to it — these are floors meant to
+catch a regression, not pin an exact measurement).
+
 ### `audio` (AUDIO_PROBE_CLIPS: `pcm_audio_480p.mov`, `surround51_480p.mp4`)
 
 Carries `codec` (ffprobe's raw `codec_name`, unnormalized — there is no audio entry in

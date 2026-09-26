@@ -5,6 +5,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -85,6 +86,7 @@ class TransformerEngine(
     ): CompressResultMessage {
         val startElapsedMs = SystemClock.elapsedRealtime()
         val inputBytes = inputFile.length()
+        val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
         val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
 
         val target = resolvePlan(inputFile, inputInfo, request)
@@ -132,29 +134,55 @@ class TransformerEngine(
                 inputFps = inputInfo.frameRateFps,
             )
 
+        // AUDO-03 forced re-encode (04-RESEARCH.md Pitfall 1): a real, previously-undocumented
+        // gap -- today, ONLY an explicit REENCODE request builds a ChannelMixingAudioProcessor
+        // or explicit AudioEncoderSettings. A 5.1 AAC source, or any non-AAC source, under the
+        // DEFAULT AudioPassthrough option would sail straight through untouched: not what
+        // "compress with default options" needs to produce (stereo AAC, audioReencoded: true).
+        // Computed once, here, before the processors and the encoder factory are built: forced
+        // whenever the request is not already an explicit re-encode or a strip (there is
+        // nothing to force onto a track already being re-encoded or removed), the input has
+        // audio, and either its normalised codec is not AAC or its channel count exceeds
+        // stereo.
+        val audioForcedReencode =
+            request.audioMode != AudioModeMessage.REENCODE &&
+                request.audioMode != AudioModeMessage.STRIP &&
+                inputInfo.hasAudio &&
+                (
+                    inputAudioCodec != AUDIO_CODEC_AAC_TOKEN ||
+                        (inputAudioChannels != null && inputAudioChannels > FORCED_AUDIO_REENCODE_MAX_CHANNELS)
+                )
+
         // Channel-count changes go through the platform's own mixing processor
         // (ChannelMixingAudioProcessor + ChannelMixingMatrix.createForConstantGain), never
         // hand-written per-sample downmix math (02-RESEARCH.md Pattern 5, Don't Hand-Roll):
         // AudioEncoderSettings has no channel-count field of its own to set. Only meaningful --
-        // and only added -- for an explicit re-encode with a target channel count that differs
-        // from what the source actually has; passthrough and strip never touch this list, for
-        // the same "leave the audio pipeline alone unless asked to change it" reason the
+        // and only added -- when the target channel count differs from what the source actually
+        // has; passthrough (with nothing forcing it) and strip never touch this list, for the
+        // same "leave the audio pipeline alone unless asked to change it" reason the
         // encoder-factory branch below leaves audio encoder settings at their Media3 default
-        // for anything other than a forced re-encode.
+        // for anything other than a re-encode.
         val requestedAudioChannels = request.audioChannels?.toInt()
+        val targetAudioChannels =
+            when {
+                request.audioMode == AudioModeMessage.REENCODE -> requestedAudioChannels
+                // Capped at 2, never upmixed: a mono non-AAC source targets its own 1 channel,
+                // a stereo or 5.1+ source targets 2. An unreadable source channel count on a
+                // path already forcing a re-encode falls back to this plugin's own 2-channel
+                // default rather than leaving the mixing matrix undecided.
+                audioForcedReencode -> (inputAudioChannels ?: FORCED_AUDIO_REENCODE_MAX_CHANNELS)
+                    .coerceAtMost(FORCED_AUDIO_REENCODE_MAX_CHANNELS)
+                else -> null
+            }
         val audioProcessors: List<AudioProcessor> =
-            if (request.audioMode == AudioModeMessage.REENCODE &&
-                requestedAudioChannels != null &&
+            if (targetAudioChannels != null &&
                 inputAudioChannels != null &&
-                requestedAudioChannels != inputAudioChannels
+                targetAudioChannels != inputAudioChannels
             ) {
                 listOf(
                     ChannelMixingAudioProcessor().apply {
                         putChannelMixingMatrix(
-                            ChannelMixingMatrix.createForConstantGain(
-                                inputAudioChannels,
-                                requestedAudioChannels,
-                            ),
+                            channelMixingMatrixFor(inputAudioChannels, targetAudioChannels),
                         )
                     },
                 )
@@ -239,162 +267,225 @@ class TransformerEngine(
                             .setBitrate(target.audioBitrateBps.toInt())
                             .build(),
                     )
+                } else if (audioForcedReencode) {
+                    // The source's own audio bitrate (what SizeGuard rule 5 would otherwise
+                    // resolve) describes six channels or raw LPCM here -- the wrong number to
+                    // ask a 1-or-2-channel AAC encoder for. A fixed, named constant instead
+                    // (AUDO-03, 04-RESEARCH.md Pitfall 1) -- this is what actually makes Media3
+                    // transcode the track rather than copy it; the ChannelMixingAudioProcessor
+                    // above alone only changes what samples the encoder receives, not whether
+                    // Media3 decides an encode is needed at all.
+                    builder.setRequestedAudioEncoderSettings(
+                        AudioEncoderSettings.Builder()
+                            .setBitrate(FORCED_AUDIO_REENCODE_BITRATE_BPS)
+                            .build(),
+                    )
                 }
                 builder.build()
             }
 
-        val deferred = CompletableDeferred<ExportOutcome>()
-        val listener =
-            object : Transformer.Listener {
-                override fun onCompleted(
-                    composition: Composition,
-                    exportResult: ExportResult,
-                ) {
-                    // Stop polling HERE, inside the terminal callback itself, rather than
-                    // waiting for JobRegistry.remove after this suspend function resumes: the
-                    // Transformer class javadoc states getProgress reports
-                    // PROGRESS_STATE_NOT_STARTED once an export completes, so the polling loop
-                    // must stop itself proactively rather than rely on that state change.
-                    JobRegistry.stopPolling(jobId)
-                    deferred.complete(ExportOutcome.Success(exportResult))
-                }
+        // Whether this job's tone-map decision might need the OpenGL->MediaCodec fallback chain
+        // at all (04-RESEARCH.md Pattern 2/Pitfall 3): only ever true for a genuinely HDR source
+        // under the default tone-map request -- `Arguments.kt` does not yet accept any other
+        // `hdrMode` value, so this is exactly "the input was HDR." A non-HDR job never attempts
+        // the retry and never sees the exhausted-chain error message below.
+        val isHdrToneMapAttempt = inputInfo.isHdr && request.hdrMode == "toneMapToSdr"
 
-                override fun onError(
-                    composition: Composition,
-                    exportResult: ExportResult,
-                    exportException: ExportException,
-                ) {
-                    JobRegistry.stopPolling(jobId)
-                    deferred.complete(ExportOutcome.Failure(exportException))
-                }
-            }
-
-        // No composition-level transmux flags (Transformer.Builder has no such API; the
-        // per-EditedMediaItem knobs 02-RESEARCH.md Pattern 2 names are ignored for a
-        // single-item composition, so there is no reachable code path here where setting them
-        // would do anything). When target.wouldTransmux is true, videoEffects above is already
-        // empty and requesting H.264/AAC output already matches the input's own codecs (the
-        // predicate requires exactly that), so Media3's own "transcode only if necessary"
-        // behaviour transmuxes both tracks without any extra wiring on this builder.
-        //
-        // setAudioMimeType(AUDIO_AAC) is unconditional, for every audio mode -- deliberately not
-        // branched the way the encoder-factory settings above are. It is what makes AUDO-01's
-        // default path safe: when the source audio is already AAC, requesting AAC output simply
-        // matches (no forced transcode, confirmed by the passing small_480p.mp4 transmux case
-        // below), so passthrough still copies; when the source audio is present but NOT AAC,
-        // this same unconditional request is what makes Media3 transcode it to AAC rather than
-        // failing outright or trying to mux an incompatible codec into the output MP4 (D-14) --
-        // there is deliberately no separate "is this AAC" branch here because the one
-        // unconditional call already covers both outcomes.
-        //
-        // Explicit InAppMp4Muxer.Factory with streamable output DISABLED -- found and fixed
-        // this plan (Rule 1 bug, orchestrator-flagged): Transformer.Builder's own default
-        // muxer (DefaultMuxer.Factory, confirmed via javap on the installed
-        // media3-transformer:1.11.1 AAR) already delegates to InAppMp4Muxer with
-        // attemptStreamableOutputEnabled left at ITS OWN default of true. That default writes
-        // moov before mdat (so playback can start before the file finishes downloading) by
-        // reserving a speculative `free` box after moov sized for moov to grow into as samples
-        // arrive, then leaves whatever is unused as a real `free` box in the final file. For a
-        // short, few-sample clip that reservation dwarfs the actual content: a raw MP4-box walk
-        // of a remuxed small_480p.mp4 (77,504 input bytes) found a single 395,344-byte `free`
-        // box -- the entire cause of a measured 472,825-byte "remux" of a 77KB clip, not muxer
-        // overhead in any normal sense. Disabling streamable output removes that reservation
-        // entirely (the same remux then measures 77,481 bytes, smaller than the input) at the
-        // cost of moov landing at the end of the file instead of the start; this plugin's output
-        // is written to local storage for the caller to read as a whole file, not progressively
-        // streamed while still being written, so that cost is not a real one here.
-        val transformer =
-            Transformer.Builder(context)
-                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .setEncoderFactory(encoderFactory)
-                .setMuxerFactory(InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(false))
-                .addListener(listener)
-                .build()
-
-        val tempFile = PluginFiles.tempFileBeside(destinationFile)
-        val progressHolder = ProgressHolder()
-        // A dedicated scope for firing fire-and-forget progress events from the (non-suspend)
-        // Runnable below -- cancelled once this job settles so it never outlives it.
-        val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-
-        // Remembers the last value actually forwarded for THIS job -- a fresh 0.0 per call to
-        // [compress], since this variable lives in this function's own local scope alongside
-        // the rest of this job's state, so two jobs polling concurrently can never see or
-        // affect each other's last-sent value.
+        // Shared across every attempt of THIS job (never reset to 0.0 on a retry): the poller
+        // below already refuses to forward a value smaller than the last one actually sent, so a
+        // second attempt's own progress restarting at 0 produces a pause in what the caller sees,
+        // never a rewind (04-02-PLAN.md task 2). Declared here, once, rather than inside
+        // [attemptExport], precisely so a retry's fresh [ProgressHolder] does not reset it.
         var lastSentProgress = 0.0
-        lateinit var progressRunnable: Runnable
-        progressRunnable =
-            Runnable {
-                val state = transformer.getProgress(progressHolder)
-                if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                    // Clamp into 0..99, not 0..100: measured live this task -- the exporter can
-                    // report PROGRESS_STATE_AVAILABLE with progress already at 100 for several
-                    // poll ticks BEFORE onCompleted actually fires (muxing/finalisation happens
-                    // after the reported progress reaches its own ceiling), which would forward
-                    // 100 multiple times if this loop's own upper clamp allowed it through. The
-                    // single canonical terminal 100 is reserved for the explicit onProgress(100.0)
-                    // call made once, right before the success/never-larger/remux-shortcut reply
-                    // below -- this is what guarantees 100 appears exactly once in the whole
-                    // stream, per 02-06-PLAN.md task 1's acceptance criteria. Never forward a
-                    // value smaller than the last one actually sent for this job, either --
-                    // monotonically non-decreasing.
-                    val clamped = progressHolder.progress.toDouble().coerceIn(0.0, 99.0)
-                    val forwarded = maxOf(clamped, lastSentProgress)
-                    lastSentProgress = forwarded
-                    progressScope.launch { onProgress(forwarded) }
+
+        // Performs ONE export attempt at [hdrMode]: builds its own [Transformer] and its own temp
+        // file via [PluginFiles.tempFileBeside], registers with [JobRegistry], starts, awaits the
+        // outcome and returns it alongside the temp file it wrote to. Neither a [Transformer] nor
+        // a temp file is reused across attempts (04-RESEARCH.md Pattern 2/Anti-Patterns): each
+        // call here builds fresh instances of both. A local suspend function, not a member one,
+        // so it can close over every value already resolved above ([editedMediaItem],
+        // [encoderFactory], [jobId], [destinationFile], [onProgress], [mainHandler] and the
+        // shared [lastSentProgress]) without a long parameter list or a separate mutable-ref type.
+        suspend fun attemptExport(hdrMode: Int): Pair<ExportOutcome, File> {
+            val attemptDeferred = CompletableDeferred<ExportOutcome>()
+            val listener =
+                object : Transformer.Listener {
+                    override fun onCompleted(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                    ) {
+                        // Stop polling HERE, inside the terminal callback itself, rather than
+                        // waiting for JobRegistry.remove after this suspend function resumes: the
+                        // Transformer class javadoc states getProgress reports
+                        // PROGRESS_STATE_NOT_STARTED once an export completes, so the polling
+                        // loop must stop itself proactively rather than rely on that state
+                        // change.
+                        JobRegistry.stopPolling(jobId)
+                        attemptDeferred.complete(ExportOutcome.Success(exportResult))
+                    }
+
+                    override fun onError(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                        exportException: ExportException,
+                    ) {
+                        JobRegistry.stopPolling(jobId)
+                        attemptDeferred.complete(ExportOutcome.Failure(exportException))
+                    }
                 }
-                // The class javadoc: "After an export completes, this method returns
-                // PROGRESS_STATE_NOT_STARTED" -- the terminal Transformer.Listener callbacks
-                // above call JobRegistry.stopPolling the instant they fire (rather than relying
-                // on this state change, or on JobRegistry.remove/cancel after this suspend
-                // function resumes) to stop this loop on every terminal path.
-                mainHandler.postDelayed(progressRunnable, PROGRESS_POLL_INTERVAL_MS)
-            }
 
-        JobRegistry.register(
-            jobId,
-            JobRegistry.LiveJob(
-                cancelTransformer = { transformer.cancel() },
-                tempFile = tempFile,
-                mainHandler = mainHandler,
-                progressRunnable = progressRunnable,
-                onCancelled = { deferred.complete(ExportOutcome.Cancelled) },
-            ),
-        )
+            // Every export starts through the Composition overload, unconditionally, rather than
+            // branching between start(EditedMediaItem, ...) and start(Composition, ...): a
+            // Composition wrapping a single item changes nothing for a non-HDR clip, so one code
+            // path is worth more than a micro-optimisation for the common case (04-RESEARCH.md
+            // Pattern 1). This is also the only way to set HdrMode at all -- it lives on
+            // Composition.Builder, with no equivalent on the EditedMediaItem overload.
+            val sequence = EditedMediaItemSequence.Builder(editedMediaItem).build()
+            val composition = Composition.Builder(sequence).setHdrMode(hdrMode).build()
 
-        // Every export starts through the Composition overload, unconditionally, rather than
-        // branching between start(EditedMediaItem, ...) and start(Composition, ...): a
-        // Composition wrapping a single item changes nothing for a non-HDR clip, so one code
-        // path is worth more than a micro-optimisation for the common case (04-RESEARCH.md
-        // Pattern 1). This is also the only way to set HdrMode at all -- it lives on
-        // Composition.Builder, with no equivalent on the EditedMediaItem overload.
-        val sequence = EditedMediaItemSequence.Builder(editedMediaItem).build()
-        val composition =
-            Composition.Builder(sequence)
-                .setHdrMode(resolveHdrMode(request.hdrMode, inputInfo.isHdr))
-                .build()
+            // No composition-level transmux flags (Transformer.Builder has no such API; the
+            // per-EditedMediaItem knobs 02-RESEARCH.md Pattern 2 names are ignored for a
+            // single-item composition, so there is no reachable code path here where setting
+            // them would do anything). When target.wouldTransmux is true, videoEffects above is
+            // already empty and requesting H.264/AAC output already matches the input's own
+            // codecs (the predicate requires exactly that), so Media3's own "transcode only if
+            // necessary" behaviour transmuxes both tracks without any extra wiring on this
+            // builder.
+            //
+            // setAudioMimeType(AUDIO_AAC) is unconditional, for every audio mode -- deliberately
+            // not branched the way the encoder-factory settings above are. It is what makes
+            // AUDO-01's default path safe: when the source audio is already AAC, requesting AAC
+            // output simply matches (no forced transcode, confirmed by the passing
+            // small_480p.mp4 transmux case), so passthrough still copies; when the source audio
+            // is present but NOT AAC, this same unconditional request is what makes Media3
+            // transcode it to AAC rather than failing outright or trying to mux an incompatible
+            // codec into the output MP4 (D-14) -- there is deliberately no separate "is this
+            // AAC" branch here because the one unconditional call already covers both outcomes.
+            //
+            // Explicit InAppMp4Muxer.Factory with streamable output DISABLED -- found and fixed
+            // plan 02-04 (Rule 1 bug, orchestrator-flagged): Transformer.Builder's own default
+            // muxer (DefaultMuxer.Factory, confirmed via javap on the installed
+            // media3-transformer:1.11.1 AAR) already delegates to InAppMp4Muxer with
+            // attemptStreamableOutputEnabled left at ITS OWN default of true. That default
+            // writes moov before mdat (so playback can start before the file finishes
+            // downloading) by reserving a speculative `free` box after moov sized for moov to
+            // grow into as samples arrive, then leaves whatever is unused as a real `free` box
+            // in the final file. For a short, few-sample clip that reservation dwarfs the actual
+            // content: a raw MP4-box walk of a remuxed small_480p.mp4 (77,504 input bytes) found
+            // a single 395,344-byte `free` box -- the entire cause of a measured 472,825-byte
+            // "remux" of a 77KB clip, not muxer overhead in any normal sense. Disabling
+            // streamable output removes that reservation entirely (the same remux then measures
+            // 77,481 bytes, smaller than the input) at the cost of moov landing at the end of the
+            // file instead of the start; this plugin's output is written to local storage for the
+            // caller to read as a whole file, not progressively streamed while still being
+            // written, so that cost is not a real one here.
+            val transformer =
+                Transformer.Builder(context)
+                    .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                    .setEncoderFactory(encoderFactory)
+                    .setMuxerFactory(InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(false))
+                    .addListener(listener)
+                    .build()
 
-        mainHandler.post(progressRunnable)
-        transformer.start(composition, tempFile.path)
+            val attemptTempFile = PluginFiles.tempFileBeside(destinationFile)
+            val progressHolder = ProgressHolder()
+            // A dedicated scope for firing fire-and-forget progress events from the (non-suspend)
+            // Runnable below -- cancelled once this attempt settles so it never outlives it.
+            val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            lateinit var progressRunnable: Runnable
+            progressRunnable =
+                Runnable {
+                    val state = transformer.getProgress(progressHolder)
+                    if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                        // Clamp into 0..99, not 0..100: measured live plan 02-06 -- the exporter
+                        // can report PROGRESS_STATE_AVAILABLE with progress already at 100 for
+                        // several poll ticks BEFORE onCompleted actually fires
+                        // (muxing/finalisation happens after the reported progress reaches its
+                        // own ceiling), which would forward 100 multiple times if this loop's own
+                        // upper clamp allowed it through. The single canonical terminal 100 is
+                        // reserved for the explicit onProgress(100.0) call made once, right
+                        // before the success/never-larger/remux-shortcut reply below -- this is
+                        // what guarantees 100 appears exactly once in the whole stream, per
+                        // 02-06-PLAN.md task 1's acceptance criteria. Never forward a value
+                        // smaller than the last one actually sent for this JOB (shared across
+                        // every attempt, see [lastSentProgress] above), either --
+                        // monotonically non-decreasing even across a retry.
+                        val clamped = progressHolder.progress.toDouble().coerceIn(0.0, 99.0)
+                        val forwarded = maxOf(clamped, lastSentProgress)
+                        lastSentProgress = forwarded
+                        progressScope.launch { onProgress(forwarded) }
+                    }
+                    // The class javadoc: "After an export completes, this method returns
+                    // PROGRESS_STATE_NOT_STARTED" -- the terminal Transformer.Listener callbacks
+                    // above call JobRegistry.stopPolling the instant they fire (rather than
+                    // relying on this state change, or on JobRegistry.remove/cancel after this
+                    // suspend function resumes) to stop this loop on every terminal path.
+                    mainHandler.postDelayed(progressRunnable, PROGRESS_POLL_INTERVAL_MS)
+                }
 
-        val outcome = deferred.await()
-        JobRegistry.remove(jobId)
-        progressScope.cancel()
+            JobRegistry.register(
+                jobId,
+                JobRegistry.LiveJob(
+                    cancelTransformer = { transformer.cancel() },
+                    tempFile = attemptTempFile,
+                    mainHandler = mainHandler,
+                    progressRunnable = progressRunnable,
+                    onCancelled = { attemptDeferred.complete(ExportOutcome.Cancelled) },
+                ),
+            )
 
-        return when (outcome) {
+            mainHandler.post(progressRunnable)
+            transformer.start(composition, attemptTempFile.path)
+
+            val attemptOutcome = attemptDeferred.await()
+            JobRegistry.remove(jobId)
+            progressScope.cancel()
+            return attemptOutcome to attemptTempFile
+        }
+
+        var (outcome, tempFile) =
+            attemptExport(resolveHdrMode(request.hdrMode, inputInfo.isHdr))
+        var triedMediaCodecFallback = false
+
+        // The retry chain (04-RESEARCH.md Pattern 2): only for a genuinely HDR source under the
+        // default tone-map request, only after a real export FAILURE (never a cancellation --
+        // ExportOutcome.Cancelled is a distinct case below and is always terminal on the first
+        // attempt), and only where the MediaCodec tone-map path is even available (API 31+).
+        // Retrying an ordinary (non-HDR) failure would double its cost to serve a case that
+        // cannot benefit -- a regression this condition exists specifically to prevent.
+        if (outcome is ExportOutcome.Failure &&
+            isHdrToneMapAttempt &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        ) {
+            // The failed attempt's temp file is deleted BEFORE the retry starts, not after --
+            // a retry against a stale file left behind by the first attempt is a different bug
+            // wearing the first one's clothes (04-RESEARCH.md Anti-Patterns).
+            PluginFiles.quietDelete(tempFile)
+            triedMediaCodecFallback = true
+            val retryResult =
+                attemptExport(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC)
+            outcome = retryResult.first
+            tempFile = retryResult.second
+        }
+
+        return when (val finalOutcome = outcome) {
             is ExportOutcome.Cancelled -> {
                 PluginFiles.quietDelete(tempFile)
                 throw CompressVideoError("cancelled", "The compression job was cancelled")
             }
             is ExportOutcome.Failure -> {
                 PluginFiles.quietDelete(tempFile)
-                throw mapExportException(outcome.exception)
+                if (isHdrToneMapAttempt) {
+                    throw hdrFallbackExhaustedError(finalOutcome.exception, triedMediaCodecFallback)
+                } else {
+                    throw mapExportException(finalOutcome.exception)
+                }
             }
             is ExportOutcome.Success -> {
                 onProgress(100.0)
                 finishSuccess(
-                    outcome.exportResult,
+                    finalOutcome.exportResult,
                     tempFile,
                     destinationFile,
                     inputFile,
@@ -402,9 +493,39 @@ class TransformerEngine(
                     startElapsedMs,
                     inputWasHdr = inputInfo.isHdr,
                     hevcFallback = hevcFallback,
+                    audioEncodeForced =
+                        request.audioMode == AudioModeMessage.REENCODE || audioForcedReencode,
                 )
             }
         }
+    }
+
+    /**
+     * Throws when the HDR tone-map fallback chain (04-RESEARCH.md Pattern 2) is exhausted:
+     * neither `HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL` nor (when [triedMediaCodecFallback])
+     * `_USING_MEDIACODEC` succeeded on this device. Reason `unsupportedInput` -- there is nothing
+     * more this engine can attempt on this hardware, not a malformed request -- with
+     * [lastException]'s own `errorCode` folded into the message, following [mapExportException]'s
+     * own convention so the numeric code stays observable from Dart even though the reason is
+     * recognised (`CompressVideoException.platformDetail` is only populated Dart-side for an
+     * unrecognised reason NAME, per [mapExportException]'s own doc comment). No new
+     * [CompressVideoErrorReason] value is added -- `unsupportedInput` already exists.
+     */
+    private fun hdrFallbackExhaustedError(
+        lastException: ExportException,
+        triedMediaCodecFallback: Boolean,
+    ): CompressVideoError {
+        val chain =
+            if (triedMediaCodecFallback) {
+                "the OpenGL then MediaCodec HDR tone-map paths"
+            } else {
+                "the OpenGL HDR tone-map path (MediaCodec fallback unavailable below API 31)"
+            }
+        val detailMessage = lastException.message?.let { ": $it" } ?: ""
+        val message =
+            "No supported HDR tone-map path on this device -- exhausted $chain " +
+                "(Media3 export failed with code ${lastException.errorCode}$detailMessage)"
+        return CompressVideoError("unsupportedInput", message, lastException.errorCode.toString())
     }
 
     /**
@@ -443,6 +564,60 @@ class TransformerEngine(
     }
 
     /**
+     * Resolves a [ChannelMixingMatrix] for [inputChannels] to [outputChannels], special-casing
+     * 6-to-2 (5.1 to stereo). [ChannelMixingMatrix.createForConstantGain] does NOT implement
+     * every pair -- confirmed live this task, not assumed from 04-RESEARCH.md's "Don't Hand-Roll"
+     * citation: `createForConstantGain(6, 2)` throws
+     * `UnsupportedOperationException("Default channel mixing coefficients for 6->2 are not yet
+     * implemented.")` on the installed media3-common-1.11.1 AAR. [fiveDotOneToStereoMixingMatrix]
+     * supplies the one additional pair AUDO-03 needs; every other pair this plugin actually
+     * requests (mono<->stereo, for [AudioReencode]'s 1-or-2-channel range) already works through
+     * the library default and is left alone.
+     */
+    private fun channelMixingMatrixFor(
+        inputChannels: Int,
+        outputChannels: Int,
+    ): ChannelMixingMatrix =
+        if (inputChannels == 6 && outputChannels == 2) {
+            fiveDotOneToStereoMixingMatrix()
+        } else {
+            ChannelMixingMatrix.createForConstantGain(inputChannels, outputChannels)
+        }
+
+    /**
+     * A fixed-coefficient 5.1-to-stereo [ChannelMixingMatrix], since Media3 has no built-in
+     * default for this pair (see [channelMixingMatrixFor]'s doc comment). Assumes the standard
+     * Android 5.1 channel order (`AudioFormat.CHANNEL_OUT_5POINT1`): front-left, front-right,
+     * front-centre, LFE, back-left, back-right. Coefficients follow the common ITU-R
+     * BS.775-inspired downmix every mainstream consumer decoder uses: each front channel passes
+     * straight through to its own side, the centre and each surround channel contribute to BOTH
+     * output channels at [SURROUND_DOWNMIX_GAIN] (-3dB), and LFE is not folded in at all --
+     * matching how most consumer downmix implementations treat the sub channel by default.
+     */
+    private fun fiveDotOneToStereoMixingMatrix(): ChannelMixingMatrix {
+        val g = SURROUND_DOWNMIX_GAIN
+        // Row-major, input-channel-major (confirmed via javap against the installed
+        // media3-common-1.11.1 AAR's ChannelMixingMatrix.getMixingCoefficient(int, int)):
+        // coefficients[inputChannelIndex * outputChannelCount + outputChannelIndex].
+        val coefficients =
+            floatArrayOf(
+                // FL -> L, R
+                1f, 0f,
+                // FR -> L, R
+                0f, 1f,
+                // FC -> L, R
+                g, g,
+                // LFE -> L, R (not folded in)
+                0f, 0f,
+                // BL -> L, R
+                g, 0f,
+                // BR -> L, R
+                0f, g,
+            )
+        return ChannelMixingMatrix(6, 2, coefficients)
+    }
+
+    /**
      * Finishes a successful export: runs the never-larger POST-check on the real byte count on
      * disk (the pre-check in [compress] is a heuristic; this is the fact) -- UNCONDITIONALLY,
      * on every produced file, remux or real encode alike -- then, only for a file that survives
@@ -469,6 +644,7 @@ class TransformerEngine(
         startElapsedMs: Long,
         inputWasHdr: Boolean,
         hevcFallback: Boolean,
+        audioEncodeForced: Boolean,
     ): CompressResultMessage {
         val tempBytes = tempFile.length()
         val usedOriginal = tempBytes >= inputBytes
@@ -490,13 +666,27 @@ class TransformerEngine(
             exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED ||
                 exportResult.audioConversionProcess == ExportResult.CONVERSION_PROCESS_NA
         val transmuxed = !usedOriginal && videoTransmuxed && audioTransmuxedOrAbsent
+        // Found live this task (Rule 1 bug, not assumed): for a raw PCM source, Media3 reports
+        // ExportResult.audioConversionProcess as CONVERSION_PROCESS_TRANSMUXED (2), never
+        // TRANSCODED, EVEN THOUGH a real AudioEncoderSettings-driven encode ran and the produced
+        // file re-probes as genuine AAC (confirmed via readAudioCodec on the destination file
+        // in a case that forced exactly this path) -- the DECODE side of a raw/PCM track needs
+        // no real decoder, and Media3's own conversion-process classification apparently reflects
+        // that trivial decode step rather than the real encode step for this specific source
+        // shape. TransformerUtil.shouldTranscodeAudio's own bytecode (javap-verified against the
+        // installed media3-transformer-1.11.1 AAR) proves audioNeedsEncoding()==true --
+        // unconditionally true whenever this engine sets explicit AudioEncoderSettings --
+        // ALWAYS forces Media3 down the real transcode path, before any mime-type comparison;
+        // [audioEncodeForced] mirrors that exact same decision, so it is trusted directly for
+        // this one ambiguous enum value rather than treated as a guess.
         val audioReencoded =
             !usedOriginal &&
                 (
                     exportResult.audioConversionProcess ==
                         ExportResult.CONVERSION_PROCESS_TRANSCODED ||
                         exportResult.audioConversionProcess ==
-                        ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED
+                        ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED ||
+                        audioEncodeForced
                 )
 
         // Computed from the export's OWN output colour info via ColorInfo.isTransferHdr, never
@@ -682,22 +872,29 @@ class TransformerEngine(
         request: CompressRequestMessage,
     ): SizeGuard.Plan {
         val inputAudioCodec = if (inputInfo.hasAudio) readAudioCodec(inputFile) else null
+        // Read the same way audioCodec is, immediately above (AUDO-03, 04-02-PLAN.md task 3):
+        // needed by SizeGuard.Plan.wouldTransmux's channel-count condition, so estimate() and
+        // the real job -- both of which call resolvePlan and nothing else to get a Plan -- can
+        // never resolve a different answer about whether a 5.1 source would remux.
+        val inputAudioChannels = if (inputInfo.hasAudio) readAudioChannelCount(inputFile) else null
         return SizeGuard.resolve(
-            buildSizeGuardInput(inputInfo, inputAudioCodec),
+            buildSizeGuardInput(inputInfo, inputAudioCodec, inputAudioChannels),
             buildSizeGuardOptions(request),
         )
     }
 
     /**
      * Builds [SizeGuard.InputInfo] from the probed [inputInfo]. [MediaInfoMessage] itself has no
-     * audio-codec field (see [readAudioCodec]'s own doc comment), so [audioCodec] is read
-     * separately, once, in [compress] before this is called and threaded through here -- needed
-     * by [SizeGuard.Plan.wouldTransmux]'s audio-codec condition (D-10), which
-     * [SizeGuard.InputInfo.audioBitrateBps] alone cannot answer.
+     * audio-codec or audio-channel-count field (see [readAudioCodec]/[readAudioChannelCount]'s
+     * own doc comments), so both are read separately by [resolvePlan] and threaded through here
+     * -- needed by [SizeGuard.Plan.wouldTransmux]'s audio-codec (D-10) and audio-channel-count
+     * (AUDO-03) conditions, neither of which [SizeGuard.InputInfo.audioBitrateBps] alone can
+     * answer.
      */
     private fun buildSizeGuardInput(
         inputInfo: MediaInfoMessage,
         audioCodec: String?,
+        audioChannelCount: Int?,
     ): SizeGuard.InputInfo =
         SizeGuard.InputInfo(
             displayedWidthPx = inputInfo.widthPx.toInt(),
@@ -711,6 +908,7 @@ class TransformerEngine(
             hasAudio = inputInfo.hasAudio,
             audioCodec = audioCodec,
             audioBitrateBps = null,
+            audioChannelCount = audioChannelCount,
         )
 
     /**
@@ -786,6 +984,34 @@ class TransformerEngine(
          * for another leftover hardcoded value.
          */
         private const val NO_TRANSFORM_ATTEMPTED = false
+
+        /** The normalised audio codec token [normalizeAudioCodec] returns for AAC. */
+        private const val AUDIO_CODEC_AAC_TOKEN = "aac"
+
+        /**
+         * The channel count AUDO-03's forced re-encode caps its target at (AUDO-03, 04-02-PLAN.md
+         * task 3): a 5.1 (or wider) source downmixes to stereo, never wider. Also used as the
+         * fallback source-channel-count assumption when the source's own count could not be read
+         * at all -- an unreadable count on a path already forcing a re-encode still needs a
+         * concrete target, and 2 is this plugin's own audio default everywhere else.
+         */
+        private const val FORCED_AUDIO_REENCODE_MAX_CHANNELS = 2
+
+        /**
+         * The fixed audio bitrate AUDO-03's forced re-encode targets, in bits per second --
+         * deliberately not [SizeGuard.Plan.audioBitrateBps]: that value is SizeGuard rule 5's
+         * resolution of the SOURCE's own audio bitrate, which describes six channels or raw
+         * LPCM here and is the wrong number to hand a 1-or-2-channel AAC encoder (04-RESEARCH.md
+         * Pitfall 1).
+         */
+        private const val FORCED_AUDIO_REENCODE_BITRATE_BPS = 128000
+
+        /**
+         * The gain [fiveDotOneToStereoMixingMatrix] applies from the centre and each surround
+         * channel into both stereo outputs: -3dB, `10^(-3/20)` rounded to 7 significant figures,
+         * the standard ITU-R BS.775-inspired downmix attenuation.
+         */
+        private const val SURROUND_DOWNMIX_GAIN = 0.7071068f
 
         /**
          * Builds the video effects list in one fixed, documented order: geometry
