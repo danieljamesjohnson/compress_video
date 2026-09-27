@@ -33,9 +33,11 @@ enum CompressVideoErrorReason {
   /// The destination filesystem does not have room for the output.
   outOfSpace,
 
-  /// The operation was interrupted by the system before it completed and can be retried.
-  /// Thrown only by the Apple engine (Phase 5), but present in the taxonomy now so this enum's
-  /// shape does not change later.
+  /// The operation was interrupted by the system before it completed and can be retried:
+  /// resubmitting the same input and options is the correct response. Thrown by both engines
+  /// (Phase 5) -- on Android when the system ends the `mediaProcessing` foreground service's
+  /// six-hour-per-24h quota (`CompressOptions.androidForegroundService`), on Apple when the app
+  /// is suspended mid-export.
   interrupted,
 }
 

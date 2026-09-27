@@ -378,20 +378,17 @@ void main() {
       },
     );
 
-    test(
-      'a valid androidForegroundService is accepted (JOBS-05, D-07)',
-      () {
-        expect(
-          () => const CompressOptions(
-            androidForegroundService: AndroidForegroundServiceOptions(
-              notificationTitle: 'Compressing',
-              notificationText: 'video.mp4',
-            ),
-          ).validate(),
-          returnsNormally,
-        );
-      },
-    );
+    test('a valid androidForegroundService is accepted (JOBS-05, D-07)', () {
+      expect(
+        () => const CompressOptions(
+          androidForegroundService: AndroidForegroundServiceOptions(
+            notificationTitle: 'Compressing',
+            notificationText: 'video.mp4',
+          ),
+        ).validate(),
+        returnsNormally,
+      );
+    });
 
     test('an androidForegroundService with a blank title is rejected', () {
       expect(
