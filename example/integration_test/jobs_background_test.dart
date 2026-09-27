@@ -282,6 +282,62 @@ void main() {
     },
   );
 
+  group('Android foreground service opt-in (JOBS-05, D-07/D-08)', () {
+    testWidgets(
+      'a job with androidForegroundService set runs inside a real mediaProcessing foreground '
+      'service and completes with a typed, never-larger result',
+      (WidgetTester tester) async {
+        if (!Platform.isAndroid) {
+          markTestSkipped(
+            'androidForegroundService is Android-only (D-08); Apple platforms ignore the '
+            'option entirely -- there is no equivalent to prove there.',
+          );
+          return;
+        }
+
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/portrait_hibitrate_1080p60.mp4',
+          'jobs_background_fgs_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+
+        final CompressVideo compressVideo = CompressVideo();
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: const CompressOptions(
+            androidForegroundService: AndroidForegroundServiceOptions(
+              notificationTitle: 'JOBS-05 foreground-service test',
+              notificationText: 'compressing a distinctive test clip',
+            ),
+          ),
+        );
+
+        // Captured while the job is in flight for the summary's dumpsys evidence -- this
+        // print is grepped by CI's own polled `dumpsys activity services` capture (see
+        // 05-03-PLAN.md task 2), not this test itself.
+        // ignore: avoid_print
+        print(
+          'FGS_TEST_JOB_STARTED path=$path notificationTitle="JOBS-05 foreground-service test"',
+        );
+
+        final CompressResult result = await job.result.timeout(
+          const Duration(seconds: 60),
+        );
+
+        expect(
+          result.outputBytes,
+          lessThanOrEqualTo(result.inputBytes),
+          reason: 'never-larger must hold for a foreground-service-hosted job too',
+        );
+        expect(
+          File(result.outputPath).existsSync(),
+          isTrue,
+          reason: 'a foreground-service-hosted job must still produce a real output file',
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
+  });
+
   group('Background isolate: calls proven working since 05-02', () {
     testWidgets(
       'getMediaInfo returns correctly from inside Isolate.run, proving '

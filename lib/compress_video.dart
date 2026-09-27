@@ -378,6 +378,16 @@ class CompressVideo {
       outputPath: options.outputPath,
       videoCodec: options.codec.name,
       hdrMode: options.hdr.name,
+      androidForegroundService: switch (options.androidForegroundService) {
+        null => null,
+        final AndroidForegroundServiceOptions foregroundService =>
+          messages.AndroidForegroundServiceOptionsMessage(
+            notificationTitle: foregroundService.notificationTitle,
+            notificationText: foregroundService.notificationText,
+            notificationIconResourceName:
+                foregroundService.notificationIconResourceName,
+          ),
+      },
     );
   }
 

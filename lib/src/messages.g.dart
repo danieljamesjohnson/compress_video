@@ -245,6 +245,77 @@ class MediaInfoMessage {
   }
 }
 
+/// Android-only notification content for [CompressRequestMessage.androidForegroundService]
+/// (JOBS-05, D-07/D-08). Apple implementations ignore this type entirely — it exists purely to
+/// carry a caller's opt-in through the channel to the Android side.
+class AndroidForegroundServiceOptionsMessage {
+  AndroidForegroundServiceOptionsMessage({
+    required this.notificationTitle,
+    required this.notificationText,
+    this.notificationIconResourceName,
+  });
+
+  /// The notification's title. Validated non-blank by `CompressOptions.validate()` (Dart) and
+  /// `Arguments.requireValidCompressRequest` (Kotlin) before this message is built or accepted.
+  String notificationTitle;
+
+  /// The notification's text. Validated non-blank the same way as [notificationTitle].
+  String notificationText;
+
+  /// Optional Android drawable resource name (for example `"ic_notification"`), resolved
+  /// against the host app's own resources by name. `null`, or a name the host app does not
+  /// have, falls back to a platform drawable rather than failing the job.
+  String? notificationIconResourceName;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      notificationTitle,
+      notificationText,
+      notificationIconResourceName,
+    ];
+  }
+
+  Object encode() {
+    return _toList();
+  }
+
+  static AndroidForegroundServiceOptionsMessage decode(Object result) {
+    result as List<Object?>;
+    return AndroidForegroundServiceOptionsMessage(
+      notificationTitle: result[0]! as String,
+      notificationText: result[1]! as String,
+      notificationIconResourceName: result[2] as String?,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! AndroidForegroundServiceOptionsMessage ||
+        other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(notificationTitle, other.notificationTitle) &&
+        _deepEquals(notificationText, other.notificationText) &&
+        _deepEquals(
+          notificationIconResourceName,
+          other.notificationIconResourceName,
+        );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+
+  @override
+  String toString() {
+    return 'AndroidForegroundServiceOptionsMessage(notificationTitle: $notificationTitle, notificationText: $notificationText, notificationIconResourceName: $notificationIconResourceName)';
+  }
+}
+
 /// A compression request, sent once per job via [CompressHostApi.startCompress] and also used
 /// (identically) by [CompressHostApi.estimate] to predict what that request would produce.
 ///
@@ -268,6 +339,7 @@ class CompressRequestMessage {
     this.outputPath,
     required this.videoCodec,
     required this.hdrMode,
+    this.androidForegroundService,
   });
 
   /// Explicit cap on the output's longer displayed side, in pixels, or `null` when the caller
@@ -333,6 +405,12 @@ class CompressRequestMessage {
   /// is Phase 4.
   String hdrMode;
 
+  /// Android-only: opts this job into the `mediaProcessing` foreground service (JOBS-05,
+  /// D-07/D-08). `null` (the default) means the caller did not opt in — no service starts and
+  /// no permission is exercised. Apple implementations ignore this field entirely; there is no
+  /// equivalent background-task attachment made from it on iOS or macOS.
+  AndroidForegroundServiceOptionsMessage? androidForegroundService;
+
   List<Object?> _toList() {
     return <Object?>[
       maxLongSidePx,
@@ -349,6 +427,7 @@ class CompressRequestMessage {
       outputPath,
       videoCodec,
       hdrMode,
+      androidForegroundService,
     ];
   }
 
@@ -373,6 +452,8 @@ class CompressRequestMessage {
       outputPath: result[11] as String?,
       videoCodec: result[12]! as String,
       hdrMode: result[13]! as String,
+      androidForegroundService:
+          result[14] as AndroidForegroundServiceOptionsMessage?,
     );
   }
 
@@ -398,7 +479,8 @@ class CompressRequestMessage {
         _deepEquals(trimEndMs, other.trimEndMs) &&
         _deepEquals(outputPath, other.outputPath) &&
         _deepEquals(videoCodec, other.videoCodec) &&
-        _deepEquals(hdrMode, other.hdrMode);
+        _deepEquals(hdrMode, other.hdrMode) &&
+        _deepEquals(androidForegroundService, other.androidForegroundService);
   }
 
   @override
@@ -407,7 +489,7 @@ class CompressRequestMessage {
 
   @override
   String toString() {
-    return 'CompressRequestMessage(maxLongSidePx: $maxLongSidePx, videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, presetMaxLongSidePx: $presetMaxLongSidePx, presetVideoBitrateBps: $presetVideoBitrateBps, maxFps: $maxFps, audioMode: $audioMode, audioBitrateBps: $audioBitrateBps, audioChannels: $audioChannels, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, outputPath: $outputPath, videoCodec: $videoCodec, hdrMode: $hdrMode)';
+    return 'CompressRequestMessage(maxLongSidePx: $maxLongSidePx, videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, presetMaxLongSidePx: $presetMaxLongSidePx, presetVideoBitrateBps: $presetVideoBitrateBps, maxFps: $maxFps, audioMode: $audioMode, audioBitrateBps: $audioBitrateBps, audioChannels: $audioChannels, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, outputPath: $outputPath, videoCodec: $videoCodec, hdrMode: $hdrMode, androidForegroundService: $androidForegroundService)';
   }
 }
 
@@ -653,14 +735,17 @@ class _PigeonCodec extends StandardMessageCodec {
     } else if (value is MediaInfoMessage) {
       buffer.putUint8(130);
       writeValue(buffer, value.encode());
-    } else if (value is CompressRequestMessage) {
+    } else if (value is AndroidForegroundServiceOptionsMessage) {
       buffer.putUint8(131);
       writeValue(buffer, value.encode());
-    } else if (value is CompressResultMessage) {
+    } else if (value is CompressRequestMessage) {
       buffer.putUint8(132);
       writeValue(buffer, value.encode());
-    } else if (value is EstimateMessage) {
+    } else if (value is CompressResultMessage) {
       buffer.putUint8(133);
+      writeValue(buffer, value.encode());
+    } else if (value is EstimateMessage) {
+      buffer.putUint8(134);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -676,10 +761,14 @@ class _PigeonCodec extends StandardMessageCodec {
       case 130:
         return MediaInfoMessage.decode(readValue(buffer)!);
       case 131:
-        return CompressRequestMessage.decode(readValue(buffer)!);
+        return AndroidForegroundServiceOptionsMessage.decode(
+          readValue(buffer)!,
+        );
       case 132:
-        return CompressResultMessage.decode(readValue(buffer)!);
+        return CompressRequestMessage.decode(readValue(buffer)!);
       case 133:
+        return CompressResultMessage.decode(readValue(buffer)!);
+      case 134:
         return EstimateMessage.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);

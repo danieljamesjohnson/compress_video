@@ -330,6 +330,67 @@ data class MediaInfoMessage (
 }
 
 /**
+ * Android-only notification content for [CompressRequestMessage.androidForegroundService]
+ * (JOBS-05, D-07/D-08). Apple implementations ignore this type entirely — it exists purely to
+ * carry a caller's opt-in through the channel to the Android side.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class AndroidForegroundServiceOptionsMessage (
+  /**
+   * The notification's title. Validated non-blank by `CompressOptions.validate()` (Dart) and
+   * `Arguments.requireValidCompressRequest` (Kotlin) before this message is built or accepted.
+   */
+  val notificationTitle: String,
+  /** The notification's text. Validated non-blank the same way as [notificationTitle]. */
+  val notificationText: String,
+  /**
+   * Optional Android drawable resource name (for example `"ic_notification"`), resolved
+   * against the host app's own resources by name. `null`, or a name the host app does not
+   * have, falls back to a platform drawable rather than failing the job.
+   */
+  val notificationIconResourceName: String? = null
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): AndroidForegroundServiceOptionsMessage {
+      val notificationTitle = pigeonVar_list[0] as String
+      val notificationText = pigeonVar_list[1] as String
+      val notificationIconResourceName = pigeonVar_list[2] as String?
+      return AndroidForegroundServiceOptionsMessage(notificationTitle, notificationText, notificationIconResourceName)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      notificationTitle,
+      notificationText,
+      notificationIconResourceName,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as AndroidForegroundServiceOptionsMessage
+    return MessagesPigeonUtils.deepEquals(this.notificationTitle, other.notificationTitle) && MessagesPigeonUtils.deepEquals(this.notificationText, other.notificationText) && MessagesPigeonUtils.deepEquals(this.notificationIconResourceName, other.notificationIconResourceName)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.notificationTitle)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.notificationText)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.notificationIconResourceName)
+    return result
+  }
+  override fun toString(): String {
+    return "AndroidForegroundServiceOptionsMessage(notificationTitle=$notificationTitle, notificationText=$notificationText, notificationIconResourceName=$notificationIconResourceName)"
+  }
+}
+
+/**
  * A compression request, sent once per job via [CompressHostApi.startCompress] and also used
  * (identically) by [CompressHostApi.estimate] to predict what that request would produce.
  *
@@ -413,7 +474,14 @@ data class CompressRequestMessage (
    * Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
    * is Phase 4.
    */
-  val hdrMode: String
+  val hdrMode: String,
+  /**
+   * Android-only: opts this job into the `mediaProcessing` foreground service (JOBS-05,
+   * D-07/D-08). `null` (the default) means the caller did not opt in — no service starts and
+   * no permission is exercised. Apple implementations ignore this field entirely; there is no
+   * equivalent background-task attachment made from it on iOS or macOS.
+   */
+  val androidForegroundService: AndroidForegroundServiceOptionsMessage? = null
 )
  {
   companion object {
@@ -432,7 +500,8 @@ data class CompressRequestMessage (
       val outputPath = pigeonVar_list[11] as String?
       val videoCodec = pigeonVar_list[12] as String
       val hdrMode = pigeonVar_list[13] as String
-      return CompressRequestMessage(maxLongSidePx, videoBitrateBps, targetSizeMb, presetMaxLongSidePx, presetVideoBitrateBps, maxFps, audioMode, audioBitrateBps, audioChannels, trimStartMs, trimEndMs, outputPath, videoCodec, hdrMode)
+      val androidForegroundService = pigeonVar_list[14] as AndroidForegroundServiceOptionsMessage?
+      return CompressRequestMessage(maxLongSidePx, videoBitrateBps, targetSizeMb, presetMaxLongSidePx, presetVideoBitrateBps, maxFps, audioMode, audioBitrateBps, audioChannels, trimStartMs, trimEndMs, outputPath, videoCodec, hdrMode, androidForegroundService)
     }
   }
   fun toList(): List<Any?> {
@@ -451,6 +520,7 @@ data class CompressRequestMessage (
       outputPath,
       videoCodec,
       hdrMode,
+      androidForegroundService,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -461,7 +531,7 @@ data class CompressRequestMessage (
       return true
     }
     val other = other as CompressRequestMessage
-    return MessagesPigeonUtils.deepEquals(this.maxLongSidePx, other.maxLongSidePx) && MessagesPigeonUtils.deepEquals(this.videoBitrateBps, other.videoBitrateBps) && MessagesPigeonUtils.deepEquals(this.targetSizeMb, other.targetSizeMb) && MessagesPigeonUtils.deepEquals(this.presetMaxLongSidePx, other.presetMaxLongSidePx) && MessagesPigeonUtils.deepEquals(this.presetVideoBitrateBps, other.presetVideoBitrateBps) && MessagesPigeonUtils.deepEquals(this.maxFps, other.maxFps) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.audioBitrateBps, other.audioBitrateBps) && MessagesPigeonUtils.deepEquals(this.audioChannels, other.audioChannels) && MessagesPigeonUtils.deepEquals(this.trimStartMs, other.trimStartMs) && MessagesPigeonUtils.deepEquals(this.trimEndMs, other.trimEndMs) && MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.hdrMode, other.hdrMode)
+    return MessagesPigeonUtils.deepEquals(this.maxLongSidePx, other.maxLongSidePx) && MessagesPigeonUtils.deepEquals(this.videoBitrateBps, other.videoBitrateBps) && MessagesPigeonUtils.deepEquals(this.targetSizeMb, other.targetSizeMb) && MessagesPigeonUtils.deepEquals(this.presetMaxLongSidePx, other.presetMaxLongSidePx) && MessagesPigeonUtils.deepEquals(this.presetVideoBitrateBps, other.presetVideoBitrateBps) && MessagesPigeonUtils.deepEquals(this.maxFps, other.maxFps) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.audioBitrateBps, other.audioBitrateBps) && MessagesPigeonUtils.deepEquals(this.audioChannels, other.audioChannels) && MessagesPigeonUtils.deepEquals(this.trimStartMs, other.trimStartMs) && MessagesPigeonUtils.deepEquals(this.trimEndMs, other.trimEndMs) && MessagesPigeonUtils.deepEquals(this.outputPath, other.outputPath) && MessagesPigeonUtils.deepEquals(this.videoCodec, other.videoCodec) && MessagesPigeonUtils.deepEquals(this.hdrMode, other.hdrMode) && MessagesPigeonUtils.deepEquals(this.androidForegroundService, other.androidForegroundService)
   }
 
   override fun hashCode(): Int {
@@ -480,10 +550,11 @@ data class CompressRequestMessage (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.outputPath)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.videoCodec)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.hdrMode)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.androidForegroundService)
     return result
   }
   override fun toString(): String {
-    return "CompressRequestMessage(maxLongSidePx=$maxLongSidePx, videoBitrateBps=$videoBitrateBps, targetSizeMb=$targetSizeMb, presetMaxLongSidePx=$presetMaxLongSidePx, presetVideoBitrateBps=$presetVideoBitrateBps, maxFps=$maxFps, audioMode=$audioMode, audioBitrateBps=$audioBitrateBps, audioChannels=$audioChannels, trimStartMs=$trimStartMs, trimEndMs=$trimEndMs, outputPath=$outputPath, videoCodec=$videoCodec, hdrMode=$hdrMode)"
+    return "CompressRequestMessage(maxLongSidePx=$maxLongSidePx, videoBitrateBps=$videoBitrateBps, targetSizeMb=$targetSizeMb, presetMaxLongSidePx=$presetMaxLongSidePx, presetVideoBitrateBps=$presetVideoBitrateBps, maxFps=$maxFps, audioMode=$audioMode, audioBitrateBps=$audioBitrateBps, audioChannels=$audioChannels, trimStartMs=$trimStartMs, trimEndMs=$trimEndMs, outputPath=$outputPath, videoCodec=$videoCodec, hdrMode=$hdrMode, androidForegroundService=$androidForegroundService)"
   }
 }
 
@@ -688,15 +759,20 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
       }
       131.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CompressRequestMessage.fromList(it)
+          AndroidForegroundServiceOptionsMessage.fromList(it)
         }
       }
       132.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CompressResultMessage.fromList(it)
+          CompressRequestMessage.fromList(it)
         }
       }
       133.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CompressResultMessage.fromList(it)
+        }
+      }
+      134.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           EstimateMessage.fromList(it)
         }
@@ -714,16 +790,20 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(130)
         writeValue(stream, value.toList())
       }
-      is CompressRequestMessage -> {
+      is AndroidForegroundServiceOptionsMessage -> {
         stream.write(131)
         writeValue(stream, value.toList())
       }
-      is CompressResultMessage -> {
+      is CompressRequestMessage -> {
         stream.write(132)
         writeValue(stream, value.toList())
       }
-      is EstimateMessage -> {
+      is CompressResultMessage -> {
         stream.write(133)
+        writeValue(stream, value.toList())
+      }
+      is EstimateMessage -> {
+        stream.write(134)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)

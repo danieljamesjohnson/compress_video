@@ -301,6 +301,61 @@ struct MediaInfoMessage: Hashable, CustomStringConvertible {
   }
 }
 
+/// Android-only notification content for [CompressRequestMessage.androidForegroundService]
+/// (JOBS-05, D-07/D-08). Apple implementations ignore this type entirely — it exists purely to
+/// carry a caller's opt-in through the channel to the Android side.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct AndroidForegroundServiceOptionsMessage: Hashable, CustomStringConvertible {
+  /// The notification's title. Validated non-blank by `CompressOptions.validate()` (Dart) and
+  /// `Arguments.requireValidCompressRequest` (Kotlin) before this message is built or accepted.
+  var notificationTitle: String
+  /// The notification's text. Validated non-blank the same way as [notificationTitle].
+  var notificationText: String
+  /// Optional Android drawable resource name (for example `"ic_notification"`), resolved
+  /// against the host app's own resources by name. `null`, or a name the host app does not
+  /// have, falls back to a platform drawable rather than failing the job.
+  var notificationIconResourceName: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> AndroidForegroundServiceOptionsMessage? {
+    let notificationTitle = pigeonVar_list[0] as! String
+    let notificationText = pigeonVar_list[1] as! String
+    let notificationIconResourceName: String? = nilOrValue(pigeonVar_list[2])
+
+    return AndroidForegroundServiceOptionsMessage(
+      notificationTitle: notificationTitle,
+      notificationText: notificationText,
+      notificationIconResourceName: notificationIconResourceName
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      notificationTitle,
+      notificationText,
+      notificationIconResourceName,
+    ]
+  }
+  static func == (lhs: AndroidForegroundServiceOptionsMessage, rhs: AndroidForegroundServiceOptionsMessage) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return MessagesPigeonInternal.deepEquals(lhs.notificationTitle, rhs.notificationTitle) && MessagesPigeonInternal.deepEquals(lhs.notificationText, rhs.notificationText) && MessagesPigeonInternal.deepEquals(lhs.notificationIconResourceName, rhs.notificationIconResourceName)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("AndroidForegroundServiceOptionsMessage")
+    MessagesPigeonInternal.deepHash(value: notificationTitle, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: notificationText, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: notificationIconResourceName, hasher: &hasher)
+  }
+
+  public var description: String {
+    return "AndroidForegroundServiceOptionsMessage(notificationTitle: \(String(describing: notificationTitle)), notificationText: \(String(describing: notificationText)), notificationIconResourceName: \(String(describing: notificationIconResourceName)))"
+  }
+}
+
 /// A compression request, sent once per job via [CompressHostApi.startCompress] and also used
 /// (identically) by [CompressHostApi.estimate] to predict what that request would produce.
 ///
@@ -360,6 +415,11 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
   /// Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
   /// is Phase 4.
   var hdrMode: String
+  /// Android-only: opts this job into the `mediaProcessing` foreground service (JOBS-05,
+  /// D-07/D-08). `null` (the default) means the caller did not opt in — no service starts and
+  /// no permission is exercised. Apple implementations ignore this field entirely; there is no
+  /// equivalent background-task attachment made from it on iOS or macOS.
+  var androidForegroundService: AndroidForegroundServiceOptionsMessage? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -378,6 +438,7 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
     let outputPath: String? = nilOrValue(pigeonVar_list[11])
     let videoCodec = pigeonVar_list[12] as! String
     let hdrMode = pigeonVar_list[13] as! String
+    let androidForegroundService: AndroidForegroundServiceOptionsMessage? = nilOrValue(pigeonVar_list[14])
 
     return CompressRequestMessage(
       maxLongSidePx: maxLongSidePx,
@@ -393,7 +454,8 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
       trimEndMs: trimEndMs,
       outputPath: outputPath,
       videoCodec: videoCodec,
-      hdrMode: hdrMode
+      hdrMode: hdrMode,
+      androidForegroundService: androidForegroundService
     )
   }
   func toList() -> [Any?] {
@@ -412,13 +474,14 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
       outputPath,
       videoCodec,
       hdrMode,
+      androidForegroundService,
     ]
   }
   static func == (lhs: CompressRequestMessage, rhs: CompressRequestMessage) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return MessagesPigeonInternal.deepEquals(lhs.maxLongSidePx, rhs.maxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.videoBitrateBps, rhs.videoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.targetSizeMb, rhs.targetSizeMb) && MessagesPigeonInternal.deepEquals(lhs.presetMaxLongSidePx, rhs.presetMaxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.presetVideoBitrateBps, rhs.presetVideoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.maxFps, rhs.maxFps) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.audioBitrateBps, rhs.audioBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.audioChannels, rhs.audioChannels) && MessagesPigeonInternal.deepEquals(lhs.trimStartMs, rhs.trimStartMs) && MessagesPigeonInternal.deepEquals(lhs.trimEndMs, rhs.trimEndMs) && MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.hdrMode, rhs.hdrMode)
+    return MessagesPigeonInternal.deepEquals(lhs.maxLongSidePx, rhs.maxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.videoBitrateBps, rhs.videoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.targetSizeMb, rhs.targetSizeMb) && MessagesPigeonInternal.deepEquals(lhs.presetMaxLongSidePx, rhs.presetMaxLongSidePx) && MessagesPigeonInternal.deepEquals(lhs.presetVideoBitrateBps, rhs.presetVideoBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.maxFps, rhs.maxFps) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.audioBitrateBps, rhs.audioBitrateBps) && MessagesPigeonInternal.deepEquals(lhs.audioChannels, rhs.audioChannels) && MessagesPigeonInternal.deepEquals(lhs.trimStartMs, rhs.trimStartMs) && MessagesPigeonInternal.deepEquals(lhs.trimEndMs, rhs.trimEndMs) && MessagesPigeonInternal.deepEquals(lhs.outputPath, rhs.outputPath) && MessagesPigeonInternal.deepEquals(lhs.videoCodec, rhs.videoCodec) && MessagesPigeonInternal.deepEquals(lhs.hdrMode, rhs.hdrMode) && MessagesPigeonInternal.deepEquals(lhs.androidForegroundService, rhs.androidForegroundService)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -437,10 +500,11 @@ struct CompressRequestMessage: Hashable, CustomStringConvertible {
     MessagesPigeonInternal.deepHash(value: outputPath, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: videoCodec, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: hdrMode, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: androidForegroundService, hasher: &hasher)
   }
 
   public var description: String {
-    return "CompressRequestMessage(maxLongSidePx: \(String(describing: maxLongSidePx)), videoBitrateBps: \(String(describing: videoBitrateBps)), targetSizeMb: \(String(describing: targetSizeMb)), presetMaxLongSidePx: \(String(describing: presetMaxLongSidePx)), presetVideoBitrateBps: \(String(describing: presetVideoBitrateBps)), maxFps: \(String(describing: maxFps)), audioMode: \(String(describing: audioMode)), audioBitrateBps: \(String(describing: audioBitrateBps)), audioChannels: \(String(describing: audioChannels)), trimStartMs: \(String(describing: trimStartMs)), trimEndMs: \(String(describing: trimEndMs)), outputPath: \(String(describing: outputPath)), videoCodec: \(String(describing: videoCodec)), hdrMode: \(String(describing: hdrMode)))"
+    return "CompressRequestMessage(maxLongSidePx: \(String(describing: maxLongSidePx)), videoBitrateBps: \(String(describing: videoBitrateBps)), targetSizeMb: \(String(describing: targetSizeMb)), presetMaxLongSidePx: \(String(describing: presetMaxLongSidePx)), presetVideoBitrateBps: \(String(describing: presetVideoBitrateBps)), maxFps: \(String(describing: maxFps)), audioMode: \(String(describing: audioMode)), audioBitrateBps: \(String(describing: audioBitrateBps)), audioChannels: \(String(describing: audioChannels)), trimStartMs: \(String(describing: trimStartMs)), trimEndMs: \(String(describing: trimEndMs)), outputPath: \(String(describing: outputPath)), videoCodec: \(String(describing: videoCodec)), hdrMode: \(String(describing: hdrMode)), androidForegroundService: \(String(describing: androidForegroundService)))"
   }
 }
 
@@ -647,10 +711,12 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
     case 130:
       return MediaInfoMessage.fromList(self.readValue() as! [Any?])
     case 131:
-      return CompressRequestMessage.fromList(self.readValue() as! [Any?])
+      return AndroidForegroundServiceOptionsMessage.fromList(self.readValue() as! [Any?])
     case 132:
-      return CompressResultMessage.fromList(self.readValue() as! [Any?])
+      return CompressRequestMessage.fromList(self.readValue() as! [Any?])
     case 133:
+      return CompressResultMessage.fromList(self.readValue() as! [Any?])
+    case 134:
       return EstimateMessage.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -666,14 +732,17 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? MediaInfoMessage {
       super.writeByte(130)
       super.writeValue(value.toList())
-    } else if let value = value as? CompressRequestMessage {
+    } else if let value = value as? AndroidForegroundServiceOptionsMessage {
       super.writeByte(131)
       super.writeValue(value.toList())
-    } else if let value = value as? CompressResultMessage {
+    } else if let value = value as? CompressRequestMessage {
       super.writeByte(132)
       super.writeValue(value.toList())
-    } else if let value = value as? EstimateMessage {
+    } else if let value = value as? CompressResultMessage {
       super.writeByte(133)
+      super.writeValue(value.toList())
+    } else if let value = value as? EstimateMessage {
+      super.writeByte(134)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)

@@ -132,6 +132,29 @@ enum AudioModeMessage {
   strip,
 }
 
+/// Android-only notification content for [CompressRequestMessage.androidForegroundService]
+/// (JOBS-05, D-07/D-08). Apple implementations ignore this type entirely — it exists purely to
+/// carry a caller's opt-in through the channel to the Android side.
+class AndroidForegroundServiceOptionsMessage {
+  AndroidForegroundServiceOptionsMessage({
+    required this.notificationTitle,
+    required this.notificationText,
+    this.notificationIconResourceName,
+  });
+
+  /// The notification's title. Validated non-blank by `CompressOptions.validate()` (Dart) and
+  /// `Arguments.requireValidCompressRequest` (Kotlin) before this message is built or accepted.
+  final String notificationTitle;
+
+  /// The notification's text. Validated non-blank the same way as [notificationTitle].
+  final String notificationText;
+
+  /// Optional Android drawable resource name (for example `"ic_notification"`), resolved
+  /// against the host app's own resources by name. `null`, or a name the host app does not
+  /// have, falls back to a platform drawable rather than failing the job.
+  final String? notificationIconResourceName;
+}
+
 /// A compression request, sent once per job via [CompressHostApi.startCompress] and also used
 /// (identically) by [CompressHostApi.estimate] to predict what that request would produce.
 ///
@@ -155,6 +178,7 @@ class CompressRequestMessage {
     this.outputPath,
     required this.videoCodec,
     required this.hdrMode,
+    this.androidForegroundService,
   });
 
   /// Explicit cap on the output's longer displayed side, in pixels, or `null` when the caller
@@ -219,6 +243,12 @@ class CompressRequestMessage {
   /// Requested HDR handling. Only `"toneMapToSdr"` is accepted in this phase; keep-HDR opt-in
   /// is Phase 4.
   final String hdrMode;
+
+  /// Android-only: opts this job into the `mediaProcessing` foreground service (JOBS-05,
+  /// D-07/D-08). `null` (the default) means the caller did not opt in — no service starts and
+  /// no permission is exercised. Apple implementations ignore this field entirely; there is no
+  /// equivalent background-task attachment made from it on iOS or macOS.
+  final AndroidForegroundServiceOptionsMessage? androidForegroundService;
 }
 
 /// The typed result of a completed compression job. Every field is populated from a re-probe

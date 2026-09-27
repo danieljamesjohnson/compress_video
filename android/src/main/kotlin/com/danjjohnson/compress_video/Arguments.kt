@@ -243,6 +243,26 @@ object Arguments {
     }
 
     /**
+     * Returns `"unsupportedInput"` if `androidForegroundService` is given and its title or
+     * text is blank, or `null` if it is valid (including `null`, meaning "did not opt in").
+     *
+     * Mirrors `CompressOptions.validate()`'s Dart-side check deliberately: this is the
+     * authority for any caller that reaches the generated host API another way.
+     */
+    fun validateAndroidForegroundService(
+        androidForegroundService: AndroidForegroundServiceOptionsMessage?,
+    ): String? {
+        val options = androidForegroundService ?: return null
+        if (options.notificationTitle.isBlank()) {
+            return "unsupportedInput"
+        }
+        if (options.notificationText.isBlank()) {
+            return "unsupportedInput"
+        }
+        return null
+    }
+
+    /**
      * Runs every compress-request argument check, in the same order as
      * `CompressOptions.validate()`, and throws a [CompressVideoError] naming the first
      * violated reason -- or returns normally if [request] is entirely valid.
@@ -267,6 +287,7 @@ object Arguments {
                     request.audioBitrateBps,
                     request.audioChannels,
                 )
+                ?: validateAndroidForegroundService(request.androidForegroundService)
         if (violatedReason != null) {
             throw CompressVideoError(violatedReason, "Invalid compress request argument")
         }

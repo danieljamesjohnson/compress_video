@@ -31,7 +31,7 @@ object JobRegistry {
         val tempFile: File,
         val mainHandler: Handler,
         val progressRunnable: Runnable,
-        val onCancelled: () -> Unit,
+        val onCancelled: (reason: String) -> Unit,
     ) {
         internal var cancelled: Boolean = false
 
@@ -97,15 +97,25 @@ object JobRegistry {
     /**
      * Cancels the job identified by [jobId]: stops its progress polling, cancels the underlying
      * export via [LiveJob.cancelTransformer], deletes its temp output file, forgets it, and
-     * invokes its [LiveJob.onCancelled] callback so the suspended `startCompress` call can fail
-     * with a typed cancelled error. A no-op if [jobId] is unknown, already cancelled, or already
-     * [LiveJob.terminal] -- so cancelling twice, cancelling after the job already finished
-     * (successfully or not) and was removed from this registry, or cancelling in the window
-     * between the job's own `Transformer.Listener` terminal callback firing (WR-01: see
-     * [stopPolling]) and its `compress()` coroutine actually removing it, deletes nothing and
-     * resolves without error -- the job's own outcome is authoritative once it is terminal.
+     * invokes its [LiveJob.onCancelled] callback (with [reason]) so the suspended
+     * `startCompress` call can fail with a typed error naming it. A no-op if [jobId] is
+     * unknown, already cancelled, or already [LiveJob.terminal] -- so cancelling twice,
+     * cancelling after the job already finished (successfully or not) and was removed from this
+     * registry, or cancelling in the window between the job's own `Transformer.Listener`
+     * terminal callback firing (WR-01: see [stopPolling]) and its `compress()` coroutine
+     * actually removing it, deletes nothing and resolves without error -- the job's own outcome
+     * is authoritative once it is terminal.
+     *
+     * [reason] defaults to `"cancelled"` -- an ordinary cancel, from
+     * [com.danjjohnson.compress_video.Compression.cancel] or [cancelAll] on plugin detach.
+     * [ForegroundServiceHost.onTimeout] (D-09) is the only other call site, passing
+     * `"interrupted"` for the system's own six-hour foreground-service quota expiry, which the
+     * typed error the suspended `compress()` call throws then names as retryable.
      */
-    fun cancel(jobId: String) {
+    fun cancel(
+        jobId: String,
+        reason: String = "cancelled",
+    ) {
         val job = jobs[jobId] ?: return
         if (job.cancelled || job.terminal) return
         job.cancelled = true
@@ -113,7 +123,7 @@ object JobRegistry {
         job.cancelTransformer()
         PluginFiles.quietDelete(job.tempFile)
         jobs.remove(jobId)
-        job.onCancelled()
+        job.onCancelled(reason)
     }
 
     /** Cancels every live job -- used on plugin detach so no job outlives the engine (D-17). */

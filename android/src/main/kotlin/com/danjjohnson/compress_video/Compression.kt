@@ -52,22 +52,36 @@ class Compression(
             // exists -- a job that cannot possibly fit is never even attempted.
             requireSufficientFreeSpace(inputFile, inputInfo, request, destinationFile)
 
-            val result =
-                engine.compress(
-                    jobId = jobId,
-                    inputFile = inputFile,
-                    inputInfo = inputInfo,
-                    request = request,
-                    destinationFile = destinationFile,
-                ) { percent -> flutterApi.onProgress(jobId, percent) }
-            // A no-op when engine.compress()'s own success branch already recorded this (the
-            // normal case): completeResult only ever accepts the first value. Reached directly
-            // (not a no-op) for the wouldUseOriginal/finishSuccess branches is impossible to
-            // skip -- restated here only as the single point every return value flows through,
-            // for callers reasoning about this function rather than TransformerEngine's
-            // internals.
-            JobRegistry.completeResult(jobId, Result.success(result))
-            result
+            // JOBS-05 (D-07/D-08): attach before the engine call and detach in a finally scoped
+            // around it, so every terminal path -- success, a thrown typed error, or the
+            // cancellation that makes this suspended call unwind -- releases the service
+            // (T-05-12). A no-op below API 35 or when the caller did not opt in.
+            val foregroundServiceOptions = request.androidForegroundService
+            if (foregroundServiceOptions != null) {
+                ForegroundServiceHost.attach(context, jobId, foregroundServiceOptions)
+            }
+            try {
+                val result =
+                    engine.compress(
+                        jobId = jobId,
+                        inputFile = inputFile,
+                        inputInfo = inputInfo,
+                        request = request,
+                        destinationFile = destinationFile,
+                    ) { percent -> flutterApi.onProgress(jobId, percent) }
+                // A no-op when engine.compress()'s own success branch already recorded this (the
+                // normal case): completeResult only ever accepts the first value. Reached
+                // directly (not a no-op) for the wouldUseOriginal/finishSuccess branches is
+                // impossible to skip -- restated here only as the single point every return
+                // value flows through, for callers reasoning about this function rather than
+                // TransformerEngine's internals.
+                JobRegistry.completeResult(jobId, Result.success(result))
+                result
+            } finally {
+                if (foregroundServiceOptions != null) {
+                    ForegroundServiceHost.detach(jobId)
+                }
+            }
         } catch (e: Throwable) {
             // Every exception path here (validation, free-space, cancellation, encode failure)
             // reaches this catch WITHOUT ever awaiting an onProgress push, so -- unlike the

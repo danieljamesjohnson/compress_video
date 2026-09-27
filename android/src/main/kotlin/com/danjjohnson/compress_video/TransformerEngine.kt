@@ -480,7 +480,7 @@ class TransformerEngine(
                     tempFile = attemptTempFile,
                     mainHandler = mainHandler,
                     progressRunnable = progressRunnable,
-                    onCancelled = { attemptDeferred.complete(ExportOutcome.Cancelled) },
+                    onCancelled = { reason -> attemptDeferred.complete(ExportOutcome.Cancelled(reason)) },
                 ),
             )
 
@@ -521,7 +521,14 @@ class TransformerEngine(
         return when (val finalOutcome = outcome) {
             is ExportOutcome.Cancelled -> {
                 PluginFiles.quietDelete(tempFile)
-                throw CompressVideoError("cancelled", "The compression job was cancelled")
+                val message =
+                    if (finalOutcome.reason == "interrupted") {
+                        "The compression job was interrupted by the system before it completed " +
+                            "and can be retried"
+                    } else {
+                        "The compression job was cancelled"
+                    }
+                throw CompressVideoError(finalOutcome.reason, message)
             }
             is ExportOutcome.Failure -> {
                 PluginFiles.quietDelete(tempFile)
@@ -1116,7 +1123,13 @@ class TransformerEngine(
 
         data class Failure(val exception: ExportException) : ExportOutcome()
 
-        object Cancelled : ExportOutcome()
+        /**
+         * [reason] rides along [JobRegistry.cancel]'s own parameter of the same name (D-09):
+         * `"cancelled"` for an ordinary cancel, `"interrupted"` when
+         * [ForegroundServiceHost.onTimeout] cancelled every hosted job on the system's own
+         * six-hour foreground-service quota expiry.
+         */
+        data class Cancelled(val reason: String) : ExportOutcome()
     }
 
     internal companion object {

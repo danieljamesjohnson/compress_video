@@ -429,4 +429,65 @@ internal class ArgumentsTest {
             }
         assertEquals("unsupportedInput", error.code)
     }
+
+    @Test
+    fun validateAndroidForegroundService_null_isValid() {
+        assertEquals(null, Arguments.validateAndroidForegroundService(null))
+    }
+
+    @Test
+    fun validateAndroidForegroundService_validTitleAndText_isValid() {
+        assertEquals(
+            null,
+            Arguments.validateAndroidForegroundService(
+                AndroidForegroundServiceOptionsMessage(
+                    notificationTitle = "Compressing",
+                    notificationText = "video.mp4",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun validateAndroidForegroundService_blankTitle_rejectedAsUnsupportedInput() {
+        assertEquals(
+            "unsupportedInput",
+            Arguments.validateAndroidForegroundService(
+                AndroidForegroundServiceOptionsMessage(
+                    notificationTitle = "   ",
+                    notificationText = "video.mp4",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun validateAndroidForegroundService_blankText_rejectedAsUnsupportedInput() {
+        assertEquals(
+            "unsupportedInput",
+            Arguments.validateAndroidForegroundService(
+                AndroidForegroundServiceOptionsMessage(
+                    notificationTitle = "Compressing",
+                    notificationText = "",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun requireValidCompressRequest_androidForegroundServiceWithBlankTitle_throwsWithThatReason() {
+        val error =
+            assertFailsWith<CompressVideoError> {
+                Arguments.requireValidCompressRequest(
+                    validCompressRequest().copy(
+                        androidForegroundService =
+                            AndroidForegroundServiceOptionsMessage(
+                                notificationTitle = "",
+                                notificationText = "video.mp4",
+                            ),
+                    ),
+                )
+            }
+        assertEquals("unsupportedInput", error.code)
+    }
 }

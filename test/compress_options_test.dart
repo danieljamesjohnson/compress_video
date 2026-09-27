@@ -369,6 +369,53 @@ void main() {
         );
       },
     );
+
+    test(
+      'androidForegroundService is absent by default and does not affect validation',
+      () {
+        expect(const CompressOptions().androidForegroundService, isNull);
+        expect(() => const CompressOptions().validate(), returnsNormally);
+      },
+    );
+
+    test(
+      'a valid androidForegroundService is accepted (JOBS-05, D-07)',
+      () {
+        expect(
+          () => const CompressOptions(
+            androidForegroundService: AndroidForegroundServiceOptions(
+              notificationTitle: 'Compressing',
+              notificationText: 'video.mp4',
+            ),
+          ).validate(),
+          returnsNormally,
+        );
+      },
+    );
+
+    test('an androidForegroundService with a blank title is rejected', () {
+      expect(
+        () => const CompressOptions(
+          androidForegroundService: AndroidForegroundServiceOptions(
+            notificationTitle: '   ',
+            notificationText: 'video.mp4',
+          ),
+        ).validate(),
+        throwsUnsupportedInput(),
+      );
+    });
+
+    test('an androidForegroundService with a blank text is rejected', () {
+      expect(
+        () => const CompressOptions(
+          androidForegroundService: AndroidForegroundServiceOptions(
+            notificationTitle: 'Compressing',
+            notificationText: '',
+          ),
+        ).validate(),
+        throwsUnsupportedInput(),
+      );
+    });
   });
 
   group('CompressVideo.compress option validation', () {

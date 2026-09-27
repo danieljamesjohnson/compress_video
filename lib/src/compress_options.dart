@@ -151,6 +151,56 @@ class AudioStrip extends AudioOptions {
   int get hashCode => (AudioStrip).hashCode;
 }
 
+/// Opts a job into Android's `mediaProcessing` foreground service (JOBS-05, D-07/D-08), so the
+/// encode survives the app going to the background on Android 15 and above.
+///
+/// Accepted but inert below API 35: no service starts, no permission is exercised, and the job
+/// runs exactly as it would without this option (D-08). Apple platforms ignore this option
+/// entirely -- there is no equivalent background-task attachment made from it on iOS or macOS.
+@immutable
+class AndroidForegroundServiceOptions {
+  /// Creates an [AndroidForegroundServiceOptions]. [notificationTitle] and [notificationText]
+  /// must be non-blank -- [CompressOptions.validate] enforces this before the request crosses
+  /// the platform channel, and `Arguments.requireValidCompressRequest` (Kotlin) is the
+  /// authority for any caller that reaches the channel another way.
+  const AndroidForegroundServiceOptions({
+    required this.notificationTitle,
+    required this.notificationText,
+    this.notificationIconResourceName,
+  });
+
+  /// The notification's title.
+  final String notificationTitle;
+
+  /// The notification's text.
+  final String notificationText;
+
+  /// Optional Android drawable resource name (for example `"ic_notification"`), resolved
+  /// against the host app's own resources by name. `null`, or a name the host app does not
+  /// have, falls back to a platform drawable rather than failing the job.
+  final String? notificationIconResourceName;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AndroidForegroundServiceOptions &&
+      other.notificationTitle == notificationTitle &&
+      other.notificationText == notificationText &&
+      other.notificationIconResourceName == notificationIconResourceName;
+
+  @override
+  int get hashCode => Object.hash(
+    notificationTitle,
+    notificationText,
+    notificationIconResourceName,
+  );
+
+  @override
+  String toString() =>
+      'AndroidForegroundServiceOptions(notificationTitle: $notificationTitle, '
+      'notificationText: $notificationText, '
+      'notificationIconResourceName: $notificationIconResourceName)';
+}
+
 /// Options controlling how [CompressVideo.compress] transforms its input.
 ///
 /// Every field is documented with its unit and its behaviour when left at the default. The
@@ -174,6 +224,7 @@ class CompressOptions {
     this.outputPath,
     this.codec = VideoCodec.h264,
     this.hdr = HdrMode.toneMapToSdr,
+    this.androidForegroundService,
   });
 
   /// The named preset to resolve [maxLongSidePx]/[videoBitrateBps] from when either is not
@@ -270,6 +321,12 @@ class CompressOptions {
   /// and `CompressResult.hevcFallback: true`.
   final HdrMode hdr;
 
+  /// Opts this job into Android's `mediaProcessing` foreground service so it survives the app
+  /// going to the background on Android 15 and above (JOBS-05). `null` (the default) means the
+  /// caller did not opt in. Accepted but inert below API 35 (D-08). Apple platforms ignore this
+  /// field entirely.
+  final AndroidForegroundServiceOptions? androidForegroundService;
+
   /// Throws a [CompressVideoException] with reason
   /// [CompressVideoErrorReason.unsupportedInput] for any combination of fields the engine
   /// cannot honour. Called by `CompressVideo.compress`/`estimate` before either crosses the
@@ -319,6 +376,20 @@ class CompressOptions {
         'output size; set at most one',
       );
     }
+    final AndroidForegroundServiceOptions? foregroundService =
+        androidForegroundService;
+    if (foregroundService != null) {
+      if (foregroundService.notificationTitle.trim().isEmpty) {
+        reject(
+          'androidForegroundService.notificationTitle must not be blank when given',
+        );
+      }
+      if (foregroundService.notificationText.trim().isEmpty) {
+        reject(
+          'androidForegroundService.notificationText must not be blank when given',
+        );
+      }
+    }
   }
 
   @override
@@ -335,7 +406,8 @@ class CompressOptions {
           other.trimEndMs == trimEndMs &&
           other.outputPath == outputPath &&
           other.codec == codec &&
-          other.hdr == hdr);
+          other.hdr == hdr &&
+          other.androidForegroundService == androidForegroundService);
 
   @override
   int get hashCode => Object.hash(
@@ -350,6 +422,7 @@ class CompressOptions {
     outputPath,
     codec,
     hdr,
+    androidForegroundService,
   );
 
   @override
@@ -357,5 +430,6 @@ class CompressOptions {
       'CompressOptions(preset: $preset, maxLongSidePx: $maxLongSidePx, '
       'videoBitrateBps: $videoBitrateBps, targetSizeMb: $targetSizeMb, maxFps: $maxFps, '
       'audio: $audio, trimStartMs: $trimStartMs, trimEndMs: $trimEndMs, '
-      'outputPath: $outputPath, codec: $codec, hdr: $hdr)';
+      'outputPath: $outputPath, codec: $codec, hdr: $hdr, '
+      'androidForegroundService: $androidForegroundService)';
 }
