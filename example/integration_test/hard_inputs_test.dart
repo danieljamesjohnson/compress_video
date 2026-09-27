@@ -781,6 +781,95 @@ void main() {
     );
   });
 
+  group('An explicit HEVC request combined with HdrMode.keepHdr never produces an untagged '
+      'HEVC-SDR file when keep-HDR falls back (CR-01, 04-REVIEW.md)', () {
+    /// `codec: VideoCodec.hevc` and `hdr: HdrMode.keepHdr` against a genuinely HDR source is
+    /// the exact combination 04-REVIEW.md's CR-01 found unreachable by every other case in this
+    /// file -- `expectKeepHdrOrFallback` above never sets `codec`, and the HEVC opt-in group
+    /// below never uses an HDR clip. Reuses `_expectCodecFallbackInvariant`, the SAME
+    /// cross-cutting assertion every other codec/HDR case in this suite is held to: either the
+    /// keep branch (HEVC HDR preserved, `hevcFallback: false`) or the fallback branch (H.264,
+    /// `hevcFallback: true`) -- never an HEVC 8-bit file with `hevcFallback: false` that the
+    /// pre-fix formula could produce by computing the HEVC-output and HDR-fallback decisions
+    /// independently of each other.
+    Future<void> expectCoherentHevcKeepHdr(String clipName) async {
+      final String path = await _copyAssetToTempFile(
+        'assets/corpus/$clipName.mp4',
+        '${clipName}_hevckeephdr_${DateTime.now().microsecondsSinceEpoch}.mp4',
+      );
+      final CompressJob job = compressVideo.compress(
+        path,
+        options: const CompressOptions(
+          codec: VideoCodec.hevc,
+          hdr: HdrMode.keepHdr,
+        ),
+      );
+
+      try {
+        final CompressResult result = await job.result;
+        await _printHardInputResult(clipName, result);
+
+        expect(result.transmuxed, isFalse);
+        _expectCodecFallbackInvariant(result, requestedCodec: 'hevc');
+
+        if (result.hevcFallback) {
+          expect(result.toneMapped, isTrue);
+          expect(result.videoCodec, 'h264');
+        } else {
+          expect(result.toneMapped, isFalse);
+          expect(result.videoCodec, 'hevc');
+        }
+      } on CompressVideoException catch (e) {
+        // Same exhausted-chain outcome expectKeepHdrOrFallback's own catch branch documents --
+        // a real capability gap on this hardware, not a bug in this combination's own logic.
+        expect(
+          e.reason,
+          CompressVideoErrorReason.unsupportedInput,
+          reason:
+              'the only other legitimate outcome is an exhausted OpenGL-then-MediaCodec '
+              'fallback chain reporting unsupportedInput -- any other reason is a real bug',
+        );
+      }
+    }
+
+    testWidgets(
+      'hdr_hlg10.mp4 (HLG) with codec: VideoCodec.hevc, hdr: HdrMode.keepHdr',
+      (WidgetTester tester) => expectCoherentHevcKeepHdr('hdr_hlg10'),
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+  });
+
+  group('HdrMode.keepHdr against a non-HDR source is a harmless no-op, never reported as a '
+      'fallback (CR-02, 04-REVIEW.md)', () {
+    testWidgets(
+      'small_480p.mp4 (SDR) with HdrMode.keepHdr reports hevcFallback: false and '
+      'toneMapped: false -- there is nothing to keep and nothing fell back',
+      (WidgetTester tester) async {
+        final String path = await _copyAssetToTempFile(
+          'assets/corpus/small_480p.mp4',
+          'small_480p_keephdr_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        final CompressJob job = compressVideo.compress(
+          path,
+          options: const CompressOptions(hdr: HdrMode.keepHdr),
+        );
+        final CompressResult result = await job.result;
+        await _printHardInputResult('small_480p', result);
+
+        expect(
+          result.hevcFallback,
+          isFalse,
+          reason:
+              'the source was never HDR, so there was nothing to keep and nothing to fall '
+              'back from -- an unremarkable SDR encode must never report hevcFallback: true '
+              '(CR-02)',
+        );
+        expect(result.toneMapped, isFalse);
+        expect(result.videoCodec, 'h264');
+      },
+    );
+  });
+
   group('Unusual audio and 4K60 sources compress instead of failing (04-02 task 3)', () {
     testWidgets(
       'surround51_480p.mp4 (5.1 AAC) with default options downmixes to 2-channel AAC '

@@ -108,18 +108,29 @@ class TransformerEngine(
         val hasHardwareHevc = requestedHevc && hasHardwareHevcEncoder()
         val keepHdrAchievable =
             resolveKeepHdrAchievable(inputFile, inputInfo.isHdr, requestedKeepHdr)
-        val outputIsHevc = hasHardwareHevc || keepHdrAchievable
+        // CR-01/CR-02 (04-REVIEW.md): couple the HEVC-output decision to the FINAL HDR decision
+        // via the SAME pure function [resolvePlan] below calls, rather than computing the two
+        // independently -- see [resolveHevcOutputDecision]'s own doc comment for why.
+        val hevcDecision =
+            resolveHevcOutputDecision(
+                requestedHevc = requestedHevc,
+                hasHardwareHevc = hasHardwareHevc,
+                requestedKeepHdr = requestedKeepHdr,
+                inputIsHdr = inputInfo.isHdr,
+                keepHdrAchievable = keepHdrAchievable,
+            )
+        val outputIsHevc = hevcDecision.outputIsHevc
         val resolvedVideoMimeType = if (outputIsHevc) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
 
         // D-06/D-08: true when the caller asked for HEVC and this device has no hardware HEVC
-        // encoder, OR asked for keep-HDR and keep-HDR is not achievable -- a keep-HDR request
-        // that comes back with toneMapped:true is how a caller learns the fallback happened.
-        // Threaded as a real parameter now, all the way through finishSuccess into
-        // buildResultFromDestination, guarded there by the same !usedOriginal check
-        // toneMapped/transmuxed/audioReencoded already use: a substituted original or a skipped
-        // encode never "fell back" to anything, whatever this raw value says.
-        val hevcFallback =
-            (requestedHevc && !hasHardwareHevc) || (requestedKeepHdr && !keepHdrAchievable)
+        // encoder, OR a keep-HDR request against a genuinely HDR source could not be honoured --
+        // a keep-HDR request that comes back with toneMapped:true is how a caller learns the
+        // fallback happened. Threaded as a real parameter now, all the way through
+        // finishSuccess into buildResultFromDestination, guarded there by the same
+        // !usedOriginal check toneMapped/transmuxed/audioReencoded already use: a substituted
+        // original or a skipped encode never "fell back" to anything, whatever this raw value
+        // says.
+        val hevcFallback = hevcDecision.hevcFallback
 
         // Never-larger pre-check (D-11, CORE-05, plan 02-04 task 1): when the resolver already
         // knows encoding would not help, skip building a Transformer at all rather than running
@@ -921,9 +932,21 @@ class TransformerEngine(
         // SizeGuard.Options.outputCodecIsHevc [compress] resolves, with no risk of the two ever
         // drifting apart.
         val requestedHevc = request.videoCodec == "hevc"
+        val requestedKeepHdr = request.hdrMode == "keepHdr"
+        val hasHardwareHevc = requestedHevc && hasHardwareHevcEncoder()
+        val keepHdrAchievable =
+            resolveKeepHdrAchievable(inputFile, inputInfo.isHdr, requestedKeepHdr)
+        // CR-01 (04-REVIEW.md): the SAME pure function [compress] calls for its own outputIsHevc
+        // decision -- calling it here too, rather than threading a value in from [compress],
+        // means this prediction and compress()'s real decision can never disagree.
         val outputCodecIsHevc =
-            (requestedHevc && hasHardwareHevcEncoder()) ||
-                resolveKeepHdrAchievable(inputFile, inputInfo.isHdr, request.hdrMode == "keepHdr")
+            resolveHevcOutputDecision(
+                requestedHevc = requestedHevc,
+                hasHardwareHevc = hasHardwareHevc,
+                requestedKeepHdr = requestedKeepHdr,
+                inputIsHdr = inputInfo.isHdr,
+                keepHdrAchievable = keepHdrAchievable,
+            ).outputIsHevc
         return SizeGuard.resolve(
             buildSizeGuardInput(inputInfo, inputAudioCodec, inputAudioChannels),
             buildSizeGuardOptions(request, outputCodecIsHevc),
@@ -1147,6 +1170,46 @@ class TransformerEngine(
          * the standard ITU-R BS.775-inspired downmix attenuation.
          */
         private const val SURROUND_DOWNMIX_GAIN = 0.7071068f
+
+        /**
+         * The result of [resolveHevcOutputDecision]: [outputIsHevc] decides the actual video
+         * MIME type the encode targets; [hevcFallback] is what [CompressResultMessage] reports.
+         */
+        internal data class HevcOutputDecision(val outputIsHevc: Boolean, val hevcFallback: Boolean)
+
+        /**
+         * The coupled HEVC-output-vs-keep-HDR-fallback decision (CR-01/CR-02, 04-REVIEW.md),
+         * computed as ONE unit from the four independent capability/request booleans [compress]
+         * and [resolvePlan] each already have on hand -- so the two decisions (which video MIME
+         * type to encode, and whether a keep-HDR request fell back) can never disagree with each
+         * other, the way computing them as two separate `||` expressions once let them.
+         *
+         * A keep-HDR request against a genuinely HDR ([inputIsHdr]) source that could not be kept
+         * ([keepHdrAchievable] false) is the ONLY case that (a) forces H.264 output regardless of
+         * an otherwise-available hardware HEVC encoder -- an HEVC-encoded, untagged,
+         * tone-mapped-to-SDR file is exactly what `HdrMode.keepHdr`'s own dartdoc and
+         * `hard_inputs_test.dart`'s `_expectCodecFallbackInvariant` rule out -- and (b) reports a
+         * real [HevcOutputDecision.hevcFallback]. Gating that case on [inputIsHdr] matters for
+         * both halves: a keep-HDR request against an already-SDR source is a harmless no-op
+         * (04-03) that must neither downgrade an explicit, otherwise-honourable plain HEVC
+         * request to H.264, nor report a fallback that never happened.
+         *
+         * Pure: no [Context], no I/O -- callable from a plain JVM unit test exactly like
+         * [buildVideoEffects].
+         */
+        internal fun resolveHevcOutputDecision(
+            requestedHevc: Boolean,
+            hasHardwareHevc: Boolean,
+            requestedKeepHdr: Boolean,
+            inputIsHdr: Boolean,
+            keepHdrAchievable: Boolean,
+        ): HevcOutputDecision {
+            val keepHdrFallbackActive = requestedKeepHdr && inputIsHdr && !keepHdrAchievable
+            val outputIsHevc =
+                if (keepHdrFallbackActive) false else hasHardwareHevc || keepHdrAchievable
+            val hevcFallback = (requestedHevc && !hasHardwareHevc) || keepHdrFallbackActive
+            return HevcOutputDecision(outputIsHevc = outputIsHevc, hevcFallback = hevcFallback)
+        }
 
         /**
          * Builds the video effects list in one fixed, documented order: geometry

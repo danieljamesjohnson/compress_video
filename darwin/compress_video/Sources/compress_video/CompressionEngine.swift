@@ -147,14 +147,25 @@ final class CompressionEngine {
     let keepHdrAchievable =
       requestedKeepHdr && inputInfo.isHdr && sourceColorTransfer != nil
       && CodecCapabilities.hasHardwareHevcEncoder()
-    var outputIsHevc = hasHardwareHevc || keepHdrAchievable
+    // CR-01/CR-02 (04-REVIEW.md): couple the HEVC-output decision to the FINAL HDR decision
+    // instead of computing them independently. A keep-HDR request against a GENUINELY HDR
+    // source that could not be kept is the only case that (a) forces H.264 output regardless of
+    // an otherwise-available hardware HEVC encoder -- an HEVC-encoded, untagged,
+    // tone-mapped-to-SDR file is exactly what `HdrMode.keepHdr`'s own dartdoc and
+    // hard_inputs_test.dart's `_expectCodecFallbackInvariant` rule out -- and (b) reports a real
+    // `hevcFallback`. Gating on `inputInfo.isHdr` matters for both halves: a keepHdr request
+    // against an already-SDR source is a harmless no-op (04-03) that must neither downgrade an
+    // explicit, otherwise-honourable HEVC request to H.264 nor report a fallback that never
+    // happened.
+    let keepHdrFallbackActive = requestedKeepHdr && inputInfo.isHdr && !keepHdrAchievable
+    var outputIsHevc = keepHdrFallbackActive ? false : (hasHardwareHevc || keepHdrAchievable)
     // D-06/D-08: true when the caller asked for HEVC and this device has no hardware HEVC
-    // encoder, OR asked for keep-HDR and keep-HDR is not achievable -- mirrors
-    // `TransformerEngine.compress`'s own `hevcFallback` formula exactly. `var`: the pre-flight
-    // `canApply` guard below can still flip this to `true` if the writer disagrees with the
-    // probe. Threaded through `finishJob`/`buildResult`, guarded there by `!usedOriginal`,
-    // exactly like `toneMapped`.
-    var hevcFallback = (requestedHevc && !hasHardwareHevc) || (requestedKeepHdr && !keepHdrAchievable)
+    // encoder, OR a keep-HDR request against a genuinely HDR source could not be honoured --
+    // mirrors `TransformerEngine.compress`'s own `hevcFallback` formula exactly. `var`: the
+    // pre-flight `canApply` guard below can still flip this to `true` if the writer disagrees
+    // with the probe. Threaded through `finishJob`/`buildResult`, guarded there by
+    // `!usedOriginal`, exactly like `toneMapped`.
+    var hevcFallback = (requestedHevc && !hasHardwareHevc) || keepHdrFallbackActive
 
     let plan = resolvePlan(
       inputInfo: inputInfo, request: request, audioCodec: inputAudioCodec,
@@ -731,7 +742,11 @@ final class CompressionEngine {
       let sourceColorTransfer = await Self.readSourceColorTransfer(videoTrack: videoTrack)
       keepHdrAchievable = sourceColorTransfer != nil && CodecCapabilities.hasHardwareHevcEncoder()
     }
-    let outputCodecIsHevc = hasHardwareHevc || keepHdrAchievable
+    // CR-01 (04-REVIEW.md): mirror `compress()`'s own coupled `outputIsHevc` decision -- a
+    // keep-HDR request against a genuinely HDR source that could not be kept forces H.264 here
+    // too, or this prediction and `compress()`'s real decision could disagree.
+    let keepHdrFallbackActive = requestedKeepHdr && inputInfo.isHdr && !keepHdrAchievable
+    let outputCodecIsHevc = keepHdrFallbackActive ? false : (hasHardwareHevc || keepHdrAchievable)
     return resolvePlan(
       inputInfo: inputInfo, request: request, audioCodec: audioCodec,
       audioChannelCount: audioChannelCount, outputCodecIsHevc: outputCodecIsHevc)
