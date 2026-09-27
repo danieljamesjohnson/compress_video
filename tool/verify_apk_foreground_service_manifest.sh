@@ -59,11 +59,45 @@ if ! grep -q 'com.danjjohnson.compress_video.ForegroundServiceHost' <<<"$MANIFES
   FAILED=1
 fi
 
+# IN-01: isolate the ForegroundServiceHost <service> element's OWN attribute lines -- from its
+# "E: service" line up to (not including) the next "E: " line, whatever that next element turns
+# out to be -- so the exported/foregroundServiceType checks below can only be satisfied by
+# attributes that actually belong to this service, never by a same-named attribute on some other
+# manifest node (the merged manifest declares several other services/providers, several of which
+# are also exported=false). Every "E: " line starts a new element block; a block is checked and
+# printed the moment the NEXT "E: " line is seen, so this also correctly captures the last
+# element in the tree via the END block.
+FOREGROUND_SERVICE_BLOCK=$(awk '
+  /^ *E: / {
+    if (block ~ /ForegroundServiceHost/) { print block }
+    block = ""
+  }
+  { block = block $0 "\n" }
+  END {
+    if (block ~ /ForegroundServiceHost/) { print block }
+  }
+' <<<"$MANIFEST_TREE")
+
+if [ -z "$FOREGROUND_SERVICE_BLOCK" ]; then
+  echo "FATAL: could not isolate the ForegroundServiceHost <service> element's own attribute block" >&2
+  FAILED=1
+fi
+
 # foregroundServiceType's resource id 0x01010599 with value 0x00002000
-# (ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING) -- both checked together so a service
-# declaration that lost its type attribute during a future manifest edit still fails loudly.
-if ! grep -q '0x01010599)=0x00002000' <<<"$MANIFEST_TREE"; then
+# (ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING) -- checked against the isolated block so
+# a service declaration that lost its type attribute during a future manifest edit still fails
+# loudly.
+if ! grep -q '0x01010599)=0x00002000' <<<"$FOREGROUND_SERVICE_BLOCK"; then
   echo "FATAL: ForegroundServiceHost is missing android:foregroundServiceType=\"mediaProcessing\" (0x00002000) in the merged manifest" >&2
+  FAILED=1
+fi
+
+# IN-01: android:exported="false" (resource id 0x01010010) -- this project's own stated
+# correctness bar for this manifest. aapt2's xmltree renders a boolean attribute value as the
+# literal token `false`/`true`, not hex, confirmed live against a real built APK's merged
+# manifest -- verify against the actual dump output rather than assuming a numeric encoding.
+if ! grep -q '0x01010010)=false' <<<"$FOREGROUND_SERVICE_BLOCK"; then
+  echo "FATAL: ForegroundServiceHost is missing android:exported=\"false\" in the merged manifest -- it would be targetable by other apps on the device" >&2
   FAILED=1
 fi
 
