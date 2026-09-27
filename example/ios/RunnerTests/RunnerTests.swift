@@ -1429,18 +1429,28 @@ class RunnerTests: XCTestCase {
 
     var stillKnown = true
     for _ in 0..<50 {
-      stillKnown = (await JobRegistry.isKnownJobId(liveJobId)) || (await JobRegistry.isKnownJobId(knownJobId))
+      // Bind each actor-isolated call to a local before combining with `||` -- `||`'s RHS
+      // parameter is `@autoclosure`, which does not support `await` (a plain `Bool` autoclosure,
+      // not an async one), so `await` cannot appear directly inside it.
+      let liveStillKnown = await JobRegistry.isKnownJobId(liveJobId)
+      let otherStillKnown = await JobRegistry.isKnownJobId(knownJobId)
+      stillKnown = liveStillKnown || otherStillKnown
       if !stillKnown { break }
       await Task.yield()
     }
 
     XCTAssertNil(JobRegistry.find(jobId: liveJobId), "cancelAll must cancel and forget every live job")
+    // Bind before asserting -- XCTAssert's message/condition parameters are `@autoclosure`s that
+    // do not support `await` either, even though this enclosing test method is itself `async`.
+    let liveKnownAfterReset = await JobRegistry.isKnownJobId(liveJobId)
     XCTAssertFalse(
-      await JobRegistry.isKnownJobId(liveJobId),
+      liveKnownAfterReset,
       "cancelAll must reset a live job's known-job bookkeeping too (WR-02)")
-    XCTAssertFalse(await JobRegistry.isKnownJobId(knownJobId), "cancelAll must reset known-job bookkeeping")
+    let knownAfterReset = await JobRegistry.isKnownJobId(knownJobId)
+    XCTAssertFalse(knownAfterReset, "cancelAll must reset known-job bookkeeping")
+    let consumedAfterReset = await JobRegistry.isConsumedJobId(consumedJobId)
     XCTAssertFalse(
-      await JobRegistry.isConsumedJobId(consumedJobId), "cancelAll must reset consumed-job bookkeeping")
+      consumedAfterReset, "cancelAll must reset consumed-job bookkeeping")
   }
 
   /// WR-04 regression, mirroring Android's
@@ -1488,8 +1498,11 @@ class RunnerTests: XCTestCase {
       result: .failure(
         CompressVideoError(code: "unknown", message: cancelledReason ?? "", details: nil)))
 
+    // Bind before asserting -- XCTAssert's parameters are `@autoclosure`s that do not support
+    // `await`, even though this enclosing test method is itself `async`.
+    let knownAfterBelatedCompleteResult = await JobRegistry.isKnownJobId(jobId)
     XCTAssertFalse(
-      await JobRegistry.isKnownJobId(jobId),
+      knownAfterBelatedCompleteResult,
       "a belated completeResult call for a job cancelAll() already tore down must not resurrect "
         + "knownJobIds bookkeeping (WR-04)")
   }
