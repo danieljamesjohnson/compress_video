@@ -145,3 +145,9 @@ three risk points above are where to look first; two pushes remain in the budget
   `git log` and on both remotes.
 - "PASSED" covers what was claimed above only: the CI-dependent acceptance criterion is
   recorded as unverified, not as met.
+
+## Orchestrator CI resolution (2026-09-27, after execution)
+
+- Run 36349144752 (06-01's push) was cancelled by 06-03's push under the workflow's cancel-in-progress concurrency, as expected.
+- Run 36349558026 (06-03's push, covering 06-01's commits too): Android job **green** (including the new "Verify README preset table matches the preset constants (RELS-02)" step); Apple job **failed** in the Phase 5 suite `jobs_background_test.dart` ("awaitCompressResult called for unknown jobId"), a latent Apple-side registration race unrelated to Phase 6 code. Fixed by quick task 260927-r4k (`404dff4`, `b8ee2f9`, `74c7206`).
+- Run 36351396397 (quick-task push, containing every Phase 6 wave 1 commit): **all four jobs green** (Detect Apple-relevant changes, Android, Apple, Cross-platform parity). This run is the CI evidence for the "pending" criteria above; they are now satisfied.
