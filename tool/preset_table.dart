@@ -257,7 +257,8 @@ String renderPresetTable({
   out
     ..writeln()
     ..writeln(
-      'The bitrate target is a ceiling. It scales down with the output '
+      'The bitrate target is what the encoder is asked for, and an encoder '
+      'lands near it, not on it. The target scales down with the output '
       'resolution and frame rate, and a video is never upscaled and never '
       'given a higher frame rate than it came with.',
     )

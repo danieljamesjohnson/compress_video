@@ -98,6 +98,26 @@ including cancellation, resolves `job.result` with a typed [`CompressVideoExcept
 output is never larger than the input — see `doc/PRESETS.md` and the "same on every platform"
 section below.
 
+### Presets at a glance
+
+A preset sets three limits, and the table shows each one next to what that preset really
+produced from a portrait 1080p phone clip recorded at 60 frames per second.
+
+<!-- PRESET_TABLE_START -->
+| Preset | Longest side (px) | Video bitrate target | Frame rate cap | From a 1080p60 phone clip: Android | From a 1080p60 phone clip: iOS | From a 1080p60 phone clip: macOS |
+|---|---|---|---|---|---|---|
+| p360 | 640 | 0.8 Mbps (at 30 fps) | 30 fps (never raised) | 360×640, 0.75 Mbps | 360×640, 0.86 Mbps | 360×640, 0.84 Mbps |
+| p480 | 854 | 1.2 Mbps (at 30 fps) | 30 fps (never raised) | 480×854, 0.88 Mbps | 480×854, 1.32 Mbps | 480×854, 1.27 Mbps |
+| p720 | 1280 | 2.5 Mbps (at 30 fps) | 30 fps (never raised) | 720×1280, 1.48 Mbps | 720×1280, 2.67 Mbps | 720×1280, 2.59 Mbps |
+| p1080 | 1920 | 5 Mbps (at 30 fps) | 30 fps (never raised) | 1080×1920, 3.55 Mbps | 1080×1920, 5.26 Mbps | 1080×1920, 5.18 Mbps |
+
+The bitrate target is what the encoder is asked for, and an encoder lands near it, not on it. The target scales down with the output resolution and frame rate, and a video is never upscaled and never given a higher frame rate than it came with.
+
+The Android numbers come from the emulator's software encoder. A phone's hardware encoder will give different numbers.
+
+The full measurements are in [doc/PRESETS.md](doc/PRESETS.md).
+<!-- PRESET_TABLE_END -->
+
 ### Jobs beyond the foreground: queueing, isolates and backgrounding
 
 The four subsections below are one story, in the order a caller runs into them: how to submit
@@ -333,10 +353,28 @@ HEVC and HDR, and `doc/PRESETS.md` for measured bitrate/byte tables.
 
 * **Bundle FFmpeg.** No GPL dependency, no ~100 MB binary blob, no software-only encode path.
   Everything goes through the platform's own hardware-accelerated media APIs.
-* **Filters, watermarks or stitching.** This is a compression and inspection tool, not a video
-  editor.
+* **Filters, overlays, watermarks or stitching.** This is a compression and inspection tool, not
+  a video editor. Trimming by start and end time is the one edit it does.
 * **Upload or manage network transfer.** This plugin produces a local file; getting it somewhere
   else is the app's job.
+* **Run on the web.** The platforms are Android, iOS and macOS. Web may come in a later version
+  and is not promised. A web build has to compress on the server or upload the original.
+* **Encode HEVC in software.** `VideoCodec.hevc` is used only with a hardware HEVC encoder.
+  Without one the output is H.264 and the result reports `hevcFallback: true`.
+* **Keep HDR without a hardware HEVC 10-bit encoder.** On a device without one,
+  `HdrMode.keepHdr` falls back to tone-mapped SDR H.264 and the result reports both
+  `toneMapped: true` and `hevcFallback: true`. The video still plays everywhere, with the right
+  colours.
+* **Deliver progress to a background isolate.** A job started there resolves its `result` as
+  usual, but its `progress` stream emits nothing. This is a limit of the Flutter engine. Start
+  the job on the root isolate when the app shows progress.
+* **Keep a job alive in the background below Android 15.** `androidForegroundService` uses the
+  `mediaProcessing` service type, which exists from Android 15 (API 35). Below that the option
+  does nothing, and there is no `dataSync` fallback. The job still runs while the app is in the
+  foreground.
+* **Run a long job in the background on iOS.** The plugin uses only the short background task
+  the system gives every app and asks for no background entitlement. A job the system suspends
+  ends with `interrupted`, and the app can submit it again.
 
 ## Development
 
