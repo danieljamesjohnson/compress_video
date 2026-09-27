@@ -204,7 +204,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-04-PLAN.md — Apple parity: `CodecCapabilities.swift` over VideoToolbox, HEVC Main10 keep-HDR writer settings, the same forced audio downmix, the `SizeGuard.swift` port catch-up, and the macOS Apple Silicon CI leg proving the HEVC success branch the emulator and simulator structurally cannot
+- [x] 04-04-PLAN.md — Apple parity: `CodecCapabilities.swift` over VideoToolbox, HEVC Main10 keep-HDR writer settings, the same forced audio downmix, the `SizeGuard.swift` port catch-up, and the macOS Apple Silicon CI leg proving the HEVC success branch the emulator and simulator structurally cannot — complete, CI run 36279264836; macOS host confirmed real HEVC/keep-HDR success branch (`HEVC_BRANCH=success`, `KEEP_HDR_BRANCH=keep`), iOS simulator confirmed fallback branch on both
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -256,6 +256,6 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
-| 4. Codecs, HDR and Hard Inputs | 3/5 | In Progress | - |
+| 4. Codecs, HDR and Hard Inputs | 4/5 | In Progress | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
