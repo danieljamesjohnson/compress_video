@@ -264,7 +264,21 @@ Plans:
   3. An app using `video_compress`'s `compressVideo`, `getMediaInfo`, `getFileThumbnail`, `cancelCompression` and `deleteAllCache` builds and works after switching to the compatibility import. MIGRATION.md maps every old API and `VideoQuality` value to the new API.
   4. The TEST-01 hardware checklist has been re-run against the release build before publishing.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — `video_compress_compat.dart`: the incumbent's verbs, `VideoQuality` mapping and progress stream on the new engine, unit-tested and snippet-compiled (RELS-03)
+- [ ] 06-03-PLAN.md — Generated README preset table from the constants and doc/PRESETS.md, complete non-goals section, CI drift gate (RELS-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-02-PLAN.md — MIGRATION.md for every old API and `VideoQuality` value, plus the compat integration suite on Android, iOS and macOS with parity (RELS-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 06-04-PLAN.md — 1.0.0, CHANGELOG breaking changes, pana/dartdoc gates, doc/RELEASE.md; the real publish and hardware re-run stay Dan's deferred steps (RELS-01)
 **Research**: Skip. pub.dev publishing and scoring are well documented.
 **Notes**: Publishing needs a verified pub.dev publisher, or Dan's decision to publish under his Google account (QUESTIONS.md #2).
 

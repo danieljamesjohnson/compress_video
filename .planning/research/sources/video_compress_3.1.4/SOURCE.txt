@@ -1,0 +1,1 @@
+Snapshot of jonataslaw/VideoCompress at 69c0e3f (2025-02-13, v3.1.4), MIT. Reference for the Phase 6 compat shim signatures.
