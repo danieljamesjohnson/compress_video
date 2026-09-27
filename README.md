@@ -13,6 +13,20 @@ preset-only export sessions.
 One call turns a phone video into a smaller MP4 that plays everywhere, and it **never makes the
 file bigger, never returns null, and builds on today's Flutter toolchain**.
 
+## Migrating from video_compress
+
+Change one import and your existing `VideoCompress` calls keep compiling, on the new engine.
+[MIGRATION.md](MIGRATION.md) lists every old call next to its new one, and what each
+`VideoQuality` value now does.
+
+```dart
+// Before
+import 'package:video_compress/video_compress.dart';
+
+// After
+import 'package:compress_video/video_compress_compat.dart';
+```
+
 ## What this package does
 
 Everything below is on a typed platform-channel contract (via
