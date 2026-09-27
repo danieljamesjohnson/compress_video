@@ -252,6 +252,16 @@ class CompressOptions {
   /// only where a hardware HEVC encoder exists; otherwise the engine falls back to H.264 and the
   /// result reports [VideoCodec] via `CompressResult.videoCodec` plus
   /// `CompressResult.hevcFallback: true`.
+  ///
+  /// **This field can be overridden to HEVC even when set to [VideoCodec.h264]:** a successful
+  /// [HdrMode.keepHdr] request (see [hdr]) always produces HEVC 10-bit output, because HDR
+  /// cannot be represented in this plugin's H.264 output -- `codec: VideoCodec.h264, hdr:
+  /// HdrMode.keepHdr` is honoured as keep-HDR, not as a request to keep HDR out of an H.264
+  /// container. In that case `CompressResult.hevcFallback` stays `false` (nothing fell back;
+  /// the codec field was simply not the deciding factor) and `CompressResult.videoCodec` reports
+  /// `'hevc'`. A caller that must never receive HEVC regardless of HDR should set
+  /// `hdr: HdrMode.toneMapToSdr` explicitly rather than relying on `codec: VideoCodec.h264`
+  /// alone.
   final VideoCodec codec;
 
   /// Requested HDR handling. Defaults to [HdrMode.toneMapToSdr]. [HdrMode.keepHdr] is honoured
