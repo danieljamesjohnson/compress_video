@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Looper
 import android.os.StatFs
 import java.io.File
+import kotlinx.coroutines.delay
 
 /**
  * [CompressHostApi] implementation.
@@ -121,7 +122,23 @@ class Compression(
                     "consumed by an earlier awaitCompressResult call",
             )
         }
-        if (!JobRegistry.isKnownJobId(jobId)) {
+        // Belt and braces (quick task 260927-r4k), mirroring Compression.swift's identical
+        // bounded grace: wait up to 2 s (40 x 50 ms) for startCompress's registration to land
+        // before concluding the jobId is genuinely unknown. Unreachable in practice on Android:
+        // startCompress calls JobRegistry.resultDeferredFor before its first suspension point
+        // and every handler is dispatched in order on the main Looper, so a jobId fired ahead
+        // of this call is always already known here. It exists so both platforms resolve a
+        // reordered delivery identically -- typed, bounded, never a hang. delay() resumes on
+        // this coroutine's own dispatcher (Pigeon launches it on Dispatchers.Main), so
+        // JobRegistry is still only ever touched from the main Looper.
+        var known = JobRegistry.isKnownJobId(jobId)
+        var remainingPolls = KNOWN_JOB_ID_GRACE_POLLS
+        while (!known && remainingPolls > 0) {
+            delay(KNOWN_JOB_ID_GRACE_POLL_MS)
+            known = JobRegistry.isKnownJobId(jobId)
+            remainingPolls -= 1
+        }
+        if (!known) {
             throw CompressVideoError(
                 "unknown",
                 "awaitCompressResult called for unknown jobId \"$jobId\": startCompress was never " +
@@ -254,5 +271,11 @@ class Compression(
         // D-18's pre-flight free-space margin: the destination filesystem must have at least
         // this many times the predicted output size free before an encode is even attempted.
         const val FREE_SPACE_SAFETY_FACTOR = 1.2
+
+        // awaitCompressResult's bounded grace for a jobId startCompress has not registered yet:
+        // 40 polls 50 ms apart, 2 s in total. Mirrors Compression.swift's
+        // knownJobIdGracePolls/knownJobIdGracePollNanoseconds exactly.
+        const val KNOWN_JOB_ID_GRACE_POLLS = 40
+        const val KNOWN_JOB_ID_GRACE_POLL_MS = 50L
     }
 }
