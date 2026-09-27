@@ -1,126 +1,129 @@
 ---
 phase: 05-jobs-isolates-and-background
-fixed_at: 2026-09-27T18:15:11Z
+fixed_at: 2026-09-27T20:35:00Z
 review_path: .planning/phases/05-jobs-isolates-and-background/05-REVIEW.md
-iteration: 1
-findings_in_scope: 4
-fixed: 4
+iteration: 2
+findings_in_scope: 3
+fixed: 3
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 5: Code Review Fix Report
 
-**Fixed at:** 2026-09-27T18:15:11Z
+**Fixed at:** 2026-09-27T20:35:00Z
 **Source review:** .planning/phases/05-jobs-isolates-and-background/05-REVIEW.md
-**Iteration:** 1
+**Iteration:** 2
 
 **Summary:**
-- Findings in scope: 4
-- Fixed: 4
+- Findings in scope: 3
+- Fixed: 3
 - Skipped: 0
 
-**Scope note:** `fix_scope` was `critical_warning` (nominally CR-01, WR-01, WR-02). The
-orchestrator's dispatch explicitly named a fourth finding, IN-01 (the
-`verify_apk_foreground_service_manifest.sh` gap), for inclusion as well, so all four
-findings documented in 05-REVIEW.md's body were fixed. (05-REVIEW.md's frontmatter
-reports `critical: 2` / `total: 5`, but the document body only contains four numbered
-findings -- one Critical (CR-01), two Warnings (WR-01, WR-02), one Info (IN-01). This
-looks like a pre-existing counting inconsistency in the source review itself, not
-something introduced here; all four findings actually present in the body were
-addressed.)
+`fix_scope` was `critical_warning`. 05-REVIEW.md (iteration 2) reported 0 Critical and 3
+Warning findings (WR-01, WR-02, WR-03); all three were fixed.
 
 ## Fixed Issues
 
-### CR-01: ForegroundServiceHost can be left running (with a stale "0 videos" notification) if the last hosted job detaches before the service has actually started
+### WR-01: `JobRegistry.cancelAll()` (Android) can silently resurrect the bookkeeping D-17/CR-02 clears, for exactly the jobs it just cancelled
 
-**Files modified:** `android/src/main/kotlin/com/danjjohnson/compress_video/ForegroundServiceHost.kt`, `android/src/test/kotlin/com/danjjohnson/compress_video/ForegroundServiceHostTest.kt`
-**Commit:** c630c82
-**Applied fix:** `onStartCommand` now re-checks `ref.hostedCount` immediately after posting the
-foreground notification and calls `stopSelf(startId)` when it is `0` -- closing the race where
-`startForegroundService()`'s deferred `onCreate()`/`onStartCommand()` runs after the one job that
-triggered the start has already fully detached again. Added a JVM regression test
-(`singleAttachThenDetach_leavesZeroHostedJobs_forADeferredStartCommandToObserve`) proving the
-`Ref` bookkeeping this check relies on. Verified: `:compress_video:testDebugUnitTest` (all 6
-`ForegroundServiceHostTest` cases pass, including the new one) and a clean `compileDebugKotlin`.
+**Files modified:** `android/src/main/kotlin/com/danjjohnson/compress_video/JobRegistry.kt`, `android/src/test/kotlin/com/danjjohnson/compress_video/JobRegistryTest.kt`
+**Commit:** 843dc55
+**Applied fix:** `cancel(jobId)`'s `onCancelled` callback only completes a `CompletableDeferred`
+synchronously; the suspended `Compression.startCompress` call that actually calls
+`completeResult` resumes on a LATER main-Looper message (Pigeon dispatches every
+`CompressHostApi` call via the non-`.immediate` `Dispatchers.Main`). `cancelAll()`'s three
+`.clear()` calls previously ran and returned before that resumption, so the belated
+`completeResult` call silently re-added the jobId to `knownJobIds` via `resultDeferredFor`'s
+`getOrPut` -- defeating the D-17 guarantee for exactly the case (a job still in flight at
+detach) `cancelAll()` exists to handle.
 
-### WR-02: The shared ForegroundServiceHost notification is never refreshed when a job detaches, only when one attaches
+Implemented the review's third suggested option (bypass the two-map bookkeeping for a
+cancelled-via-`cancelAll` job): added a self-cleaning `tornDownJobIds` set that `cancelAll()`
+populates with every jobId it cancels, before its `.clear()` calls run. `completeResult()` now
+checks (and removes from) `tornDownJobIds` first and discards the outcome for any jobId still
+present, instead of resurrecting `knownJobIds`/`resultDeferreds` bookkeeping `cancelAll()`
+already tore down. `tornDownJobIds` only ever holds entries for jobs currently unwinding from
+the most recent `cancelAll()` call -- it self-empties as each belated `completeResult` call
+arrives and is discarded, so it never grows across the app's lifetime.
 
-**Files modified:** `android/src/main/kotlin/com/danjjohnson/compress_video/ForegroundServiceHost.kt`
-**Commit:** b4fc528
-**Applied fix:** `detach()` now calls `instance?.refreshNotification()` in the `else` branch
-(when `shouldStop` is `false`, i.e. other jobs remain hosted), mirroring what `attach()` already
-does for the non-first-job case. No new unit test was added for this one: `refreshNotification()`
-is a method on the real `Service` instance, which this project's plain-JVM test suite has no
-Robolectric shadow to instantiate (the same constraint `ForegroundServiceHostTest`'s own doc
-comment documents for testing `Ref` instead of the real service). Verified via a clean
-`compileDebugKotlin` and the full `ForegroundServiceHostTest` suite still passing.
+Added a new JVM regression test
+(`cancelAll_doesNotResurrectBookkeeping_forALiveJobsBelatedCancellationCompletion`) that
+registers a real `JobRegistry.LiveJob` (with `mainHandler`/`progressRunnable` Mockito-mocked,
+since this is a plain JVM test with no Robolectric shadow layer and a real `Handler` would
+throw against the unmocked Android stub jar), calls `cancelAll()`, asserts `isKnownJobId` is
+already `false`, then simulates the belated `completeResult` call the real cancellation
+completion would trigger later and asserts `isKnownJobId` stays `false` across it -- the
+regression class the existing empty-`jobs` test could not catch. Verified:
+`:compress_video:testDebugUnitTest` (all `JobRegistryTest` cases pass, including the new one,
+with no compiler warnings) and the full Android unit test suite (all suites pass).
 
-### WR-01: `awaitCompressResult` hangs forever (never fails typed) for a job id that was never started or whose result was already consumed
+### WR-02: iOS/macOS `JobRegistry.cancelAll()` never resets `knownJobIds`/`consumedJobIds`/`resultOutcomes`/`resultWaiters` -- Android's D-17 cleanup has no Swift counterpart
 
-**Files modified:** `android/src/main/kotlin/com/danjjohnson/compress_video/JobRegistry.kt`, `android/src/main/kotlin/com/danjjohnson/compress_video/Compression.kt`, `android/src/test/kotlin/com/danjjohnson/compress_video/JobRegistryTest.kt` (new), `darwin/compress_video/Sources/compress_video/JobRegistry.swift`, `darwin/compress_video/Sources/compress_video/Compression.swift`, `test/await_compress_result_test.dart` (new)
-**Commit:** 4b5b7a9
-**Applied fix:** Both `JobRegistry`s now track every job id ever started (`knownJobIds` /
-Swift's `knownJobIds`) and every job id whose result has already been delivered once
-(`consumedJobIds`), populated at the same point each platform's `startCompress` already
-pre-registers a job (`resultDeferredFor`/`registerJob`) and at the point a result is
-consumed/delivered (`forgetResult` on Android; both the `resultOutcomes` and `resultWaiters`
-delivery paths on Swift). `Compression.awaitCompressResult`/`.swift` check `isConsumedJobId` then
-`isKnownJobId` before ever calling the underlying await, throwing a typed `CompressVideoError`
-(reason `"unknown"`) with a distinct, diagnosable message for each of the two cases instead of
-falling into `getOrPut`/`withCheckedThrowingContinuation`, which previously manufactured a
-deferred/continuation nothing would ever complete. The shipped Dart wrapper (`CompressJob._run`)
-is unaffected -- it only ever awaits a jobId it always started first, exactly once.
+**Files modified:** `darwin/compress_video/Sources/compress_video/JobRegistry.swift`
+**Commit:** 7af5d26
+**Applied fix:** Added the same four-collection reset Android's `cancelAll()` performs
+(`resultOutcomes`, `resultWaiters`, `knownJobIds`, `consumedJobIds`). These four collections
+are `@MainActor`-isolated (unlike `jobs`, which is plain `nonisolated` state), so the reset
+runs inside a `Task { @MainActor in ... }` that `cancelAll()` enqueues -- the same
+fire-and-forget hop-to-MainActor pattern already used elsewhere in this package
+(`Compression.swift`'s progress-forwarding `Task { @MainActor [flutterApi] in ... }`) -- rather
+than making `cancelAll()` itself `async`/`@MainActor`, which would force its two plain,
+non-`async` `FlutterPlugin` call sites (iOS's `detachFromEngine(for:)`, macOS's
+`handleWillTerminate(_:)`) to become `@MainActor`-isolated too, a change outside this fix's
+scope and not something the review's own suggested snippet (a bare synchronous
+`.removeAll()` sequence) would have compiled as written given `cancelAll()`'s existing
+signature.
 
-Added a new JVM test file (`JobRegistryTest.kt`, 4 cases) exercising the new
-`isKnownJobId`/`isConsumedJobId`/`cancelAll`-reset bookkeeping directly (the same pattern
-`ForegroundServiceHostTest` uses to test `Ref` rather than a real `Service`, since `Compression`
-itself asserts the main Looper, which throws in this project's plain-JVM unit tests). Added a new
-Dart test file (`test/await_compress_result_test.dart`, 2 cases) that installs a fake host API on
-the generated `awaitCompressResult` channel (the same channel-mocking technique
-`test/thumbnail_api_test.dart` and `test/compress_job_test.dart` already use) replying with the
-new typed failure shape, proving the generated `CompressHostApi.awaitCompressResult` proxy
-decodes it into a `PlatformException(code: 'unknown')` rather than hanging.
+Every continuation in `resultWaiters` is drained and resumed with a typed `CompressVideoError`
+(`code: "unknown"`) before the dictionary is cleared, rather than dropped by a bare
+`.removeAll()` -- an unresumed `CheckedContinuation` is a Swift Concurrency runtime misuse (it
+must be resumed exactly once), so silently discarding it the way Android's plain,
+continuation-free bookkeeping safely can is not an option on this platform.
 
-**Verification caveat:** no Swift toolchain is available in this environment (danserver has none
-installed, and the MacBook Air over `ssh dans-macbook-air` was unreachable -- connection timed
-out -- when probed for this fix). The Swift changes in `JobRegistry.swift`/`Compression.swift`
-were therefore verified by careful manual re-reading only (Tier 1: brace/type/actor-isolation
-correctness against the surrounding file, matching the already-`@MainActor`-isolated patterns
-`completeResult`/`awaitResult` already use) and by mirroring the Kotlin fix's logic closely --
-not by an actual `swiftc`/Xcode build. This should be confirmed by CI's macOS/iOS jobs (or a
-future run with the Mac reachable) before this finding is considered fully closed on the Apple
-side.
+### WR-03: The new CR-02 `JobRegistry`/`Compression` additions have zero dedicated test coverage on iOS/macOS
 
-### IN-01: `verify_apk_foreground_service_manifest.sh` doesn't check `android:exported="false"` on the merged manifest
+**Files modified:** `example/ios/RunnerTests/RunnerTests.swift`, `example/macos/RunnerTests/RunnerTests.swift`
+**Commit:** 547a9b8
+**Applied fix:** Added 5 new XCTest cases to the `// MARK: - JobRegistry` section, mirroring
+`JobRegistryTest.kt`'s 4 cases plus explicit coverage of the `resultWaiters` waiter-delivery
+branch `completeResult` also has (a code path Kotlin's `CompletableDeferred`-based design has
+no equivalent branch for): `registerJob` makes a jobId known but not consumed; a fresh jobId is
+not known; `completeResult` (stash) then `awaitResult` returns the outcome and marks it
+consumed; `awaitResult` called first is resumed by a later `completeResult` call (the
+waiter-delivery branch, using a `@MainActor`-isolated test plus a same-executor enqueued `Task`
+to deterministically force that ordering without a race); and `cancelAll()` resets
+known/consumed bookkeeping for both a genuinely live, cancelled job and a CR-02-only-registered
+one (this last case also directly proves the WR-02 fix above, polling briefly since
+`cancelAll()`'s reset now runs on an enqueued `Task`).
 
-**Files modified:** `tool/verify_apk_foreground_service_manifest.sh`
-**Commit:** 0b8ed88
-**Applied fix:** Added an `awk`-based block-isolation step that extracts the
-`ForegroundServiceHost` `<service>` element's own attribute lines (bounded by the next `E: `
-line in `aapt2 dump xmltree`'s output) before checking `foregroundServiceType` and the new
-`android:exported="false"` assertion against that isolated block -- rather than grepping the
-whole merged manifest, which declares several other services/providers that are also
-`exported=false` and could have let an unscoped check pass even if this specific service's own
-attribute were wrong or missing.
+Added byte-identically to `example/ios/RunnerTests/RunnerTests.swift` and
+`example/macos/RunnerTests/RunnerTests.swift` (`diff` confirms identical after every edit,
+matching this file's own existing convention and CI's diff check).
 
-Deviated from the review's suggested implementation: the review's Fix text speculated the
-exported attribute would render as hex `0x0` in `aapt2 dump xmltree` output; running the
-updated script against the project's real, currently-built debug APK (`example/build/app/
-outputs/flutter-apk/app-debug.apk`, via the already-installed Android SDK/`aapt2` on this box)
-showed `aapt2` actually renders it as the literal token `false`/`true`, so the check matches
-that instead. Also verified negatively: a synthetic manifest fragment with `exported=true` for
-the ForegroundServiceHost block (and a sibling node's real `exported=false` attribute alongside
-it) correctly fails the isolated check while the sibling's `exported=false` is correctly ignored,
-proving the block-isolation logic has teeth and cannot be satisfied by the wrong node's
-attribute. `bash -n` syntax-checked; the full script re-run against the real APK passes.
+**Verification caveat (applies to all three fixes above):** no Swift toolchain is available on
+danserver, and this run did not attempt to reach the MacBook Air. The Swift changes in
+`JobRegistry.swift` and both `RunnerTests.swift` files were verified by careful manual
+re-reading (Tier 1: type/actor-isolation correctness against the surrounding file and its
+existing `@MainActor` patterns) and a brace-balance check (`grep -c '{' `/`'}'`, equal on all
+three files), not by an actual `swiftc`/Xcode build. This matches the same caveat iteration 1's
+WR-01 fix (Android+Swift `awaitCompressResult` guard) recorded, and should be confirmed by
+CI's macOS/iOS jobs before these three findings are considered fully closed on the Apple side.
+The Android side of WR-01 (this iteration's own JobRegistry.kt/JobRegistryTest.kt changes) was
+fully compiled and test-run locally via `:compress_video:testDebugUnitTest`, with no caveat.
+
+`flutter analyze --fatal-infos --fatal-warnings` (no issues), `flutter test` (100/100 passing),
+`dart format` (0 files changed, checked with the `flutter-stable` SDK per project convention),
+and `:compress_video:testDebugUnitTest` (full Android suite, all passing) were all re-run after
+every fix in this iteration -- none affected by, or affecting, these changes beyond the two new
+`JobRegistryTest.kt` cases already covered above.
 
 ## Skipped Issues
 
-None -- all four findings in scope were fixed.
+None -- all three findings in scope were fixed.
 
 ---
 
-_Fixed: 2026-09-27T18:15:11Z_
+_Fixed: 2026-09-27T20:35:00Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_
