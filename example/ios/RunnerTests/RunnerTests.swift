@@ -978,10 +978,46 @@ class RunnerTests: XCTestCase {
   // real case names (03-RESEARCH.md Pitfall 6) -- NOT the CONTEXT.md-prose
   // `.decoderNotAvailable`/`.encoderNotAvailable`, which do not exist.
 
-  func testKnownAVErrorCodesHasExactlyThirteenEntries() {
+  func testKnownAVErrorCodesHasExactlyFourteenEntries() {
     // Fails the whole suite if a code is ever added to knownAVErrorCodes without a
     // corresponding case below -- mirrors ErrorMappingTest.kt's own acceptance criterion.
-    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 13)
+    // 13 -> 14 in 05-04: the interruption code (-11847, D-11) joined the set.
+    XCTAssertEqual(ErrorMapping.knownAVErrorCodes.count, 14)
+  }
+
+  // 05-04 (D-11): the interruption code's raw value must resolve to a real `AVError.Code` case
+  // BEFORE anything else in this section depends on it -- if a future SDK ever removed it,
+  // this assertion fails with a clear diagnostic instead of every mapping test below crashing
+  // inside `ErrorMapping`'s own lazily-initialised `interruptedBySystem` static.
+  func testInterruptionRawValueResolvesToARealAVErrorCode() {
+    XCTAssertNotNil(AVError.Code(rawValue: -11847))
+  }
+
+  func testReasonForAVErrorInterruptionCodeMapsToInterrupted() {
+    // -11847: named in an Apple engineer's own forum reply as the code an interrupted export
+    // reports (`.planning/research/sources/VIDEO_COMPRESS_BRIEF.md` §5 "Background") -- matched
+    // by raw value, exactly like the invalid-sample-cursor case above, since the plausible-
+    // sounding case name `.operationInterrupted` was never independently confirmed.
+    XCTAssertEqual(
+      ErrorMapping.reasonForAVError(AVError.Code(rawValue: -11847)!), "interrupted")
+  }
+
+  func testReasonForNSErrorInAVFoundationDomainWithTheInterruptionCodeMapsToInterrupted() {
+    // A writer that fails its session after the app resigns active can surface -11847 as a
+    // plain NSError in AVFoundation's own domain rather than as a typed AVError (D-11) -- the
+    // plain-NSError branch must recognise it too, domain-scoped.
+    let error = NSError(domain: AVFoundationErrorDomain, code: -11847, userInfo: nil)
+    XCTAssertEqual(ErrorMapping.reasonForNSError(error), "interrupted")
+  }
+
+  func testReasonForNSErrorInAnUnrelatedDomainWithTheSameNumericCodeDoesNotMapToInterrupted() {
+    // The check above is domain-SCOPED, never a bare numeric match: an unrelated domain that
+    // happens to reuse the number -11847 must not be captured by it.
+    let error = NSError(
+      domain: "CompressVideoTestDomain", code: -11847,
+      userInfo: [NSLocalizedDescriptionKey: "an unrelated failure that reuses the same number"])
+    XCTAssertNotEqual(ErrorMapping.reasonForNSError(error), "interrupted")
+    XCTAssertEqual(ErrorMapping.reasonForNSError(error), "io")
   }
 
   func testReasonForAVErrorDecoderNotFoundMapsToDecoderUnavailable() {

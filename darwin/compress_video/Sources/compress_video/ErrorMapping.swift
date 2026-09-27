@@ -36,6 +36,7 @@ enum ErrorMapping {
     .outOfMemory,
     .unsupportedOutputSettings,
     invalidSampleCursor,
+    interruptedBySystem,
   ]
 
   /// AVFoundation's "Invalid sample cursor" error (-11880) -- observed live reading a
@@ -50,6 +51,19 @@ enum ErrorMapping {
   /// name that may not exist on this project's iOS 13/macOS 11 deployment floor. Force-unwrapped
   /// because that same live observation is proof the initializer succeeds for this raw value.
   private static let invalidSampleCursor = AVError.Code(rawValue: -11880)!
+
+  /// AVFoundation's own signal that the system took a job's execution time away from it before
+  /// it finished (D-11, 05-04) -- observed named in an Apple engineer's own forum reply as the
+  /// code an interrupted export reports (`.planning/research/sources/VIDEO_COMPRESS_BRIEF.md`
+  /// §5 "Background"), quoted there as `AVError -11847`. Constructed by RAW VALUE, exactly like
+  /// `invalidSampleCursor` above and for the identical reason (03-RESEARCH.md Pitfall 6): this
+  /// project has already been burned once guessing an AVFoundation case name by analogy (the
+  /// CONTEXT.md-prose `.decoderNotAvailable`/`.encoderNotAvailable`, which do not exist), and the
+  /// plausible-sounding name for this code -- `.operationInterrupted` -- was never independently
+  /// confirmed against Apple's own header or documentation, so it is deliberately not written
+  /// here as a case literal. `RunnerTests.swift`'s own assertion that this raw value resolves to
+  /// a real `AVError.Code` case at all runs before anything else in this file depends on it.
+  private static let interruptedBySystem = AVError.Code(rawValue: -11847)!
 
   /// Maps `code` to a `CompressVideoErrorReason` name string (for example
   /// `"decoderUnavailable"`). A code outside `knownAVErrorCodes` returns `"unknown"` -- the
@@ -67,6 +81,12 @@ enum ErrorMapping {
       // MP4 (CI run 36151081384) -- a malformed sample table is unsupported input, the same
       // bucket .fileFormatNotRecognized/.fileFailedToParse/.decodeFailed already fall into.
       return "unsupportedInput"
+    }
+    if code == interruptedBySystem {
+      // -11847: the system took this job's execution time away from it (D-11) -- an app
+      // suspension mid-export, surfaced here as a typed AVError. Retryable, not a hang and not
+      // a `null` -- the ONE reason string this file maps to "interrupted".
+      return "interrupted"
     }
     switch code {
     case .decoderNotFound, .decoderTemporarilyUnavailable:
@@ -92,12 +112,21 @@ enum ErrorMapping {
   }
 
   /// Maps a plain `NSError` (a `reader`/`writer` `.failed` status whose underlying error is
-  /// not `AVError`-typed) to a `CompressVideoErrorReason` name string: `"outOfSpace"` when
-  /// `error`'s message indicates the destination filesystem is full (a best-effort SECONDARY
-  /// defence -- the pre-flight free-space check is the primary one and does not depend on this
-  /// string matching across OS versions), otherwise `"io"`.
+  /// not `AVError`-typed) to a `CompressVideoErrorReason` name string: `"interrupted"` when
+  /// `error` is itself in AVFoundation's own error domain carrying the interruption code (D-11)
+  /// -- a writer that fails its session after the app has resigned active can surface the
+  /// condition as a plain `NSError` in that domain rather than as a typed `AVError`, so this
+  /// domain-SCOPED check (never a bare numeric match against `error.code` alone, which would
+  /// wrongly capture an unrelated domain's error that happens to reuse the same number) runs
+  /// ahead of the out-of-space heuristic below; `"outOfSpace"` when `error`'s message indicates
+  /// the destination filesystem is full (a best-effort SECONDARY defence -- the pre-flight
+  /// free-space check is the primary one and does not depend on this string matching across OS
+  /// versions); otherwise `"io"`.
   static func reasonForNSError(_ error: NSError) -> String {
-    isOutOfSpaceMessage(error.localizedDescription) ? "outOfSpace" : "io"
+    if error.domain == AVFoundationErrorDomain && error.code == interruptedBySystem.rawValue {
+      return "interrupted"
+    }
+    return isOutOfSpaceMessage(error.localizedDescription) ? "outOfSpace" : "io"
   }
 
   /// The human-readable message for an `NSError` that mapped to `"io"` or `"outOfSpace"`,
