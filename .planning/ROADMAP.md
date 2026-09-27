@@ -208,7 +208,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-05-PLAN.md — Compression parity records for the hard inputs with documented exclusions, `doc/HARDWARE_CHECKLIST.md`, public documentation matching the real codec/HDR contract, and the phase's evidence-backed requirement accounting
+- [x] 04-05-PLAN.md — Compression parity records for the hard inputs with documented exclusions, `doc/HARDWARE_CHECKLIST.md`, public documentation matching the real codec/HDR contract, and the phase's evidence-backed requirement accounting — complete, CI run 36287969994; CDEC-01/CDEC-02/CDEC-03/AUDO-03 closed, TEST-01 stays `Pending` (hardware checklist not yet run on a physical Android phone or a real Dolby Vision clip, QUESTIONS.md #3/#4)
 
 **Research**: Needed. Topics: Media3 `HdrMode` behaviour by API level and device, Apple keep-HDR writer settings, and HEVC capability probing on both platforms.
 **Notes**: Hardware HEVC/HDR checks need a physical Android phone (QUESTIONS.md #3) and an Apple device through the Mac (QUESTIONS.md #1).
@@ -256,6 +256,6 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 1. Typed Contract, CI and Media Info | 5/7 | In progress | - |
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
-| 4. Codecs, HDR and Hard Inputs | 4/5 | In Progress | - |
+| 4. Codecs, HDR and Hard Inputs | 5/5 | Complete (verification pending) | - |
 | 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
