@@ -26,7 +26,8 @@ import 'package:integration_test/integration_test.dart';
 /// damaged file, not a bug -- forcing that pair to agree would misclassify whichever platform's
 /// mapping happened to be declared "wrong" by fiat. Progress and cancellation, this file's other
 /// two groups, are inherently timing-dependent and have no genuinely cross-platform value to
-/// record.
+/// record. The queue cases (05-01) are excluded for the same reason -- their whole point is
+/// observed timing/ordering, not a value that should be identical across platforms.
 final SplayTreeMap<String, dynamic> _compressionParity =
     SplayTreeMap<String, dynamic>();
 
@@ -411,100 +412,221 @@ void main() {
     );
   });
 
-  group(
-    'Queue: default concurrency runs three jobs strictly one at a time',
-    () {
-      testWidgets(
-        'three jobs submitted together from one default-constructed CompressVideo run one '
+  group('Queue: default concurrency runs three jobs strictly one at a time', () {
+    testWidgets('three jobs submitted together from one default-constructed CompressVideo run one '
         "after another, each with its own output path, and no job's first progress arrives "
-        "before the previous job's result resolved",
-        (WidgetTester tester) async {
-          final String pathA = await _copySmallClip('queue_default_a');
-          final String pathB = await _copySmallClip('queue_default_b');
-          final String pathC = await _copySmallClip('queue_default_c');
-          final String outputA = await _freshOutputPath(
-            'queue_default_a_output.mp4',
-          );
-          final String outputB = await _freshOutputPath(
-            'queue_default_b_output.mp4',
-          );
-          final String outputC = await _freshOutputPath(
-            'queue_default_c_output.mp4',
-          );
-
-          final Stopwatch stopwatch = Stopwatch()..start();
-          final Map<String, int> firstProgressAtMs = <String, int>{};
-          final Map<String, int> resultAtMs = <String, int>{};
-
-          void recordFirstProgress(String label, CompressJob job) {
-            late final StreamSubscription<double> subscription;
-            subscription = job.progress.listen((double value) {
-              firstProgressAtMs.putIfAbsent(
-                label,
-                () => stopwatch.elapsedMilliseconds,
-              );
-            });
-            unawaited(job.result.whenComplete(subscription.cancel));
-          }
-
-          final CompressJob jobA = compressVideo.compress(
-            pathA,
-            options: CompressOptions(outputPath: outputA),
-          );
-          final CompressJob jobB = compressVideo.compress(
-            pathB,
-            options: CompressOptions(outputPath: outputB),
-          );
-          final CompressJob jobC = compressVideo.compress(
-            pathC,
-            options: CompressOptions(outputPath: outputC),
-          );
-          // Submitted together, from a single default-constructed instance (maxConcurrentJobs
-          // 1): only job A may run yet. Asserted here, before any job settles, so a pump that
-          // started all three at once cannot hide behind a later, coincidentally-ordered await.
-          expect(jobA.isQueued, isFalse);
-          expect(jobB.isQueued, isTrue);
-          expect(jobC.isQueued, isTrue);
-
-          recordFirstProgress('A', jobA);
-          recordFirstProgress('B', jobB);
-          recordFirstProgress('C', jobC);
-
-          final CompressResult resultA = await jobA.result;
-          resultAtMs['A'] = stopwatch.elapsedMilliseconds;
-          final CompressResult resultB = await jobB.result;
-          resultAtMs['B'] = stopwatch.elapsedMilliseconds;
-          final CompressResult resultC = await jobC.result;
-          resultAtMs['C'] = stopwatch.elapsedMilliseconds;
-
-          expect(resultA.outputPath, isNot(resultB.outputPath));
-          expect(resultB.outputPath, isNot(resultC.outputPath));
-          expect(resultA.outputPath, isNot(resultC.outputPath));
-          expect(await File(resultA.outputPath).exists(), isTrue);
-          expect(await File(resultB.outputPath).exists(), isTrue);
-          expect(await File(resultC.outputPath).exists(), isTrue);
-
-          // The real proof this test exists for: compared TIMESTAMPS, not await-order alone. A
-          // build whose pump started all three jobs at once would still satisfy every await
-          // above in order, but job B's first progress would arrive far earlier than job A's
-          // result -- these comparisons catch exactly that.
-          expect(
-            firstProgressAtMs['B']!,
-            greaterThanOrEqualTo(resultAtMs['A']!),
-            reason:
-                "job B's platform call must not be issued until job A's result resolved",
-          );
-          expect(
-            firstProgressAtMs['C']!,
-            greaterThanOrEqualTo(resultAtMs['B']!),
-            reason:
-                "job C's platform call must not be issued until job B's result resolved",
-          );
-        },
-        timeout: const Timeout(Duration(seconds: 60)),
+        "before the previous job's result resolved", (WidgetTester tester) async {
+      final String pathA = await _copySmallClip('queue_default_a');
+      final String pathB = await _copySmallClip('queue_default_b');
+      final String pathC = await _copySmallClip('queue_default_c');
+      final String outputA = await _freshOutputPath(
+        'queue_default_a_output.mp4',
       );
-    },
-  );
+      final String outputB = await _freshOutputPath(
+        'queue_default_b_output.mp4',
+      );
+      final String outputC = await _freshOutputPath(
+        'queue_default_c_output.mp4',
+      );
+
+      final Stopwatch stopwatch = Stopwatch()..start();
+      final Map<String, int> firstProgressAtMs = <String, int>{};
+      final Map<String, int> resultAtMs = <String, int>{};
+
+      void recordFirstProgress(String label, CompressJob job) {
+        late final StreamSubscription<double> subscription;
+        subscription = job.progress.listen((double value) {
+          firstProgressAtMs.putIfAbsent(
+            label,
+            () => stopwatch.elapsedMilliseconds,
+          );
+        });
+        unawaited(job.result.whenComplete(subscription.cancel));
+      }
+
+      final CompressJob jobA = compressVideo.compress(
+        pathA,
+        options: CompressOptions(outputPath: outputA),
+      );
+      final CompressJob jobB = compressVideo.compress(
+        pathB,
+        options: CompressOptions(outputPath: outputB),
+      );
+      final CompressJob jobC = compressVideo.compress(
+        pathC,
+        options: CompressOptions(outputPath: outputC),
+      );
+      // Submitted together, from a single default-constructed instance (maxConcurrentJobs
+      // 1): only job A may run yet. Asserted here, before any job settles, so a pump that
+      // started all three at once cannot hide behind a later, coincidentally-ordered await.
+      expect(jobA.isQueued, isFalse);
+      expect(jobB.isQueued, isTrue);
+      expect(jobC.isQueued, isTrue);
+
+      recordFirstProgress('A', jobA);
+      recordFirstProgress('B', jobB);
+      recordFirstProgress('C', jobC);
+
+      final CompressResult resultA = await jobA.result;
+      resultAtMs['A'] = stopwatch.elapsedMilliseconds;
+      final CompressResult resultB = await jobB.result;
+      resultAtMs['B'] = stopwatch.elapsedMilliseconds;
+      final CompressResult resultC = await jobC.result;
+      resultAtMs['C'] = stopwatch.elapsedMilliseconds;
+
+      expect(resultA.outputPath, isNot(resultB.outputPath));
+      expect(resultB.outputPath, isNot(resultC.outputPath));
+      expect(resultA.outputPath, isNot(resultC.outputPath));
+      expect(await File(resultA.outputPath).exists(), isTrue);
+      expect(await File(resultB.outputPath).exists(), isTrue);
+      expect(await File(resultC.outputPath).exists(), isTrue);
+
+      // The real proof this test exists for: compared TIMESTAMPS, not await-order alone. A
+      // build whose pump started all three jobs at once would still satisfy every await
+      // above in order, but job B's first progress would arrive far earlier than job A's
+      // result -- these comparisons catch exactly that.
+      expect(
+        firstProgressAtMs['B']!,
+        greaterThanOrEqualTo(resultAtMs['A']!),
+        reason:
+            "job B's platform call must not be issued until job A's result resolved",
+      );
+      expect(
+        firstProgressAtMs['C']!,
+        greaterThanOrEqualTo(resultAtMs['B']!),
+        reason:
+            "job C's platform call must not be issued until job B's result resolved",
+      );
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    testWidgets(
+      'maxConcurrentJobs: 2 runs exactly two of three jobs at once: one pair overlaps in '
+      'time and the third begins only after one of the first two resolved',
+      (WidgetTester tester) async {
+        final CompressVideo queuedCompressVideo = CompressVideo(
+          maxConcurrentJobs: 2,
+        );
+        final String pathA = await _copySmallClip('queue_limit2_a');
+        final String pathB = await _copySmallClip('queue_limit2_b');
+        final String pathC = await _copySmallClip('queue_limit2_c');
+        final String outputA = await _freshOutputPath(
+          'queue_limit2_a_output.mp4',
+        );
+        final String outputB = await _freshOutputPath(
+          'queue_limit2_b_output.mp4',
+        );
+        final String outputC = await _freshOutputPath(
+          'queue_limit2_c_output.mp4',
+        );
+
+        final CompressJob jobA = queuedCompressVideo.compress(
+          pathA,
+          options: CompressOptions(outputPath: outputA),
+        );
+        final CompressJob jobB = queuedCompressVideo.compress(
+          pathB,
+          options: CompressOptions(outputPath: outputB),
+        );
+        final CompressJob jobC = queuedCompressVideo.compress(
+          pathC,
+          options: CompressOptions(outputPath: outputC),
+        );
+        // A and B both start immediately with limit 2; C must wait. This alone already proves
+        // the overlap: A and B are BOTH admitted, synchronously, before either can possibly
+        // have finished -- exactly the observed concurrency this case exists to prove, and
+        // proven structurally rather than by racing real encode timings on a clip cheap enough
+        // that its own admission-to-first-progress latency can dwarf the gap between two
+        // real completions.
+        expect(jobA.isQueued, isFalse);
+        expect(jobB.isQueued, isFalse);
+        expect(jobC.isQueued, isTrue);
+
+        // Observed via `jobC.isQueued`'s state at the exact moment each of A/B settles, not
+        // real-clock progress timestamps: the queue's own internal completion listener (set up
+        // inside `compress()`, before this test attaches anything) always admits job C -- if it
+        // is going to -- in the SAME microtask turn as A or B's `result` future completing and
+        // strictly BEFORE any listener attached afterwards (this one) observes that same
+        // completion. So reading `jobC.isQueued` from a `whenComplete` on A/B's own `result`
+        // deterministically answers "had C already been admitted by the time this job
+        // settled?", regardless of how fast or slow the underlying clip encodes.
+        int settledCount = 0;
+        bool? cQueuedAfterFirstOfAB;
+        void observeC() {
+          settledCount++;
+          if (settledCount == 1) {
+            cQueuedAfterFirstOfAB = jobC.isQueued;
+          }
+        }
+
+        unawaited(
+          jobA.result.then((_) => observeC(), onError: (_) => observeC()),
+        );
+        unawaited(
+          jobB.result.then((_) => observeC(), onError: (_) => observeC()),
+        );
+
+        final List<CompressResult> results = await Future.wait(
+          <Future<CompressResult>>[jobA.result, jobB.result, jobC.result],
+        );
+
+        expect(
+          cQueuedAfterFirstOfAB,
+          isFalse,
+          reason:
+              'job C must be admitted the instant the FIRST of A/B settles, not wait for both',
+        );
+
+        expect(await File(results[0].outputPath).exists(), isTrue);
+        expect(await File(results[1].outputPath).exists(), isTrue);
+        expect(await File(results[2].outputPath).exists(), isTrue);
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    testWidgets(
+      'cancelling a job while it is still queued behind a running one resolves it as '
+      'cancelled and leaves no file at its outputPath',
+      (WidgetTester tester) async {
+        final CompressVideo queuedCompressVideo = CompressVideo();
+        final String pathRunning = await _copyHiBitrateClip(
+          'queue_cancel_running',
+        );
+        final String pathQueued = await _copySmallClip('queue_cancel_c');
+        final String outputQueued = await _freshOutputPath(
+          'queue_cancel_c_output.mp4',
+        );
+
+        final CompressJob jobRunning = queuedCompressVideo.compress(
+          pathRunning,
+        );
+        final CompressJob jobQueued = queuedCompressVideo.compress(
+          pathQueued,
+          options: CompressOptions(outputPath: outputQueued),
+        );
+        expect(jobQueued.isQueued, isTrue);
+
+        await jobQueued.cancel();
+        expect(jobQueued.isCancelled, isTrue);
+
+        Object? caughtError;
+        try {
+          await jobQueued.result;
+        } catch (e) {
+          caughtError = e;
+        }
+        expect(caughtError, isA<CompressVideoException>());
+        expect(
+          (caughtError as CompressVideoException).reason,
+          CompressVideoErrorReason.cancelled,
+        );
+        expect(await File(outputQueued).exists(), isFalse);
+
+        // Let the still-running job finish normally rather than leave a dangling isolate/job.
+        await jobRunning.result;
+      },
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+  });
 
   group('Real failures: every one is typed, none logs, none leaves a file behind', () {
     testWidgets(

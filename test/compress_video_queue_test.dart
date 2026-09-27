@@ -410,39 +410,36 @@ void main() {
   });
 
   group('Invariant across queue position', () {
-    test(
-      'progress and result stay independent and well-formed for every job in a submitted set, '
-      'whether it started immediately or waited',
-      () async {
-        final _FakeCompressHost fake = _FakeCompressHost()..install();
-        addTearDown(fake.uninstall);
-        final CompressVideo cv = CompressVideo();
+    test('progress and result stay independent and well-formed for every job in a submitted set, '
+        'whether it started immediately or waited', () async {
+      final _FakeCompressHost fake = _FakeCompressHost()..install();
+      addTearDown(fake.uninstall);
+      final CompressVideo cv = CompressVideo();
 
-        final CompressJob jobA = cv.compress('/tmp/a.mp4');
-        final CompressJob jobB = cv.compress('/tmp/b.mp4');
-        final _JobInvariantTracker trackerA = _JobInvariantTracker(jobA);
-        final _JobInvariantTracker trackerB = _JobInvariantTracker(jobB);
+      final CompressJob jobA = cv.compress('/tmp/a.mp4');
+      final CompressJob jobB = cv.compress('/tmp/b.mp4');
+      final _JobInvariantTracker trackerA = _JobInvariantTracker(jobA);
+      final _JobInvariantTracker trackerB = _JobInvariantTracker(jobB);
 
-        // jobA already started (front of an otherwise-empty queue); jobB has not, so no event
-        // is sent for it yet -- native has no way to reference a job id it was never given a
-        // platform call for.
-        CompressVideoFlutterApiImpl().onProgress(jobA.id, 50.0);
-        CompressVideoFlutterApiImpl().onProgress(jobA.id, 100.0);
+      // jobA already started (front of an otherwise-empty queue); jobB has not, so no event
+      // is sent for it yet -- native has no way to reference a job id it was never given a
+      // platform call for.
+      CompressVideoFlutterApiImpl().onProgress(jobA.id, 50.0);
+      CompressVideoFlutterApiImpl().onProgress(jobA.id, 100.0);
 
-        fake.completeSuccess(jobA.id);
-        final CompressResult? resultA = await trackerA.assertInvariant();
-        expect(resultA, isNotNull);
+      fake.completeSuccess(jobA.id);
+      final CompressResult? resultA = await trackerA.assertInvariant();
+      expect(resultA, isNotNull);
 
-        // jobB now started; its own progress events must land on its own tracker.
-        CompressVideoFlutterApiImpl().onProgress(jobB.id, 100.0);
-        fake.completeSuccess(jobB.id);
-        final CompressResult? resultB = await trackerB.assertInvariant();
-        expect(resultB, isNotNull);
+      // jobB now started; its own progress events must land on its own tracker.
+      CompressVideoFlutterApiImpl().onProgress(jobB.id, 100.0);
+      fake.completeSuccess(jobB.id);
+      final CompressResult? resultB = await trackerB.assertInvariant();
+      expect(resultB, isNotNull);
 
-        expect(trackerA.values, <double>[50.0, 100.0]);
-        expect(trackerB.values, <double>[100.0]);
-        expect(resultA!.outputPath, isNot(resultB!.outputPath));
-      },
-    );
+      expect(trackerA.values, <double>[50.0, 100.0]);
+      expect(trackerB.values, <double>[100.0]);
+      expect(resultA!.outputPath, isNot(resultB!.outputPath));
+    });
   });
 }

@@ -13,17 +13,20 @@ preset-only export sessions.
 One call turns a phone video into a smaller MP4 that plays everywhere, and it **never makes the
 file bigger, never returns null, and builds on today's Flutter toolchain**.
 
-## What this phase ships
+## What this package does
 
-This early version wires up the typed platform-channel contract (via
-[Pigeon](https://pub.dev/packages/pigeon)) and two calls:
+Everything below is on a typed platform-channel contract (via
+[Pigeon](https://pub.dev/packages/pigeon)) with no hand-written channel map:
 
+* **Compression** — presets or explicit targets, HEVC and HDR opt-ins, trim, audio control,
+  never-larger, per-job progress and cancellation, and an optional job queue for batches (see
+  "Compressing a video" and "Queueing several compressions" below).
 * **Media info** — duration, dimensions, rotation, codec, HDR-ness and more, read without
   decoding the whole file.
 * **Thumbnails** — a rotation-correct poster frame at any timestamp, as JPEG bytes or written to
   a file.
 
-Compression itself, presets, jobs, progress and cancellation land in later versions.
+Not yet published to pub.dev — see CHANGELOG.md for what has landed so far.
 
 ## Unit convention
 
@@ -35,7 +38,7 @@ in the public API.
 ## Usage
 
 ```dart
-const compressVideo = CompressVideo();
+final compressVideo = CompressVideo();
 
 // Media info: duration, dimensions, rotation, codec, HDR-ness — read without decoding the
 // whole file.
@@ -59,6 +62,69 @@ final String exactThumbPath = await compressVideo.getThumbnailFile(
   outputPath: '/some/writable/dir/poster.jpg',
 );
 ```
+
+> **`CompressVideo`'s constructor is not `const`.** A `const CompressVideo()` call site from
+> before this version needs to drop the `const` (see CHANGELOG.md) — the per-instance job queue
+> below is mutable state a `const` instance cannot hold.
+
+### Compressing a video
+
+```dart
+final compressVideo = CompressVideo();
+
+// compress() returns a CompressJob synchronously -- never a Future<CompressJob> -- while the
+// actual compression runs in the background.
+final CompressJob job = compressVideo.compress(
+  path,
+  options: const CompressOptions(preset: CompressPreset.p720),
+);
+
+// Progress, 0 to 100, ending with exactly one 100.
+job.progress.listen((double percent) => print('$percent%'));
+
+// Cancel any time before it finishes -- resolves `result` with a typed `cancelled` failure.
+// job.cancel();
+
+try {
+  final CompressResult result = await job.result;
+  print('${result.outputPath}: ${result.outputBytes} bytes (was ${result.inputBytes})');
+} on CompressVideoException catch (e) {
+  print('Compression failed: ${e.reason}');
+}
+```
+
+`compress()` never returns `null` and never lets a raw platform exception escape: every failure,
+including cancellation, resolves `job.result` with a typed [`CompressVideoException`]. The
+output is never larger than the input — see `doc/PRESETS.md` and the "same on every platform"
+section below.
+
+### Queueing several compressions
+
+Every `CompressVideo` instance owns its own FIFO job queue, gated by `maxConcurrentJobs`:
+
+```dart
+// Default: maxConcurrentJobs = 1 -- jobs run strictly one at a time, in submission order.
+final compressVideo = CompressVideo();
+final CompressJob first = compressVideo.compress(pathA);
+final CompressJob second = compressVideo.compress(pathB); // waits for `first` to settle
+
+// Or opt into running more than one at once:
+final batchCompressVideo = CompressVideo(maxConcurrentJobs: 3);
+```
+
+* `compress()` still returns its `CompressJob` synchronously whether the job starts immediately
+  or waits — check `CompressJob.isQueued` to tell which. A queued job's `progress` stream emits
+  nothing until it actually starts.
+* Every job keeps its own `progress` stream and its own `result`, regardless of queue position —
+  there is no global progress stream and no "is compressing" flag anywhere in this package (the
+  defect class this plugin exists to avoid, `video_compress` issues #317 and #307).
+* Cancelling a job that is still queued resolves `result` with the same typed `cancelled`
+  failure a cancelled *running* job produces, without ever reaching the platform — a caller
+  cannot tell from the exception whether the job had started.
+* Two `CompressVideo` instances queue completely independently; one instance's full queue never
+  delays another instance's jobs. One shared instance is the normal choice for an app.
+* `maxConcurrentJobs` must be at least 1 (the default); anything less throws
+  `CompressVideoException` with reason `unsupportedInput` from the constructor.
 
 ### `MediaInfo` fields
 

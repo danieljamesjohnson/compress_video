@@ -1,5 +1,16 @@
 ## Unreleased
 
+* **Job queue (Phase 5)** — `CompressVideo({int maxConcurrentJobs = 1})` and
+  `CompressJob.isQueued` are new: submitting more jobs than `maxConcurrentJobs` now queues the
+  extras in FIFO order on the Dart side instead of requiring the caller to serialise calls
+  manually, with each job's `progress`/`result` staying fully independent regardless of queue
+  position and cancelling a still-queued job resolving the same typed `cancelled` failure a
+  cancelled running job produces, without ever reaching the platform. `maxConcurrentJobs` must be
+  at least 1; the native engines are unchanged — the queue is Dart-only.
+  **Breaking:** `CompressVideo`'s constructor is no longer `const` (the queue is per-instance
+  mutable state, and Dart's `const` canonicalisation would otherwise make two `const
+  CompressVideo()` expressions silently share one queue, contradicting per-instance
+  independence). Any `const CompressVideo(...)` call site needs to drop the `const`.
 * **Codecs, HDR and hard inputs (Phase 4)** — HEVC is now an opt-in (`VideoCodec.hevc`), used
   only when the device has a hardware HEVC encoder and falling back to H.264 with
   `hevcFallback: true` reported otherwise, on both Android (`CodecCapabilities`/`EncoderUtil`)
