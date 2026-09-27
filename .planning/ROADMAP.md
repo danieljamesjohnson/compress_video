@@ -243,7 +243,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 05-04-PLAN.md — JOBS-05 (Apple): the iOS-only `beginBackgroundTask` wrap with a reason-carrying expiration handler, AVFoundation's -11847 interruption mapped on both the `AVError` and plain-`NSError` branches, byte-identical XCTest coverage on iOS and macOS, and the README suspension-and-retry contract
+- [x] 05-04-PLAN.md — JOBS-05 (Apple): the iOS-only `beginBackgroundTask` wrap with a reason-carrying expiration handler, AVFoundation's -11847 interruption mapped on both the `AVError` and plain-`NSError` branches, byte-identical XCTest coverage on iOS and macOS, and the README suspension-and-retry contract — complete, proven live in CI (run 36327133883, all four jobs green: `Build iOS (CocoaPods)`, `XCTest - iOS Runner`, `Build macOS`, `XCTest - macOS Runner` and `Build iOS via Swift Package Manager` all passed the new `JobRegistry`/`ErrorMapping` cases on both Apple targets); the Dart round trip (`PlatformException` carrying `interrupted` -> typed retryable `CompressVideoException`) proven with no device; the iOS Simulator's `xcrun simctl help` confirmed live (same CI run) to document no suspend/background/pause/resume subcommand, settling 05-RESEARCH.md's Assumption A3 and D-13's "where feasible" clause — the XCTest/Dart pair is the real proof, and the real-iPhone walkthrough is a new `doc/HARDWARE_CHECKLIST.md` entry. REQUIREMENTS.md JOBS-05 stays Pending — 05-05 also declares it (shared-ID gate) and closes it on top of both this plan and 05-03.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -280,5 +280,5 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
 | 4. Codecs, HDR and Hard Inputs | 5/5 | Complete (verification pending) | - |
-| 5. Jobs, Isolates and Background | 0/TBD | Not started | - |
+| 5. Jobs, Isolates and Background | 4/5 | In Progress | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
