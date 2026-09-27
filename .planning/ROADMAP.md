@@ -239,7 +239,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 05-03-PLAN.md — JOBS-05 (Android): `CompressOptions.androidForegroundService`, the plugin's own `mediaProcessing` service declaration and permissions, a ref-counted `ForegroundServiceHost` that stops itself, the `moveTaskToBack` emulator proof, and `onTimeout` cancelling hosted jobs with the retryable `interrupted` reason
+- [x] 05-03-PLAN.md — JOBS-05 (Android): `CompressOptions.androidForegroundService`, the plugin's own `mediaProcessing` service declaration and permissions, a ref-counted `ForegroundServiceHost` that stops itself, the `moveTaskToBack` emulator proof, and `onTimeout` cancelling hosted jobs with the retryable `interrupted` reason — complete, proven with live `dumpsys` evidence locally and in CI (run 36321581676, Android job green including a new merged-manifest backstop); backgrounding mid-encode measured directly (1 progress event before, 22 after); `onTimeout` proven on plain JVM (5 cases, no emulator). REQUIREMENTS.md JOBS-05 stays Pending until 05-04 lands the Apple half.
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
