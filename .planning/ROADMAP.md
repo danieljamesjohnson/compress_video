@@ -280,5 +280,5 @@ Phases 2 and 3 can run in parallel once the Mac is reachable. Phases 4 and 5 can
 | 2. Android Compression on Media3 | 7/7 | In Progress|  |
 | 3. Apple Compression to Parity | 6/9 | In Progress | - |
 | 4. Codecs, HDR and Hard Inputs | 5/5 | Complete (verification pending) | - |
-| 5. Jobs, Isolates and Background | 4/5 | In Progress | - |
+| 5. Jobs, Isolates and Background | 5/5 | Complete (verification pending) | - |
 | 6. Release and Migration | 0/TBD | Not started | - |
