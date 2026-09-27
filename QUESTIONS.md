@@ -234,3 +234,17 @@ Not blocking the rest of Phase 5's plans in the sense of needing YOUR action rig
 unstick other work, but `05-03`/`05-04`/`05-05` (foreground service, iOS suspension, phase
 sign-off) may reference or build on JOBS-04's shape, so I'm pausing 05-02 as `status: halted`
 rather than guessing which of (a)/(b)/(c) you want. See `05-02-SUMMARY.md` for full detail.
+
+**Update 2026-09-27 (resolved by orchestrator-directed fix-and-retry):** the scope question above
+is superseded — `compress()` from a background isolate now works. Root cause was narrower than
+this entry's original diagnosis: Android's `startCompress` blocked on `CompressVideoFlutterApi
+.onProgress`'s acknowledgement before returning, and a background isolate can never send one, but
+that block was NOT structurally required — the result can be (and now is) recorded independently
+of it. Fixed with a new Pigeon `CompressHostApi.awaitCompressResult(jobId)` async method, backed
+by a per-job outcome in `JobRegistry` completed the instant it is known, on both platforms, with
+no `SendPort`/`ReceivePort` bridge. Verified on Android with multiple stable emulator runs and
+zero regressions to the existing progress/result ordering guarantees. Apple's mirror
+implementation is written but not locally compiled (Mac still unreachable) — the pushed CI run's
+`apple` job is the pending confirmation before `REQUIREMENTS.md`'s JOBS-04 is marked `Complete`.
+See `05-02-SUMMARY.md` for the full diagnosis and two further real bugs found and fixed along the
+way. No further action needed from Dan on this item unless CI surfaces something new.

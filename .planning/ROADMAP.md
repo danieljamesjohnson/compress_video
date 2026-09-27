@@ -235,7 +235,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [~] 05-02-PLAN.md — JOBS-04: HALTED, `status: halted` (see 05-02-SUMMARY.md). `CompressVideo.ensureInitializedInBackgroundIsolate` shipped; `getMediaInfo`/`getThumbnail`/`estimate`/`clearCache` confirmed working from a background isolate. `compress()` itself is confirmed hanging off-root — a genuine Flutter engine limitation, not fixable without a prohibited SendPort/ReceivePort bridge (QUESTIONS.md #9, scope decision needed from Dan). CI wiring and README (originally Tasks 2/3) not executed, premised on the broken half.
+- [x] 05-02-PLAN.md — JOBS-04: `CompressVideo.ensureInitializedInBackgroundIsolate` plus a new Pigeon `awaitCompressResult` async method (backed by a per-job `JobRegistry` outcome, no SendPort/ReceivePort bridge) make `compress()` genuinely work from `Isolate.run` — proven on Android (multiple stable emulator runs, zero regressions); Apple's mirror implementation written, CI-pending (Mac unreachable for local compilation). Wired into `tool/run_ios_integration_suites.sh` and both Apple CI steps; README/CHANGELOG updated. REQUIREMENTS.md JOBS-04 stays Pending until CI confirms Apple.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
