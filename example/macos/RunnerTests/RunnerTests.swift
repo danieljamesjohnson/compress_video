@@ -1443,4 +1443,55 @@ class RunnerTests: XCTestCase {
       await JobRegistry.isConsumedJobId(consumedJobId), "cancelAll must reset consumed-job bookkeeping")
   }
 
+  /// WR-04 regression, mirroring Android's
+  /// `cancelAll_doesNotResurrectBookkeeping_forALiveJobsBelatedCancellationCompletion`: the
+  /// `cancelAll()` reset test above uses a no-op `cancel` closure for its live job, which never
+  /// calls `completeResult` at all -- so it cannot exercise the belated-completion race this case
+  /// targets. Here the live job's `cancel` closure genuinely fires (recording its reason),
+  /// simulating `Compression.startCompress`'s own catch block calling `completeResult` AFTER
+  /// `cancelAll()`'s enqueued reset `Task` has already cleared bookkeeping -- exactly the timing
+  /// `JobRegistry.cancelAll()`'s own `tornDownJobIds` doc comment describes. `resultOutcomes` is
+  /// private on both platforms, so both this test and Android's prove the belated call was
+  /// discarded (rather than stashed) the same indirect way: `knownJobIds` bookkeeping must not be
+  /// resurrected.
+  func testJobRegistryCancelAllDoesNotResurrectBookkeepingForALiveJobsBelatedCompleteResultCall()
+    async throws
+  {
+    let jobId = "jobregistry-cr02-live-\(UUID().uuidString)"
+    var cancelledReason: String?
+    JobRegistry.register(
+      jobId: jobId,
+      cancel: { reason in cancelledReason = reason },
+      tempFile: makeTempFileURLForJobRegistryTest())
+    await JobRegistry.registerJob(jobId: jobId)
+
+    JobRegistry.cancelAll()
+
+    var stillKnown = true
+    for _ in 0..<50 {
+      stillKnown = await JobRegistry.isKnownJobId(jobId)
+      if !stillKnown { break }
+      await Task.yield()
+    }
+    XCTAssertFalse(
+      stillKnown,
+      "cancelAll must reset known-job bookkeeping before this test's belated completeResult call arrives"
+    )
+    XCTAssertEqual(
+      cancelledReason, "cancelled", "cancelAll's cancel() call must have invoked the live job's cancel closure")
+
+    // The belated resumption: mirrors Compression.startCompress's catch block calling
+    // completeResult once the cancelled operation actually unwinds -- arriving after
+    // cancelAll()'s enqueued reset Task has already run.
+    await JobRegistry.completeResult(
+      jobId: jobId,
+      result: .failure(
+        CompressVideoError(code: "unknown", message: cancelledReason ?? "", details: nil)))
+
+    XCTAssertFalse(
+      await JobRegistry.isKnownJobId(jobId),
+      "a belated completeResult call for a job cancelAll() already tore down must not resurrect "
+        + "knownJobIds bookkeeping (WR-04)")
+  }
+
 }

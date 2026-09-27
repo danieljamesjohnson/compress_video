@@ -115,11 +115,24 @@ enum JobRegistry {
   /// runtime misuse (it must be resumed exactly once), so silently dropping it the way
   /// `.removeAll()` alone would is not an option here the way it is for Android's plain,
   /// continuation-free bookkeeping.
+  ///
+  /// WR-04: records every jobId being cancelled into `tornDownJobIds` BEFORE the enqueued
+  /// `Task` clears the other four collections -- mirrors Android's `JobRegistry.kt` `cancelAll()`
+  /// recording into its own `tornDownJobIds` before its `.clear()` calls (WR-01). `cancel(jobId:)`
+  /// only synchronously flips a flag / invokes the cancel closure; the suspended
+  /// `Compression.startCompress` call's own catch block, which actually calls `completeResult`,
+  /// always resumes on a LATER main-queue turn, after this function (and its enqueued `Task`)
+  /// have already run. Without `tornDownJobIds`, that belated `completeResult` call would find no
+  /// waiters (already cleared) and silently stash a fresh, never-to-be-read `resultOutcomes`
+  /// entry for a job that no longer exists in any other bookkeeping -- the same leak WR-01 closed
+  /// on Android.
   static func cancelAll() {
-    for jobId in Array(jobs.keys) {
+    let jobIdsBeingCancelled = Array(jobs.keys)
+    for jobId in jobIdsBeingCancelled {
       cancel(jobId: jobId)
     }
     Task { @MainActor in
+      tornDownJobIds.formUnion(jobIdsBeingCancelled)
       resultOutcomes.removeAll()
       let pendingWaiters = resultWaiters
       resultWaiters.removeAll()
@@ -174,6 +187,15 @@ enum JobRegistry {
   /// instead of appending a continuation nothing will ever resume a second time.
   @MainActor private static var consumedJobIds: Set<String> = []
 
+  /// WR-04: jobIds `cancelAll()` has cancelled whose belated `completeResult` call (from the
+  /// suspended `Compression.startCompress` call's own catch block, resumed on a LATER main-queue
+  /// turn than `cancelAll()`'s own call stack) has not yet arrived. Mirrors Android's
+  /// `JobRegistry.kt` `tornDownJobIds` exactly, including self-cleaning: `completeResult` removes
+  /// a jobId the instant that belated call arrives and is discarded, so this only ever holds
+  /// entries for jobs currently unwinding from the MOST RECENT `cancelAll()` -- never growing
+  /// across the plugin's lifetime the way an undrained `resultOutcomes` would.
+  @MainActor private static var tornDownJobIds: Set<String> = []
+
   /// Registers `jobId` as known -- must be called by `Compression.startCompress` before any
   /// async work begins (mirrors Android's `resultDeferredFor` pre-registration, called at the
   /// same point in `Compression.kt`), so a concurrent `awaitCompressResult` call for this jobId
@@ -205,6 +227,17 @@ enum JobRegistry {
   /// .startCompress` itself is not `MainActor`-isolated.
   @MainActor static func completeResult(jobId: String, result: Result<CompressResultMessage, Error>)
   {
+    if tornDownJobIds.remove(jobId) != nil {
+      // WR-04: this jobId was cancelled by a PRIOR cancelAll() call, and this is that
+      // cancellation's belated completion finally unwinding back through
+      // Compression.startCompress's catch block -- after cancelAll()'s enqueued Task already
+      // cleared resultWaiters/knownJobIds/consumedJobIds for it. The plugin has detached; nothing
+      // is ever going to call awaitCompressResult for this jobId again, and there is no
+      // guaranteed future cancelAll() to sweep a fresh resultOutcomes entry. Discard the outcome
+      // here instead of letting the resultOutcomes stash below resurrect it. Mirrors Android's
+      // JobRegistry.kt completeResult's tornDownJobIds check exactly (WR-01).
+      return
+    }
     if let waiters = resultWaiters.removeValue(forKey: jobId), !waiters.isEmpty {
       // CR-02: this jobId's outcome is delivered exactly once here -- nothing will ever call
       // completeResult for it again, so mark it consumed the same way the resultOutcomes path
