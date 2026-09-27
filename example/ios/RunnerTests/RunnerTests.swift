@@ -1189,6 +1189,25 @@ class RunnerTests: XCTestCase {
       "compress_video_jobregistry_test_\(UUID().uuidString).mp4")
   }
 
+  private func makeCompressResultMessageForJobRegistryTest() -> CompressResultMessage {
+    CompressResultMessage(
+      outputPath: "/tmp/compress_video_jobregistry_test_output.mp4",
+      inputBytes: 1000,
+      outputBytes: 500,
+      widthPx: 1080,
+      heightPx: 1920,
+      durationMs: 4000,
+      videoCodec: "h264",
+      audioCodec: "aac",
+      transmuxed: false,
+      usedOriginal: false,
+      toneMapped: false,
+      hevcFallback: false,
+      audioReencoded: false,
+      elapsedMs: 250
+    )
+  }
+
   func testJobRegistryRegisterThenFindReturnsTheJob() {
     let jobId = "jobregistry-\(UUID().uuidString)"
     let tempFile = makeTempFileURLForJobRegistryTest()
@@ -1315,6 +1334,113 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(
       livePaths,
       Set([tempFileA.resolvingSymlinksInPath().path, tempFileB.resolvingSymlinksInPath().path]))
+  }
+
+  // MARK: - JobRegistry CR-02 (registerJob/isKnownJobId/isConsumedJobId/completeResult/
+  // awaitResult), mirroring Android's JobRegistryTest.kt case for case (WR-03). None of this
+  // surface was covered by any test before WR-03 -- including the WR-02 cancelAll() reset the
+  // last case below proves.
+
+  func testJobRegistryIsKnownJobIdIsFalseForAJobIdNothingEverStarted() async {
+    let jobId = "jobregistry-cr02-\(UUID().uuidString)"
+
+    let known = await JobRegistry.isKnownJobId(jobId)
+
+    XCTAssertFalse(known, "a jobId registerJob was never called for must not be known")
+  }
+
+  func testJobRegistryRegisterJobMakesAJobIdKnownButNotConsumed() async {
+    let jobId = "jobregistry-cr02-\(UUID().uuidString)"
+
+    await JobRegistry.registerJob(jobId: jobId)
+
+    let known = await JobRegistry.isKnownJobId(jobId)
+    let consumed = await JobRegistry.isConsumedJobId(jobId)
+    XCTAssertTrue(known, "registerJob must register jobId as known")
+    XCTAssertFalse(consumed, "a job whose outcome was never delivered is not consumed")
+  }
+
+  func testJobRegistryCompleteResultStashedThenAwaitResultReturnsItAndMarksConsumed() async throws {
+    let jobId = "jobregistry-cr02-\(UUID().uuidString)"
+    let expected = makeCompressResultMessageForJobRegistryTest()
+    await JobRegistry.registerJob(jobId: jobId)
+
+    // completeResult runs BEFORE awaitResult here -- the resultOutcomes stash-then-claim path,
+    // exercised separately from the resultWaiters waiter-delivery path below.
+    await JobRegistry.completeResult(jobId: jobId, result: .success(expected))
+    let outcome = try await JobRegistry.awaitResult(jobId: jobId)
+
+    XCTAssertEqual(outcome, expected)
+    let consumed = await JobRegistry.isConsumedJobId(jobId)
+    XCTAssertTrue(
+      consumed,
+      "a second awaitCompressResult call for this jobId must see it as already consumed, "
+        + "rather than hanging on a fresh continuation nothing will ever resume")
+    let known = await JobRegistry.isKnownJobId(jobId)
+    XCTAssertTrue(known, "a consumed job remains known, just also consumed")
+  }
+
+  /// The resultWaiters waiter-delivery branch of `completeResult` (WR-03): `awaitResult` is
+  /// called FIRST here, registering a continuation BEFORE any outcome exists, so `completeResult`
+  /// must deliver directly to that continuation rather than stashing into `resultOutcomes` (the
+  /// path the test above exercises). Marking this test `@MainActor` lets `registerJob` and the
+  /// enqueued `Task { @MainActor in ... }` below run synchronously, without their own `await` --
+  /// the enqueued Task cannot actually run until `awaitResult`'s own
+  /// `withCheckedThrowingContinuation` call suspends, which only happens once the continuation is
+  /// already stored in `resultWaiters`, guaranteeing the waiter-delivery branch (not the
+  /// resultOutcomes stash) is what `completeResult` takes here.
+  @MainActor
+  func testJobRegistryAwaitResultRegisteredFirstIsResumedByALaterCompleteResultCall() async throws {
+    let jobId = "jobregistry-cr02-\(UUID().uuidString)"
+    let expected = makeCompressResultMessageForJobRegistryTest()
+    JobRegistry.registerJob(jobId: jobId)
+
+    Task { @MainActor in
+      JobRegistry.completeResult(jobId: jobId, result: .success(expected))
+    }
+
+    let outcome = try await JobRegistry.awaitResult(jobId: jobId)
+
+    XCTAssertEqual(outcome, expected)
+  }
+
+  /// WR-02 regression: `cancelAll()` must reset every CR-02 bookkeeping collection
+  /// (`knownJobIds`, `consumedJobIds`) for BOTH a genuinely live job it just cancelled and a
+  /// job that was only ever CR-02-registered, the same way Android's `JobRegistry.kt`
+  /// `cancelAll()` does (D-17) -- mirrors `JobRegistryTest.kt`'s
+  /// `cancelAll_resetsKnownAndConsumedJobIdBookkeeping`. `cancelAll()`'s own reset runs inside a
+  /// `Task { @MainActor in ... }` it enqueues rather than synchronously within the call itself
+  /// (see that function's own doc comment), so this polls briefly rather than asserting
+  /// immediately -- mirroring how a real detach's later run-loop turn would observe the reset.
+  func testJobRegistryCancelAllResetsKnownAndConsumedJobIdBookkeeping() async throws {
+    let liveJobId = "jobregistry-cr02-live-\(UUID().uuidString)"
+    let knownJobId = "jobregistry-cr02-\(UUID().uuidString)"
+    let consumedJobId = "jobregistry-cr02-\(UUID().uuidString)"
+    JobRegistry.register(
+      jobId: liveJobId, cancel: { _ in }, tempFile: makeTempFileURLForJobRegistryTest())
+    await JobRegistry.registerJob(jobId: liveJobId)
+    await JobRegistry.registerJob(jobId: knownJobId)
+    await JobRegistry.registerJob(jobId: consumedJobId)
+    await JobRegistry.completeResult(
+      jobId: consumedJobId, result: .success(makeCompressResultMessageForJobRegistryTest()))
+    _ = try await JobRegistry.awaitResult(jobId: consumedJobId)
+
+    JobRegistry.cancelAll()
+
+    var stillKnown = true
+    for _ in 0..<50 {
+      stillKnown = (await JobRegistry.isKnownJobId(liveJobId)) || (await JobRegistry.isKnownJobId(knownJobId))
+      if !stillKnown { break }
+      await Task.yield()
+    }
+
+    XCTAssertNil(JobRegistry.find(jobId: liveJobId), "cancelAll must cancel and forget every live job")
+    XCTAssertFalse(
+      await JobRegistry.isKnownJobId(liveJobId),
+      "cancelAll must reset a live job's known-job bookkeeping too (WR-02)")
+    XCTAssertFalse(await JobRegistry.isKnownJobId(knownJobId), "cancelAll must reset known-job bookkeeping")
+    XCTAssertFalse(
+      await JobRegistry.isConsumedJobId(consumedJobId), "cancelAll must reset consumed-job bookkeeping")
   }
 
 }
