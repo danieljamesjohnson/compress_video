@@ -97,9 +97,43 @@ enum JobRegistry {
 
   /// Cancels every live job -- used by both platforms' teardown paths (iOS's
   /// `detachFromEngine(for:)`, macOS's `handleWillTerminate(_:)`) so no job outlives the plugin.
+  ///
+  /// WR-02: also resets every CR-02 bookkeeping collection (`resultOutcomes`, `resultWaiters`,
+  /// `knownJobIds`, `consumedJobIds`) the same way Android's `JobRegistry.kt` `cancelAll()` does
+  /// (D-17) -- without this, `knownJobIds`/`consumedJobIds` and any stashed `resultOutcomes` grow
+  /// for the entire process lifetime across every `FlutterEngine` attach/detach cycle (a Swift
+  /// `enum`'s `static` state persists across engine teardown, unlike a process exit). These four
+  /// collections are `@MainActor`-isolated (unlike `jobs`, plain `nonisolated` state), so the
+  /// reset runs inside a `Task { @MainActor in ... }` -- the same fire-and-forget hop-to-MainActor
+  /// pattern this package already uses from a synchronous call site (`Compression.swift`'s
+  /// progress-forwarding `Task { @MainActor [flutterApi] in ... }`) -- rather than making
+  /// `cancelAll()` itself `async`/`@MainActor`, which would force the synchronous, non-`async`
+  /// `FlutterPlugin` override points that call it (`detachFromEngine(for:)`,
+  /// `handleWillTerminate(_:)`) to become `@MainActor`-isolated too, a change outside this fix's
+  /// scope. Every continuation in `resultWaiters` is resumed with a typed cancellation error
+  /// before the dictionary is cleared -- an unresumed `CheckedContinuation` is a Swift Concurrency
+  /// runtime misuse (it must be resumed exactly once), so silently dropping it the way
+  /// `.removeAll()` alone would is not an option here the way it is for Android's plain,
+  /// continuation-free bookkeeping.
   static func cancelAll() {
     for jobId in Array(jobs.keys) {
       cancel(jobId: jobId)
+    }
+    Task { @MainActor in
+      resultOutcomes.removeAll()
+      let pendingWaiters = resultWaiters
+      resultWaiters.removeAll()
+      for waiters in pendingWaiters.values {
+        for waiter in waiters {
+          waiter.resume(
+            throwing: CompressVideoError(
+              code: "unknown",
+              message: "The plugin detached before this job's outcome could be delivered",
+              details: nil))
+        }
+      }
+      knownJobIds.removeAll()
+      consumedJobIds.removeAll()
     }
   }
 
