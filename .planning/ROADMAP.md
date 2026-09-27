@@ -225,9 +225,32 @@ Plans:
   3. On Android 15/16, a job with the `mediaProcessing` foreground-service option keeps running and completes after the user sends the app to the background.
   4. On iOS, suspending the app mid-job resolves the job with a retryable Interrupted error, never a hang or `null`, and the README documents this behaviour.
 
-**Plans**: TBD
-**Research**: Needed. Topics: the `mediaProcessing` foreground-service lifecycle and time limits on Android 15/16, and iOS background-task limits.
-**Notes**: Can run in parallel with Phase 4. Both depend only on Phases 2 and 3.
+**Plans**: 5 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — JOBS-03: the Dart-side FIFO job queue in `CompressVideo` with `maxConcurrentJobs`, a queued state on `CompressJob`, a cancel-while-queued path that never reaches the platform, and per-instance independence — proven in unit tests with no device and on the Android emulator
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md — JOBS-04: `CompressVideo.ensureInitializedInBackgroundIsolate`, the phase's single new `jobs_background_test.dart` suite running a real compression inside `Isolate.run`, the omitted-initialisation typed-error case, and the suite wired into `tool/run_ios_integration_suites.sh` and both Apple CI steps
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-03-PLAN.md — JOBS-05 (Android): `CompressOptions.androidForegroundService`, the plugin's own `mediaProcessing` service declaration and permissions, a ref-counted `ForegroundServiceHost` that stops itself, the `moveTaskToBack` emulator proof, and `onTimeout` cancelling hosted jobs with the retryable `interrupted` reason
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-04-PLAN.md — JOBS-05 (Apple): the iOS-only `beginBackgroundTask` wrap with a reason-carrying expiration handler, AVFoundation's -11847 interruption mapped on both the `AVError` and plain-`NSError` branches, byte-identical XCTest coverage on iOS and macOS, and the README suspension-and-retry contract
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-05-PLAN.md — Phase closure: one coherent cross-platform background story in the README, both real-device walkthroughs added to `doc/HARDWARE_CHECKLIST.md` as not-yet-run, the filled `05-VALIDATION.md` map, and JOBS-03/JOBS-04/JOBS-05 closed on named CI evidence
+
+**Research**: Done — `05-RESEARCH.md` (MEDIUM confidence; assumptions A1–A4 and Open Questions 1–2 are carried into the plans as verification tasks rather than assumed).
+**Notes**: Can run in parallel with Phase 4. Both depend only on Phases 2 and 3. Every plan is executable on danserver plus CI; the physical-Android and iPhone backgrounding walkthroughs are deferred hardware-checklist items, never executor preconditions.
 
 ### Phase 6: Release and Migration
 
