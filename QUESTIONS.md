@@ -179,3 +179,58 @@ proceeded normally. Same ask as the rows above: leave the MacBook Air open or on
 sleep-on-adapter off. When it next answers, resume with `bash tool/mac_sync.sh && bash
 tool/mac_run.sh ios integration_test/compress_test.dart` (03-09 task 1's own precondition),
 then execute `03-09-PLAN.md` task 1 exactly as written.
+
+## 9. JOBS-04 scope decision: `compress()` from a background isolate hangs — engine limitation, not fixable in-package
+
+Executing `05-02-PLAN.md` (Phase 5, background isolates) found that `compress()` issued from
+inside `Isolate.run` never resolves, even AFTER calling the new
+`CompressVideo.ensureInitializedInBackgroundIsolate(RootIsolateToken)` correctly as the plan
+specifies. This is worse than 05-RESEARCH.md's own Pitfall 2 assumed ("MEDIUM confidence,
+untested") — the hang reproduces on the plain, correctly-initialised happy path, not only
+when initialisation is skipped.
+
+**What was confirmed empirically (not assumed), reading Flutter's own SDK source
+(`_background_isolate_binary_messenger_io.dart`) and `adb logcat` during execution:**
+
+1. Progress can never reach a background isolate at all — `BackgroundIsolateBinaryMessenger
+   .setMessageHandler` throws `UnsupportedError` unconditionally ("Messages from the host
+   platform always go to the root isolate"). This is permanent, documented Flutter engine
+   design, not a bug. Fixed in-package: `_ensureFlutterApiRegistered` now catches this and
+   continues instead of crashing `compress()` synchronously (committed, `87d1a28`).
+
+2. Separately, and this is the actual blocker: `compress()`'s own platform call
+   (`CompressHostApi.startCompress`) never resolves off-root. Native's Media3 `Transformer`
+   genuinely runs and completes (logcat shows `Init` then `Release` within ~200-300ms for the
+   corpus's cheapest clip), but the Dart-side `await` hangs forever — reproduced 3 times with
+   debug instrumentation that isolated the hang to that one call (`getMediaInfo` and
+   `estimate`, which use the IDENTICAL outgoing-call mechanism, both succeed instantly
+   off-root under the same harness). This matches the shape of the upstream issue
+   `flutter/flutter#144342` cited in 05-RESEARCH.md (a null-check exception during a platform
+   message response callback, silently reported rather than surfaced — i.e. the pending
+   completer is lost and never resolves).
+
+**Why I didn't route around it:** the only mechanism that could relay progress or a result
+across the isolate boundary in this situation is a hand-rolled `SendPort`/`ReceivePort`
+bridge — exactly what this plan's own threat model and 05-RESEARCH.md's "Don't Hand-Roll"
+table prohibit, and for good reason (it's the exact anti-pattern
+`BackgroundIsolateBinaryMessenger` exists to replace).
+
+**What shipped anyway (committed, real, tested):** the initialiser, the resilience fix, and
+an integration suite (`example/integration_test/jobs_background_test.dart`) proving what DOES
+work off-root once initialised — `getMediaInfo`, and by the same code path
+`getThumbnail`/`estimate`/`clearCache` — with a `skip: true` case documenting the `compress()`
+hang rather than hiding it. Task 2 (CI wiring) and Task 3 (README claims) were NOT executed
+since both are premised on `compress()` working from a background isolate.
+
+**Decision needed — how should JOBS-04 be scoped given this?**
+- (a) Ship JOBS-04 as "every call except `compress()` itself works from a background isolate"
+  — document the limitation plainly and close the incumbent's issue #242 partially.
+- (b) File the upstream Flutter engine bug report and wait/track it before closing JOBS-04 at
+  all (unknown timeline).
+- (c) Investigate further for a narrower in-package explanation I haven't found (I could be
+  wrong about (2) being a genuine engine bug — happy to dig further if you want, just flag it).
+
+Not blocking the rest of Phase 5's plans in the sense of needing YOUR action right now to
+unstick other work, but `05-03`/`05-04`/`05-05` (foreground service, iOS suspension, phase
+sign-off) may reference or build on JOBS-04's shape, so I'm pausing 05-02 as `status: halted`
+rather than guessing which of (a)/(b)/(c) you want. See `05-02-SUMMARY.md` for full detail.
