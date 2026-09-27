@@ -212,7 +212,28 @@ jobs:
           # apply to the same process.
           # --timeout 120s matches tool/run_ios_integration_suites.sh: the suites run real encodes
           # and the 20 s default per-test timeout is a slow-runner lottery (see that script).
-          script: bash -c 'cd example && set -o pipefail && flutter test integration_test --timeout 120s | tee /tmp/android_integration.log'
+          #
+          # T-05-17: a backgrounded poll loop appends `dumpsys activity services` snapshots to
+          # its own log for the whole run, then this same `bash -c` greps that log (after the
+          # suite finishes) for the ForegroundServiceHost class together with the
+          # mediaProcessing type (0x00002000) -- proof a real typed foreground service actually
+          # ran during 05-03's jobs_background_test.dart cases, not just that the suite passed.
+          # Everything stays in this one `bash -c` line: this action runs each `script:` line as
+          # its own separate shell, and dash's `sh` rejects `set -o pipefail` outright.
+          script: >-
+            bash -c '
+            set -o pipefail;
+            (while true; do adb shell dumpsys activity services com.danjjohnson.compress_video >> /tmp/dumpsys_poll.log 2>/dev/null; sleep 1; done) &
+            POLL_PID=$!;
+            cd example && flutter test integration_test --timeout 120s | tee /tmp/android_integration.log;
+            TEST_EXIT=$?;
+            kill "$POLL_PID" 2>/dev/null || true;
+            wait "$POLL_PID" 2>/dev/null || true;
+            if [ "$TEST_EXIT" -ne 0 ]; then exit "$TEST_EXIT"; fi;
+            if ! grep -q "ForegroundServiceHost" /tmp/dumpsys_poll.log; then echo "FATAL: dumpsys never captured ForegroundServiceHost running during the suite" >&2; exit 1; fi;
+            if ! grep -q "types=0x00002000" /tmp/dumpsys_poll.log; then echo "FATAL: dumpsys never showed the mediaProcessing foreground-service type (0x00002000)" >&2; exit 1; fi;
+            echo "dumpsys confirmed ForegroundServiceHost running with the mediaProcessing type during the suite"
+            '
 
       - name: Extract cross-platform parity records (Android)
         # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
@@ -277,6 +298,14 @@ jobs:
           grep -c 'minSdk = 23' android/build.gradle.kts
           grep -c 'compileSdk = 36' android/build.gradle.kts
           grep -Ec 'media3-(transformer|effect|common|muxer):1\.11\.' android/build.gradle.kts
+
+      - name: Verify the debug APK's merged manifest carries the foreground-service declaration (T-05-16)
+        # A deterministic backstop for the dumpsys capture above -- inspects the built archive
+        # itself rather than a live process, so it cannot race a job's lifetime. Proves
+        # 05-RESEARCH.md assumption A2: the plugin's own manifest declarations really survive
+        # Flutter/AGP's manifest merge into a consuming app, not just into the plugin's own
+        # unmerged AndroidManifest.xml.
+        run: bash tool/verify_apk_foreground_service_manifest.sh
 
   apple:
     name: Apple

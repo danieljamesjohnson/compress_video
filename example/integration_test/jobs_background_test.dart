@@ -39,7 +39,8 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:compress_video/compress_video.dart';
-import 'package:flutter/services.dart' show RootIsolateToken, rootBundle;
+import 'package:flutter/services.dart'
+    show MethodChannel, RootIsolateToken, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -91,6 +92,13 @@ class _BackgroundCompressionOutcome {
   final int inputBytes;
   final int outputBytes;
 }
+
+/// Example-only (see `MainActivity.kt`'s doc comment): backgrounds this app and reports the
+/// emulator's real API level, so the assertions below come from the platform rather than from
+/// an assumption about which image is running.
+const MethodChannel _backgroundingChannel = MethodChannel(
+  'compress_video_example/backgrounding',
+);
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -337,6 +345,120 @@ void main() {
       timeout: const Timeout(Duration(seconds: 90)),
     );
   });
+
+  group(
+    'Backgrounding mid-encode survives, honestly, on whatever API level runs '
+    'this suite (JOBS-05, D-08/D-10)',
+    () {
+      testWidgets(
+        'a job with the foreground-service option keeps progressing after the app is sent to '
+        'the background mid-encode, and completes with a typed, never-larger result; below '
+        'API 35 the option is accepted and inert',
+        (WidgetTester tester) async {
+          if (!Platform.isAndroid) {
+            markTestSkipped(
+              'the moveTaskToBack/apiLevel channel is Android-only example code; Apple '
+              'platforms have no equivalent to prove here.',
+            );
+            return;
+          }
+
+          final int apiLevel =
+              await _backgroundingChannel.invokeMethod<int>('apiLevel') ?? 0;
+          final bool serviceExpected = apiLevel >= 35;
+
+          final String path = await _copyAssetToTempFile(
+            'assets/corpus/portrait_hibitrate_1080p60.mp4',
+            'jobs_background_bg_${DateTime.now().microsecondsSinceEpoch}.mp4',
+          );
+
+          final CompressVideo compressVideo = CompressVideo();
+          final CompressJob job = compressVideo.compress(
+            path,
+            options: const CompressOptions(
+              androidForegroundService: AndroidForegroundServiceOptions(
+                notificationTitle: 'Backgrounding test',
+                notificationText: 'proving the encode survives backgrounding',
+              ),
+            ),
+          );
+
+          final List<double> progressValues = <double>[];
+          final StreamSubscription<double> subscription = job.progress.listen(
+            progressValues.add,
+          );
+          addTearDown(subscription.cancel);
+
+          // Waits for the first real progress event -- clamped below 100 by construction
+          // (TransformerEngine.kt) -- so the backgrounding call below genuinely lands
+          // mid-encode rather than racing a job that has already finished.
+          await Future.doWhile(() async {
+            if (progressValues.isNotEmpty) {
+              return false;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            return true;
+          }).timeout(
+            const Duration(seconds: 20),
+            onTimeout: () {
+              fail(
+                'never observed a progress event before the backgrounding window closed',
+              );
+            },
+          );
+          final int progressEventsBeforeBackgrounding = progressValues.length;
+
+          await _backgroundingChannel.invokeMethod<void>('moveTaskToBack');
+
+          final CompressResult result = await job.result.timeout(
+            const Duration(seconds: 60),
+          );
+          await subscription.cancel();
+
+          final int progressEventsAfterBackgrounding = progressValues.length;
+          final double highestProgressObserved = progressValues.isEmpty
+              ? 0
+              : progressValues.reduce((double a, double b) => a > b ? a : b);
+
+          // 05-RESEARCH.md Open Question 1, answered by measurement rather than assumed --
+          // grepped by CI as BACKGROUNDING_MEASURED, and quoted verbatim in the summary.
+          // ignore: avoid_print
+          print(
+            'BACKGROUNDING_MEASURED apiLevel=$apiLevel serviceExpected=$serviceExpected '
+            'progressEventsBeforeBackgrounding=$progressEventsBeforeBackgrounding '
+            'progressEventsAfterBackgrounding=$progressEventsAfterBackgrounding '
+            'highestProgressObserved=$highestProgressObserved',
+          );
+
+          expect(
+            result.outputBytes,
+            lessThanOrEqualTo(result.inputBytes),
+            reason: 'never-larger must hold for a job backgrounded mid-encode too',
+          );
+          expect(
+            File(result.outputPath).existsSync(),
+            isTrue,
+            reason: 'a job backgrounded mid-encode must still produce a real output file',
+          );
+
+          if (serviceExpected) {
+            expect(
+              progressEventsAfterBackgrounding,
+              greaterThan(progressEventsBeforeBackgrounding),
+              reason:
+                  'API 35+: the encode must keep progressing in the mediaProcessing foreground '
+                  'service after the app is backgrounded, not freeze the instant it loses the '
+                  'foreground -- this is what OQ1 asks this suite to measure rather than assume',
+            );
+          }
+          // Below API 35 (D-08): the option is accepted and inert -- no service starts, and
+          // the never-larger/file-exists assertions above already prove the job is unaffected.
+          // The BACKGROUNDING_MEASURED line above records which branch this run took.
+        },
+        timeout: const Timeout(Duration(seconds: 90)),
+      );
+    },
+  );
 
   group('Background isolate: calls proven working since 05-02', () {
     testWidgets(
