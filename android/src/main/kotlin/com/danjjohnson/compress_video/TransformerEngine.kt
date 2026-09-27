@@ -627,38 +627,9 @@ class TransformerEngine(
             ChannelMixingMatrix.createForConstantGain(inputChannels, outputChannels)
         }
 
-    /**
-     * A fixed-coefficient 5.1-to-stereo [ChannelMixingMatrix], since Media3 has no built-in
-     * default for this pair (see [channelMixingMatrixFor]'s doc comment). Assumes the standard
-     * Android 5.1 channel order (`AudioFormat.CHANNEL_OUT_5POINT1`): front-left, front-right,
-     * front-centre, LFE, back-left, back-right. Coefficients follow the common ITU-R
-     * BS.775-inspired downmix every mainstream consumer decoder uses: each front channel passes
-     * straight through to its own side, the centre and each surround channel contribute to BOTH
-     * output channels at [SURROUND_DOWNMIX_GAIN] (-3dB), and LFE is not folded in at all --
-     * matching how most consumer downmix implementations treat the sub channel by default.
-     */
-    private fun fiveDotOneToStereoMixingMatrix(): ChannelMixingMatrix {
-        val g = SURROUND_DOWNMIX_GAIN
-        // Row-major, input-channel-major (confirmed via javap against the installed
-        // media3-common-1.11.1 AAR's ChannelMixingMatrix.getMixingCoefficient(int, int)):
-        // coefficients[inputChannelIndex * outputChannelCount + outputChannelIndex].
-        val coefficients =
-            floatArrayOf(
-                // FL -> L, R
-                1f, 0f,
-                // FR -> L, R
-                0f, 1f,
-                // FC -> L, R
-                g, g,
-                // LFE -> L, R (not folded in)
-                0f, 0f,
-                // BL -> L, R
-                g, 0f,
-                // BR -> L, R
-                0f, g,
-            )
-        return ChannelMixingMatrix(6, 2, coefficients)
-    }
+    // fiveDotOneToStereoMixingMatrix moved to the companion object below (WR-01, 04-REVIEW.md):
+    // a pure, argument-free function needed no instance state to begin with, and moving it there
+    // makes it directly callable from a plain JVM unit test, exactly like [buildVideoEffects].
 
     /**
      * Finishes a successful export: runs the never-larger POST-check on the real byte count on
@@ -1209,6 +1180,46 @@ class TransformerEngine(
                 if (keepHdrFallbackActive) false else hasHardwareHevc || keepHdrAchievable
             val hevcFallback = (requestedHevc && !hasHardwareHevc) || keepHdrFallbackActive
             return HevcOutputDecision(outputIsHevc = outputIsHevc, hevcFallback = hevcFallback)
+        }
+
+        /**
+         * A fixed-coefficient 5.1-to-stereo [ChannelMixingMatrix], since Media3 has no built-in
+         * default for this pair (see [channelMixingMatrixFor]'s doc comment). Assumes the
+         * standard Android 5.1 channel order (`AudioFormat.CHANNEL_OUT_5POINT1`): front-left,
+         * front-right, front-centre, LFE, back-left, back-right. Coefficients follow the common
+         * ITU-R BS.775-inspired downmix every mainstream consumer decoder uses: each front
+         * channel passes straight through to its own side, the centre and each surround channel
+         * contribute to BOTH output channels at [SURROUND_DOWNMIX_GAIN] (-3dB), and LFE is not
+         * folded in at all -- matching how most consumer downmix implementations treat the sub
+         * channel by default.
+         *
+         * Pure, no arguments -- callable from a plain JVM unit test exactly like
+         * [buildVideoEffects] (WR-01, 04-REVIEW.md: this matrix was previously untested even at
+         * the unit level, and the corpus fixture that exercises it end to end carried identical
+         * audio content on all six channels, making it structurally incapable of catching a
+         * channel-index transposition).
+         */
+        internal fun fiveDotOneToStereoMixingMatrix(): ChannelMixingMatrix {
+            val g = SURROUND_DOWNMIX_GAIN
+            // Row-major, input-channel-major (confirmed via javap against the installed
+            // media3-common-1.11.1 AAR's ChannelMixingMatrix.getMixingCoefficient(int, int)):
+            // coefficients[inputChannelIndex * outputChannelCount + outputChannelIndex].
+            val coefficients =
+                floatArrayOf(
+                    // FL -> L, R
+                    1f, 0f,
+                    // FR -> L, R
+                    0f, 1f,
+                    // FC -> L, R
+                    g, g,
+                    // LFE -> L, R (not folded in)
+                    0f, 0f,
+                    // BL -> L, R
+                    g, 0f,
+                    // BR -> L, R
+                    0f, g,
+                )
+            return ChannelMixingMatrix(6, 2, coefficients)
         }
 
         /**

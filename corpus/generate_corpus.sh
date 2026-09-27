@@ -575,10 +575,24 @@ echo "Generating surround51_480p.mp4..."
 SURROUND=surround51_480p.mp4
 SURROUND_TMP=surround51_480p.tmp.mp4
 
+# WR-01 (04-REVIEW.md): each of the six input channels carries a DISTINCT tone (100/200/300/
+#400/500/600Hz for FL/FR/FC/LFE/BL/BR respectively) rather than the identical mono signal this
+# fixture used to duplicate onto every channel. fiveDotOneToStereoMixingMatrix's matrix is
+# symmetric per output side (FL->L=1, FC->L=g, BL->L=g and FR->R=1, FC->R=g, BR->R=g), so
+# identical per-channel content made L_out == R_out regardless of which physical channel was
+# wired to which coefficient slot -- structurally incapable of catching a channel-index
+# transposition (e.g. a BL/BR swap). Six independent lavfi sine sources are merged into one
+# 6-channel stream (amerge, channel order = input order) and explicitly named into the 5.1
+# layout via pan -- amerge alone does not label its output with a named layout.
 ffmpeg -y -loglevel error \
   -f lavfi -i "mandelbrot=size=854x480:rate=30" \
-  -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" \
-  -filter_complex "[1:a]pan=5.1|c0=c0|c1=c0|c2=c0|c3=c0|c4=c0|c5=c0[a51]" \
+  -f lavfi -i "sine=frequency=100:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=200:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=300:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=400:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=500:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=600:sample_rate=48000:duration=2" \
+  -filter_complex "[1:a][2:a][3:a][4:a][5:a][6:a]amerge=inputs=6,pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[a51]" \
   -map 0:v -map "[a51]" \
   -c:v libx264 -pix_fmt yuv420p -preset veryfast -b:v 3M -maxrate 3M -bufsize 3M \
   -threads 1 -x264-params threads=1:sliced_threads=0 \
