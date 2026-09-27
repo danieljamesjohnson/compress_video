@@ -126,9 +126,24 @@ object JobRegistry {
         job.onCancelled(reason)
     }
 
-    /** Cancels every live job -- used on plugin detach so no job outlives the engine (D-17). */
+    /**
+     * Cancels every live job -- used on plugin detach so no job outlives the engine (D-17).
+     *
+     * WR-01: `cancel(jobId)` invokes `LiveJob.onCancelled`, which for a real job
+     * (`TransformerEngine.attemptExport`) only completes a `CompletableDeferred` -- it does NOT
+     * synchronously run the suspended `Compression.startCompress` call's own catch block, which is
+     * what actually calls [completeResult]. Pigeon dispatches every `CompressHostApi` call via the
+     * non-`.immediate` `Dispatchers.Main`, so that resumption always lands on a LATER main-Looper
+     * message, after this function has already returned to its own caller. Recording every jobId
+     * cancelled here into [tornDownJobIds] BEFORE the `.clear()` calls below lets that belated
+     * [completeResult] call recognise it is settling a job this exact `cancelAll()` already tore
+     * down, and discard the outcome instead of resurrecting [knownJobIds]/[resultDeferreds] for a
+     * jobId nothing will ever await again.
+     */
     fun cancelAll() {
-        for (jobId in jobs.keys.toList()) {
+        val jobIdsBeingCancelled = jobs.keys.toList()
+        tornDownJobIds.addAll(jobIdsBeingCancelled)
+        for (jobId in jobIdsBeingCancelled) {
             cancel(jobId)
         }
         // Also clears any completed-but-unconsumed result deferreds (D-17): a background-isolate
@@ -191,6 +206,17 @@ object JobRegistry {
     private val consumedJobIds = LinkedHashSet<String>()
 
     /**
+     * WR-01: jobIds [cancelAll] has cancelled whose belated [completeResult] call (from the
+     * suspended `Compression.startCompress` call's own catch block, scheduled on a later
+     * main-Looper message than `cancelAll()`'s own call stack) has not yet arrived. Self-cleaning:
+     * [completeResult] removes a jobId the instant that belated call arrives and is discarded, so
+     * this only ever holds entries for jobs currently unwinding from the MOST RECENT `cancelAll()`
+     * -- never growing across the app's lifetime the way an un-drained `resultDeferreds`/
+     * `knownJobIds` pair would.
+     */
+    private val tornDownJobIds = LinkedHashSet<String>()
+
+    /**
      * Returns (creating on first call for [jobId]) the deferred that will resolve to [jobId]'s
      * terminal outcome. Safe to call from either [Compression.startCompress] (to pre-register
      * before the job's own async work starts) or [Compression.awaitCompressResult] (to await
@@ -231,6 +257,17 @@ object JobRegistry {
         jobId: String,
         result: Result<CompressResultMessage>,
     ) {
+        if (tornDownJobIds.remove(jobId)) {
+            // WR-01: this jobId was cancelled by a PRIOR cancelAll() call, and this is that
+            // cancellation's belated completion finally unwinding back through
+            // Compression.startCompress's catch block -- after cancelAll() already cleared
+            // knownJobIds/consumedJobIds/resultDeferreds for it. The plugin has detached; nothing
+            // is ever going to call awaitCompressResult for this jobId again, and there is no
+            // guaranteed future cancelAll() to clean up a fresh entry. Discard the outcome here
+            // instead of letting resultDeferredFor's knownJobIds.add(jobId) resurrect bookkeeping
+            // cancelAll() already tore down.
+            return
+        }
         val deferred = resultDeferredFor(jobId)
         if (!deferred.isCompleted) {
             deferred.complete(result)
