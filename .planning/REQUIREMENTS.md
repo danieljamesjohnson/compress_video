@@ -37,8 +37,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **JOBS-01**: Each compression is a job with its own progress stream (0–100) and completion future; there is no global progress stream shared across calls
 - [x] **JOBS-02**: Caller can cancel a job; the job resolves with a distinct Cancelled outcome, and any partial output file is deleted
 - [x] **JOBS-03**: Caller can submit several jobs; they run sequentially by default with an optional concurrency limit, and each reports its own progress
-- [ ] **JOBS-04**: The API can be called from a background isolate
-- [ ] **JOBS-05**: On Android, caller can opt into a `mediaProcessing` foreground service so a job survives the app going to the background; on iOS the plugin documents that exports are interrupted on suspension and surfaces that case as a retryable Interrupted error
+- [x] **JOBS-04**: The API can be called from a background isolate
+- [x] **JOBS-05**: On Android, caller can opt into a `mediaProcessing` foreground service so a job survives the app going to the background; on iOS the plugin documents that exports are interrupted on suspension and surfaces that case as a retryable Interrupted error
 
 ### Media info and thumbnails
 
@@ -119,8 +119,8 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | JOBS-01 | Phase 2 | Complete |
 | JOBS-02 | Phase 2 | Complete |
 | JOBS-03 | Phase 5 | Complete |
-| JOBS-04 | Phase 5 | Pending |
-| JOBS-05 | Phase 5 | Pending |
+| JOBS-04 | Phase 5 | Complete |
+| JOBS-05 | Phase 5 | Complete |
 | INFO-01 | Phase 1 | Complete |
 | INFO-02 | Phase 1 | Complete |
 | INFO-03 | Phase 2 | Complete |
