@@ -1507,4 +1507,56 @@ class RunnerTests: XCTestCase {
         + "knownJobIds bookkeeping (WR-04)")
   }
 
+  // MARK: - Compression.awaitCompressResult known-jobId grace (quick task 260927-r4k)
+
+  /// Regression for CI run 36349558026: `awaitCompressResult` reached `isKnownJobId` BEFORE
+  /// `startCompress` had registered the same jobId, and failed a perfectly good job with
+  /// "unknown jobId". This drives exactly that ordering on purpose -- `awaitCompressResult` is
+  /// called FIRST, and the registration plus the outcome only arrive ~100 ms later -- and
+  /// requires the call to resolve with the job's result instead of throwing, which only the
+  /// bounded grace period inside `awaitCompressResult` can make true. `@MainActor` so the
+  /// enqueued `Task` below cannot run until `awaitCompressResult` first suspends (in its own
+  /// `Task.sleep`), guaranteeing the jobId really is unknown when it is first checked.
+  @MainActor
+  func testAwaitCompressResultCalledBeforeRegistrationResolvesOnceTheJobRegisters() async throws {
+    // Matches Compression.requireValidJobId's <counter>-<16 lowercase hex characters> format;
+    // the hex half is random so a re-run in the same process never reuses a consumed jobId.
+    let hex = String(
+      UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16))
+    let jobId = "0-\(hex)"
+    let expected = makeCompressResultMessageForJobRegistryTest()
+    let compression = Compression(
+      flutterApi: CompressVideoFlutterApi(binaryMessenger: NoOpBinaryMessengerForCompressionTest()))
+
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 100_000_000)
+      JobRegistry.registerJob(jobId: jobId)
+      JobRegistry.completeResult(jobId: jobId, result: .success(expected))
+    }
+
+    let outcome = try await compression.awaitCompressResult(jobId: jobId)
+
+    XCTAssertEqual(outcome, expected)
+  }
+
+}
+
+/// A `FlutterBinaryMessenger` that sends nothing and registers nothing -- just enough for
+/// `CompressVideoFlutterApi`'s initialiser, so a `Compression` can be built in a plain XCTest
+/// with no engine attached. The test above never triggers a progress push, so none of these
+/// methods is ever expected to do anything.
+private final class NoOpBinaryMessengerForCompressionTest: NSObject, FlutterBinaryMessenger {
+  func send(onChannel channel: String, message: Data?) {}
+
+  func send(
+    onChannel channel: String, message: Data?, binaryReply callback: FlutterBinaryReply?
+  ) {}
+
+  func setMessageHandlerOnChannel(
+    _ channel: String, binaryMessageHandler handler: FlutterBinaryMessageHandler?
+  ) -> FlutterBinaryMessengerConnection {
+    0
+  }
+
+  func cleanUpConnection(_ connection: FlutterBinaryMessengerConnection) {}
 }
