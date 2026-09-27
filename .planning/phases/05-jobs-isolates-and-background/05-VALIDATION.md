@@ -51,16 +51,24 @@ All landed during execution; none remain open.
 
 ## Per-Task Verification Map
 
-Every cell cites a CI run number or a local command whose output the cited summary quotes. Three
-CI runs carry this table's evidence — 36321581676 (05-03, Android's own gate: the live `dumpsys`
-poll and the merged-manifest assertion), and 36327133883 (05-04's push, headSha `4f5264d`, which
-also re-ran every prior Phase 5 suite with no regression). No commit has changed `lib/`,
-`android/src/main/`, `darwin/compress_video/Sources/`, `pigeons/`, `example/` or
-`.github/workflows/ci.yml` since 36327133883 — this plan's own commits are Markdown/`.planning/`
-only, which this repository's own `paths-ignore` rule means trigger no CI run at all (confirmed:
-`.github/workflows/ci.yml`'s `on.push.paths-ignore` lists `**/*.md` and `.planning/**`) — so
-36327133883 remains the current, valid, unsuperseded evidence for every row below; see 05-05
-task 3's own re-run of every local command as the fresh confirmation that nothing has drifted.
+Every cell cites a CI run number or a local command whose output the cited summary quotes. Two CI
+runs carry this table's evidence — 36321581676 (05-03's own push, attempt 2: the live `dumpsys`
+poll and the merged-manifest assertion) and 36327133883 (05-04's push, headSha `4f5264d`, which
+also re-ran every prior Phase 5 suite with no regression and is the first run to prove
+`jobs_background_test.dart` passing on both the iOS Simulator and the macOS host). No commit has
+changed `lib/`, `android/src/main/`, `darwin/compress_video/Sources/`, `pigeons/`, `example/` or
+`.github/workflows/ci.yml` since 36327133883 — this plan's (05-05's) own commits are
+Markdown/`.planning/`-only, which this repository's own `paths-ignore` rule means trigger no CI
+run at all (confirmed live: pushing this plan's task 1 and task 2 commits to both `origin` and
+`github` produced no new workflow run — `gh run list` after each push still shows 36327133883 as
+the latest, headSha unchanged from `4f5264d`) — so 36327133883 remains the current, valid,
+unsuperseded evidence for every row below. 05-05 task 3 re-ran every local command in the full
+gate itself (see this plan's own SUMMARY.md) as the fresh confirmation that nothing has drifted
+since that run: `flutter analyze` clean, `flutter test` 96/96, `./gradlew
+:compress_video:testDebugUnitTest` 188/0 failed, `corpus/verify_corpus.sh` clean,
+`tool/check_parity_test.sh` all pass, `tool/run_ios_integration_suites_test.sh` all pass, `dart
+pub publish --dry-run` 0 warnings, and the full `example/integration_test` directory (105 cases,
+including `jobs_background_test.dart`'s 3 cases) passed on `compress_video_api35` with exit 0.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
