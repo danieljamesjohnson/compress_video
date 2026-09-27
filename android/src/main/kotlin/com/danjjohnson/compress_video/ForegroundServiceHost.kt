@@ -182,6 +182,11 @@ class ForegroundServiceHost : Service() {
             val shouldStop = ref.detach(jobId)
             if (shouldStop) {
                 instance?.stopSelf()
+            } else {
+                // WR-02: mirror what attach() already does for the non-first-job case --
+                // without this, a stale hosted-count / title / text lingers on the
+                // notification until some later, unrelated attach() happens to refresh it.
+                instance?.refreshNotification()
             }
         }
     }
