@@ -50,6 +50,19 @@ void main() {
         CompressVideoErrorReason.unknown,
       );
     });
+
+    test(
+      '05-04: maps "interrupted" to CompressVideoErrorReason.interrupted -- the code both '
+      "native engines' cancellation paths now throw for a real suspension/quota-expiry "
+      '(already exercised generically by the loop above; asserted explicitly here since this '
+      'is the one reason this phase makes a real outcome for the first time)',
+      () {
+        expect(
+          reasonFromPlatformCode('interrupted'),
+          CompressVideoErrorReason.interrupted,
+        );
+      },
+    );
   });
 
   group('CompressVideoException', () {

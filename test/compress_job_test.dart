@@ -331,4 +331,31 @@ void main() {
       },
     );
   });
+
+  group('CompressJob interrupted (05-04, D-11/D-12)', () {
+    test(
+      'a startCompress call that fails with the interrupted reason completes result with a '
+      'retryable CompressVideoException, with its progress stream closed -- proving the whole '
+      'channel-to-caller half of JOBS-05 with no device at all (05-03 proved the Android half; '
+      '05-04 task 2 proved AVFoundation-to-channel on the Apple side; this is the remaining '
+      'channel-to-Dart segment, shared code on both platforms)',
+      () async {
+        _installFailingStartCompressHandler('interrupted');
+        final CompressJob job = compressVideo.compress('/tmp/a.mp4');
+
+        await expectLater(
+          () => job.result,
+          throwsA(
+            isA<CompressVideoException>().having(
+              (CompressVideoException e) => e.reason,
+              'reason',
+              CompressVideoErrorReason.interrupted,
+            ),
+          ),
+        );
+
+        await expectLater(job.progress, emitsDone);
+      },
+    );
+  });
 }

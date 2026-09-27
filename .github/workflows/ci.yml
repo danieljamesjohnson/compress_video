@@ -334,6 +334,18 @@ jobs:
           uname -m
           sysctl -n machdep.cpu.brand_string
 
+      - name: Log whether simctl can suspend a running app (05-RESEARCH.md Pitfall 6/A3)
+        # One bounded, non-blocking check: does THIS Xcode's `xcrun simctl` document any
+        # subcommand that could genuinely suspend a running simulator app process, the way a
+        # real device suspension does? 05-RESEARCH.md recorded this as [ASSUMED -- training
+        # knowledge, not verified live] because no Mac was reachable when that research was
+        # written; this is the first point in the project where a real macOS runner is actually
+        # available to check it (D-13's "where feasible" clause). Never fails the build --
+        # informational only, read from the CI log by 05-04-SUMMARY.md's feasibility verdict.
+        run: |
+          xcrun simctl help 2>&1 | grep -iE 'background|suspend|pause|resume' \
+            || echo "No 'background'/'suspend'/'pause'/'resume' subcommand found in 'xcrun simctl help' -- confirms 05-RESEARCH.md's assumption live."
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:

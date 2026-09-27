@@ -159,3 +159,46 @@ once one exists. A new test case for this clip belongs in `hard_inputs_test.dart
 none exists yet because there is nothing to run it against.
 
 **When run:** not yet run — no real Dolby Vision clip exists on danserver yet (QUESTIONS.md #4).
+
+## Real iPhone suspension mid-export (05-04, D-13)
+
+**Status: not yet run — no reachable Mac this phase (QUESTIONS.md #7, #8); the iOS Simulator
+cannot genuinely suspend a running app process at all (05-RESEARCH.md Pitfall 6, Assumption A3),
+so no CI environment can substitute for this one.**
+
+05-04 proved the iOS-suspension contract two ways with no device: `RunnerTests.swift`'s
+`JobRegistry`/`ErrorMapping` cases prove the reason-carrying cancellation and the AVFoundation
+-11847-to-`interrupted` mapping are wired correctly in isolation, and
+`test/compress_job_test.dart`'s `CompressJob interrupted` case proves the channel-to-Dart half —
+a `PlatformException` carrying `interrupted` really resolves `CompressJob.result` with a typed,
+retryable `CompressVideoException` and closes the progress stream. Neither proof requires the
+system to have genuinely suspended anything; what remains unproven is the one link between
+them — that `Compression.swift`'s real `beginBackgroundTask` expiration handler actually fires,
+on a real device, at the point a real app suspension revokes a real job's execution time, and
+that AVFoundation really does report -11847 in that exact circumstance rather than some other
+code this project has not seen. `05-RESEARCH.md` recorded (CI-confirmed live, 05-04) that
+`xcrun simctl help` documents no subcommand to induce that condition in a simulator, so this
+checklist entry — not a CI job — is the only path to closing it.
+
+**To verify on a physical iPhone, once one is reachable via the Mac (QUESTIONS.md #7, #8):**
+
+```bash
+# On the Mac, with a physical iPhone connected and this repo synced (tool/mac_sync.sh):
+flutter install -d <device-id>
+# Start a compression of a clip long enough to still be running several seconds later
+# (e.g. portrait_hibitrate_1080p60.mp4 at a low target bitrate), then background the app
+# (press the Home button / swipe up) while it is still in progress, and leave it backgrounded
+# past the system's own extra-time budget (commonly tens of seconds to a few minutes --
+# 05-RESEARCH.md Assumption A4, itself unverified against current Apple documentation).
+```
+
+**Expected result:** the job's `result` eventually completes with a `CompressVideoException`
+whose `reason` is `CompressVideoErrorReason.interrupted` (never a hang, never a crash from an
+unended background task, never the app being killed outright for overrunning its background
+time), and no partial file is left in the plugin's cache directory. If the app is instead killed
+by the system before the expiration handler can run, that is itself a finding for this entry
+(the budget assumption in 05-RESEARCH.md Assumption A4 would need revising), not a plugin bug —
+record what actually happened either way.
+
+**When run:** not yet run. Record the device model, iOS version, the clip and target used, how
+long the app was backgrounded, and the observed outcome here once tested.

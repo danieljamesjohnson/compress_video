@@ -158,6 +158,34 @@ final CompressResult result = await Isolate.run(() async {
   `BackgroundIsolateBinaryMessenger.instance` itself, wrapped rather than left to escape untyped
   or hang.
 
+### Background execution and app suspension
+
+A compression can keep running after the user leaves the app, within limits that differ by
+platform and are honestly reported rather than hidden:
+
+* **iOS:** every running job asks the system for extra execution time
+  (`beginBackgroundTask`/`UIApplication`) the moment the app is backgrounded, so a short export
+  usually finishes anyway. That extra time is limited and not guaranteed — when it runs out, or
+  AVFoundation itself reports that the export was interrupted, the job fails with
+  `CompressVideoErrorReason.interrupted` and its partial output file is deleted, exactly like any
+  other retryable failure: never a hang, never a `null`. The correct response is to catch
+  `interrupted` and resubmit the same input and options. This plugin requests **no
+  background-processing entitlement** and adds **no `UIBackgroundModes` key** to the host app —
+  `beginBackgroundTask` needs neither, so nothing is imposed on an app that never asked for
+  background capabilities.
+* **Android:** the counterpart is opt-in per job via `CompressOptions.androidForegroundService`
+  (`AndroidForegroundServiceOptions`), which runs the job inside a real `mediaProcessing`
+  foreground service so it survives the app moving to the background — see that class's own
+  dartdoc for the notification and API-level details. Android's own six-hour-per-24-hour quota
+  for that service type ends a job the same way iOS suspension does: `interrupted`, retryable,
+  partial output deleted.
+* **macOS** is never suspended by the system, so none of this applies there — a running job keeps
+  running for as long as the app process is alive, exactly as before this plugin ever added it.
+
+See `doc/HARDWARE_CHECKLIST.md` for the real-device walkthrough this behaviour still needs (a
+physical iPhone suspension and a physical Android backgrounding run) versus what has already been
+proven by this package's own automated test suites.
+
 ### `MediaInfo` fields
 
 | Field | Unit | Unknown sentinel |

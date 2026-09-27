@@ -1,5 +1,17 @@
 ## Unreleased
 
+* **Background execution and app suspension (Phase 5, JOBS-05)** —
+  `CompressVideoErrorReason.interrupted` (reserved since Phase 3) is now a real outcome on both
+  native engines, both retryable: on Android, opting a job into
+  `CompressOptions.androidForegroundService` runs it inside a real `mediaProcessing` foreground
+  service that survives the app moving to the background, ended honestly with `interrupted` if
+  the system's own six-hour-per-24-hour quota for that service type ever expires mid-job; on
+  iOS, every running job now holds a system background task (`beginBackgroundTask`) so a short
+  export usually finishes after the app is backgrounded, and resolves with `interrupted` — its
+  partial output deleted — when that extra time runs out or AVFoundation itself reports the
+  interruption. Neither platform requests a background entitlement or capability the host app
+  did not already have; macOS is unaffected (it is never suspended). See the README's
+  "Background execution and app suspension" section for the caller-facing contract.
 * **Background isolates (Phase 5)** — `CompressVideo.ensureInitializedInBackgroundIsolate
   (RootIsolateToken)` is new: call it as the first statement inside an `Isolate.run`/`compute`
   closure and every call in this package, including `compress()`, works from that isolate.
