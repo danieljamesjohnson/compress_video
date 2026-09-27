@@ -1,129 +1,119 @@
 ---
 phase: 05-jobs-isolates-and-background
-fixed_at: 2026-09-27T20:35:00Z
+fixed_at: 2026-09-27T22:10:00Z
 review_path: .planning/phases/05-jobs-isolates-and-background/05-REVIEW.md
-iteration: 2
-findings_in_scope: 3
-fixed: 3
+iteration: 3
+findings_in_scope: 1
+fixed: 1
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 5: Code Review Fix Report
 
-**Fixed at:** 2026-09-27T20:35:00Z
+**Fixed at:** 2026-09-27T22:10:00Z
 **Source review:** .planning/phases/05-jobs-isolates-and-background/05-REVIEW.md
-**Iteration:** 2
+**Iteration:** 3
 
 **Summary:**
-- Findings in scope: 3
-- Fixed: 3
+- Findings in scope: 1
+- Fixed: 1
 - Skipped: 0
 
-`fix_scope` was `critical_warning`. 05-REVIEW.md (iteration 2) reported 0 Critical and 3
-Warning findings (WR-01, WR-02, WR-03); all three were fixed.
+`fix_scope` was `critical_warning`. 05-REVIEW.md (iteration 3) reported 0 Critical and 1 Warning
+finding (WR-04); it was fixed. `workflow.use_worktrees` is `false` for this project, so this run
+edited and committed directly on `main` in the primary checkout -- no worktree was created and no
+worktree cleanup applies.
 
 ## Fixed Issues
 
-### WR-01: `JobRegistry.cancelAll()` (Android) can silently resurrect the bookkeeping D-17/CR-02 clears, for exactly the jobs it just cancelled
+### WR-04: Swift `JobRegistry.cancelAll()`'s reset can still race a still-unwinding cancelled job's belated `completeResult` call, leaking a `resultOutcomes` entry forever
 
-**Files modified:** `android/src/main/kotlin/com/danjjohnson/compress_video/JobRegistry.kt`, `android/src/test/kotlin/com/danjjohnson/compress_video/JobRegistryTest.kt`
-**Commit:** 843dc55
-**Applied fix:** `cancel(jobId)`'s `onCancelled` callback only completes a `CompletableDeferred`
-synchronously; the suspended `Compression.startCompress` call that actually calls
-`completeResult` resumes on a LATER main-Looper message (Pigeon dispatches every
-`CompressHostApi` call via the non-`.immediate` `Dispatchers.Main`). `cancelAll()`'s three
-`.clear()` calls previously ran and returned before that resumption, so the belated
-`completeResult` call silently re-added the jobId to `knownJobIds` via `resultDeferredFor`'s
-`getOrPut` -- defeating the D-17 guarantee for exactly the case (a job still in flight at
-detach) `cancelAll()` exists to handle.
+**Files modified:** `darwin/compress_video/Sources/compress_video/JobRegistry.swift`, `example/ios/RunnerTests/RunnerTests.swift`, `example/macos/RunnerTests/RunnerTests.swift`
+**Commit:** 52cba90
+**Applied fix:** Mirrored Android's `tornDownJobIds` guard (the same fix class WR-01 closed on
+the Kotlin side last iteration) in Swift. `cancelAll()`'s synchronous loop already captures
+`jobIdsBeingCancelled` before cancelling each job; its enqueued `Task { @MainActor in ... }` now
+adds that same array into a new `@MainActor`-isolated `tornDownJobIds: Set<String>` as its first
+step, before clearing `resultOutcomes`/`resultWaiters`/`knownJobIds`/`consumedJobIds`.
+`completeResult(jobId:result:)` now checks `tornDownJobIds.remove(jobId) != nil` first (before
+the existing `resultWaiters` waiter-delivery branch) and returns immediately, discarding the
+outcome, if the jobId was one this exact `cancelAll()` already tore down -- rather than falling
+through to `if resultOutcomes[jobId] == nil { resultOutcomes[jobId] = result }` and silently
+creating an unreachable entry for a job with no bookkeeping left to reference it and no
+guaranteed future `cancelAll()` to sweep it. `tornDownJobIds` is self-cleaning exactly like
+Android's set: each belated `completeResult` call removes its own entry, so it only ever holds
+jobIds currently unwinding from the most recent `cancelAll()`, never growing across the plugin's
+lifetime.
 
-Implemented the review's third suggested option (bypass the two-map bookkeeping for a
-cancelled-via-`cancelAll` job): added a self-cleaning `tornDownJobIds` set that `cancelAll()`
-populates with every jobId it cancels, before its `.clear()` calls run. `completeResult()` now
-checks (and removes from) `tornDownJobIds` first and discards the outcome for any jobId still
-present, instead of resurrecting `knownJobIds`/`resultDeferreds` bookkeeping `cancelAll()`
-already tore down. `tornDownJobIds` only ever holds entries for jobs currently unwinding from
-the most recent `cancelAll()` call -- it self-empties as each belated `completeResult` call
-arrives and is discarded, so it never grows across the app's lifetime.
+Extended the WR-03 XCTests in both `example/ios/RunnerTests/RunnerTests.swift` and
+`example/macos/RunnerTests/RunnerTests.swift` byte-identically with a new case,
+`testJobRegistryCancelAllDoesNotResurrectBookkeepingForALiveJobsBelatedCompleteResultCall`,
+mirroring Android's `cancelAll_doesNotResurrectBookkeeping_forALiveJobsBelatedCancellationCompletion`
+test added last iteration. Unlike the existing `cancelAll()` reset test (whose live job's
+`cancel` closure is a no-op that never calls `completeResult`), the new case's `LiveJob` is
+registered with a `cancel` closure that genuinely records its reason, then: calls `cancelAll()`;
+polls (as the existing test already does) until `isKnownJobId` confirms the enqueued reset `Task`
+has run; and only then calls `completeResult(jobId:result:)` for that same jobId, simulating
+`Compression.startCompress`'s own catch block resuming on a later main-queue turn than
+`cancelAll()`'s own call stack. Asserts `isKnownJobId` stays `false` across that belated call --
+the same indirect proof Android's test uses, since `resultOutcomes`/`resultDeferreds` are private
+on both platforms and neither test can inspect them directly. `diff` confirms both
+`RunnerTests.swift` files remain byte-identical after the edit.
 
-Added a new JVM regression test
-(`cancelAll_doesNotResurrectBookkeeping_forALiveJobsBelatedCancellationCompletion`) that
-registers a real `JobRegistry.LiveJob` (with `mainHandler`/`progressRunnable` Mockito-mocked,
-since this is a plain JVM test with no Robolectric shadow layer and a real `Handler` would
-throw against the unmocked Android stub jar), calls `cancelAll()`, asserts `isKnownJobId` is
-already `false`, then simulates the belated `completeResult` call the real cancellation
-completion would trigger later and asserts `isKnownJobId` stays `false` across it -- the
-regression class the existing empty-`jobs` test could not catch. Verified:
-`:compress_video:testDebugUnitTest` (all `JobRegistryTest` cases pass, including the new one,
-with no compiler warnings) and the full Android unit test suite (all suites pass).
+**Verification caveat:** no Swift toolchain is available on danserver, and this run did not
+attempt to reach the MacBook Air (this fix ran in the foreground, as instructed, not as an
+autonomous/background task that could have justified the round-trip). Verified by careful manual
+re-reading against the surrounding file's existing `@MainActor`/actor-isolation patterns (Tier 1)
+and a brace/paren-balance check across all three modified files (Tier 3 fallback -- no
+`node`/`python`-equivalent syntax checker exists for Swift; counts matched pre- and post-edit).
+All verification and the commit ran in the main checkout at
+`/home/dan/CodeProjects/compress-video` (no worktree -- `workflow.use_worktrees` is `false`), so
+these results are reproducible directly from that tree. This matches the same caveat iterations 1
+and 2 recorded for this phase's Swift-side fixes, and should be confirmed by CI's macOS/iOS jobs
+or a MacBook Air run before this finding is considered fully closed on the Apple side.
 
-### WR-02: iOS/macOS `JobRegistry.cancelAll()` never resets `knownJobIds`/`consumedJobIds`/`resultOutcomes`/`resultWaiters` -- Android's D-17 cleanup has no Swift counterpart
-
-**Files modified:** `darwin/compress_video/Sources/compress_video/JobRegistry.swift`
-**Commit:** 7af5d26
-**Applied fix:** Added the same four-collection reset Android's `cancelAll()` performs
-(`resultOutcomes`, `resultWaiters`, `knownJobIds`, `consumedJobIds`). These four collections
-are `@MainActor`-isolated (unlike `jobs`, which is plain `nonisolated` state), so the reset
-runs inside a `Task { @MainActor in ... }` that `cancelAll()` enqueues -- the same
-fire-and-forget hop-to-MainActor pattern already used elsewhere in this package
-(`Compression.swift`'s progress-forwarding `Task { @MainActor [flutterApi] in ... }`) -- rather
-than making `cancelAll()` itself `async`/`@MainActor`, which would force its two plain,
-non-`async` `FlutterPlugin` call sites (iOS's `detachFromEngine(for:)`, macOS's
-`handleWillTerminate(_:)`) to become `@MainActor`-isolated too, a change outside this fix's
-scope and not something the review's own suggested snippet (a bare synchronous
-`.removeAll()` sequence) would have compiled as written given `cancelAll()`'s existing
-signature.
-
-Every continuation in `resultWaiters` is drained and resumed with a typed `CompressVideoError`
-(`code: "unknown"`) before the dictionary is cleared, rather than dropped by a bare
-`.removeAll()` -- an unresumed `CheckedContinuation` is a Swift Concurrency runtime misuse (it
-must be resumed exactly once), so silently discarding it the way Android's plain,
-continuation-free bookkeeping safely can is not an option on this platform.
-
-### WR-03: The new CR-02 `JobRegistry`/`Compression` additions have zero dedicated test coverage on iOS/macOS
-
-**Files modified:** `example/ios/RunnerTests/RunnerTests.swift`, `example/macos/RunnerTests/RunnerTests.swift`
-**Commit:** 547a9b8
-**Applied fix:** Added 5 new XCTest cases to the `// MARK: - JobRegistry` section, mirroring
-`JobRegistryTest.kt`'s 4 cases plus explicit coverage of the `resultWaiters` waiter-delivery
-branch `completeResult` also has (a code path Kotlin's `CompletableDeferred`-based design has
-no equivalent branch for): `registerJob` makes a jobId known but not consumed; a fresh jobId is
-not known; `completeResult` (stash) then `awaitResult` returns the outcome and marks it
-consumed; `awaitResult` called first is resumed by a later `completeResult` call (the
-waiter-delivery branch, using a `@MainActor`-isolated test plus a same-executor enqueued `Task`
-to deterministically force that ordering without a race); and `cancelAll()` resets
-known/consumed bookkeeping for both a genuinely live, cancelled job and a CR-02-only-registered
-one (this last case also directly proves the WR-02 fix above, polling briefly since
-`cancelAll()`'s reset now runs on an enqueued `Task`).
-
-Added byte-identically to `example/ios/RunnerTests/RunnerTests.swift` and
-`example/macos/RunnerTests/RunnerTests.swift` (`diff` confirms identical after every edit,
-matching this file's own existing convention and CI's diff check).
-
-**Verification caveat (applies to all three fixes above):** no Swift toolchain is available on
-danserver, and this run did not attempt to reach the MacBook Air. The Swift changes in
-`JobRegistry.swift` and both `RunnerTests.swift` files were verified by careful manual
-re-reading (Tier 1: type/actor-isolation correctness against the surrounding file and its
-existing `@MainActor` patterns) and a brace-balance check (`grep -c '{' `/`'}'`, equal on all
-three files), not by an actual `swiftc`/Xcode build. This matches the same caveat iteration 1's
-WR-01 fix (Android+Swift `awaitCompressResult` guard) recorded, and should be confirmed by
-CI's macOS/iOS jobs before these three findings are considered fully closed on the Apple side.
-The Android side of WR-01 (this iteration's own JobRegistry.kt/JobRegistryTest.kt changes) was
-fully compiled and test-run locally via `:compress_video:testDebugUnitTest`, with no caveat.
-
-`flutter analyze --fatal-infos --fatal-warnings` (no issues), `flutter test` (100/100 passing),
-`dart format` (0 files changed, checked with the `flutter-stable` SDK per project convention),
-and `:compress_video:testDebugUnitTest` (full Android suite, all passing) were all re-run after
-every fix in this iteration -- none affected by, or affecting, these changes beyond the two new
-`JobRegistryTest.kt` cases already covered above.
+`flutter analyze`/`flutter test`/`dart format` were not re-run for this iteration since no Dart
+source changed -- only `darwin/` Swift sources and the two `RunnerTests.swift` XCTest files,
+neither of which those Dart-toolchain gates cover.
 
 ## Skipped Issues
 
-None -- all three findings in scope were fixed.
+None -- the one finding in scope was fixed.
+
+## Post-fix CI follow-up (same pass, coordinator-directed)
+
+CI run 36341131702 reported the plugin itself compiles, but both `RunnerTests.swift` files
+failed to compile: `RunnerTests.swift:1432/1439/1441/1443`, `"'await' in an autoclosure that does
+not support concurrency"` and `"call to main actor-isolated static method 'isKnownJobId'/
+'isConsumedJobId' in a synchronous nonisolated context"`.
+
+**Root cause:** `XCTAssert*`'s condition/message parameters, and the `||` operator's
+right-hand-side parameter, are plain (non-`async`) `@autoclosure`s. Writing `await
+JobRegistry.isKnownJobId(...)` directly inside either one is rejected by the compiler even though
+the enclosing test method is itself `async` -- the `await` needs a local `let` binding first.
+
+**Commit:** 9278860 (`fix(05): XCTests bind main-actor JobRegistry calls before asserting`)
+
+**Files modified:** `example/ios/RunnerTests/RunnerTests.swift`, `example/macos/RunnerTests/RunnerTests.swift`
+
+**Lines fixed** (pre-existing iteration-2 test `testJobRegistryCancelAllResetsKnownAndConsumedJobIdBookkeeping`, plus this iteration's own new WR-04 test):
+- The `stillKnown = (await ...) || (await ...)` polling-loop line -- split into two bound `let`s (`liveStillKnown`, `otherStillKnown`) before the `||`.
+- `XCTAssertFalse(await JobRegistry.isKnownJobId(liveJobId), ...)` -- bound to `liveKnownAfterReset` first.
+- `XCTAssertFalse(await JobRegistry.isKnownJobId(knownJobId), ...)` -- bound to `knownAfterReset` first.
+- `XCTAssertFalse(await JobRegistry.isConsumedJobId(consumedJobId), ...)` -- bound to `consumedAfterReset` first.
+- This iteration's own new `testJobRegistryCancelAllDoesNotResurrectBookkeepingForALiveJobsBelatedCompleteResultCall`'s final `XCTAssertFalse(await JobRegistry.isKnownJobId(jobId), ...)` -- bound to `knownAfterBelatedCompleteResult` first (had the identical bug, introduced in this same iteration's WR-04 commit before this follow-up).
+
+No other `await`-inside-autoclosure sites were found elsewhere in either file (checked every
+`XCTAssert*` call and every `||`/`&&` use across both `// MARK: - JobRegistry` sections).
+`example/ios/RunnerTests/RunnerTests.swift` was edited directly, then copied byte-for-byte onto
+`example/macos/RunnerTests/RunnerTests.swift`; `diff` confirms both files remain identical, and a
+brace/paren-balance check (open/close counts equal) passed on both post-edit. Same verification
+caveat as above applies: no Swift toolchain on danserver, so this was not compiled locally --
+CI's next run against commit 9278860 is the actual confirmation.
 
 ---
 
-_Fixed: 2026-09-27T20:35:00Z_
+_Fixed: 2026-09-27T22:10:00Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
