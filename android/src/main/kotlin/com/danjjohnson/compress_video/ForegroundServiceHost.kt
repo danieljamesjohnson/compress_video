@@ -56,6 +56,15 @@ class ForegroundServiceHost : Service() {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING,
         )
+        if (ref.hostedCount == 0) {
+            // CR-01: startForegroundService() is asynchronous -- this callback can run after
+            // the one (and only) job that triggered the start has already fully detached
+            // again. Re-evaluate the hosted count here rather than trusting the state at the
+            // moment attach() fired the start: with nothing left hosted, stop immediately
+            // instead of leaving a zero-job service running in the foreground state with
+            // nothing left registered to ever stop it.
+            stopSelf(startId)
+        }
         return START_NOT_STICKY
     }
 

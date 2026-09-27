@@ -40,6 +40,25 @@ internal class ForegroundServiceHostTest {
         assertEquals(0, ref.hostedCount)
     }
 
+    /**
+     * CR-01 regression: the exact race is a single job attaching and then fully detaching
+     * again before the deferred `onCreate()`/`onStartCommand()` from the asynchronous
+     * `startForegroundService()` call it triggered has actually run. The real
+     * `onStartCommand` guards against this by checking `ref.hostedCount == 0` and stopping
+     * immediately when it is -- this proves the bookkeeping that check relies on: a single
+     * attach immediately undone by its matching detach must leave nothing hosted.
+     */
+    @Test
+    fun singleAttachThenDetach_leavesZeroHostedJobs_forADeferredStartCommandToObserve() {
+        val ref = ForegroundServiceHost.Ref()
+
+        ref.attach("job-a")
+        val shouldStop = ref.detach("job-a")
+
+        assertTrue(shouldStop, "the only hosted job detaching must signal a stop")
+        assertEquals(0, ref.hostedCount, "onStartCommand's hostedCount == 0 check relies on this")
+    }
+
     @Test
     fun detachingAnUnknownJobId_isANoOp() {
         val ref = ForegroundServiceHost.Ref()
