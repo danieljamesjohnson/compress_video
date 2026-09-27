@@ -108,6 +108,26 @@ class Compression(
     override suspend fun awaitCompressResult(jobId: String): CompressResultMessage {
         requireMainLooper("awaitCompressResult")
         requireValidJobId(jobId)
+        // CR-02: requireValidJobId only checks the <counter>-<hex> FORMAT, not whether
+        // startCompress was ever called for this jobId. Without this guard, a well-formed but
+        // unknown or already-consumed jobId would fall straight into
+        // JobRegistry.resultDeferredFor's `getOrPut`, which manufactures a brand-new deferred
+        // that nothing will ever complete -- an unbounded hang with no typed error, directly
+        // contradicting this project's "never hangs, never returns null" core value.
+        if (JobRegistry.isConsumedJobId(jobId)) {
+            throw CompressVideoError(
+                "unknown",
+                "awaitCompressResult called again for jobId \"$jobId\", whose result was already " +
+                    "consumed by an earlier awaitCompressResult call",
+            )
+        }
+        if (!JobRegistry.isKnownJobId(jobId)) {
+            throw CompressVideoError(
+                "unknown",
+                "awaitCompressResult called for unknown jobId \"$jobId\": startCompress was never " +
+                    "called for it",
+            )
+        }
         val outcome = JobRegistry.resultDeferredFor(jobId).await()
         JobRegistry.forgetResult(jobId)
         return outcome.getOrElse { throw it }

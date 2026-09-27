@@ -87,6 +87,11 @@ final class Compression: CompressHostApi {
   {
     try Self.requireValidJobId(jobId)
     try Arguments.requireValidCompressRequest(request)
+    // CR-02: registered BEFORE any async work below, mirroring Android's Compression.kt
+    // (`JobRegistry.resultDeferredFor(jobId)` at the same point) -- so a concurrent
+    // awaitCompressResult(jobId) call, issued by a caller on a background isolate right after
+    // this call fires, is told apart from one for a jobId nothing ever started.
+    await JobRegistry.registerJob(jobId: jobId)
     do {
       let result = try await Self.runCompress(
         path: path, jobId: jobId, request: request, flutterApi: flutterApi, engine: engine)
@@ -111,6 +116,31 @@ final class Compression: CompressHostApi {
   /// hatch Pigeon's cross-platform contract promises regardless.
   func awaitCompressResult(jobId: String) async throws -> CompressResultMessage {
     try Self.requireValidJobId(jobId)
+    // CR-02: requireValidJobId only checks the <counter>-<hex> FORMAT, not whether
+    // startCompress was ever called for this jobId. Without this guard, a well-formed but
+    // unknown or already-consumed jobId would fall straight into JobRegistry.awaitResult's
+    // `withCheckedThrowingContinuation`, appending a continuation nothing will ever resume --
+    // an unbounded hang with no typed error, directly contradicting this project's "never
+    // hangs, never returns null" core value.
+    if await JobRegistry.isConsumedJobId(jobId) {
+      throw CompressVideoError(
+        code: "unknown",
+        message:
+          "awaitCompressResult called again for jobId \"\(jobId)\", whose result was already "
+          + "consumed by an earlier awaitCompressResult call",
+        details: nil
+      )
+    }
+    let known = await JobRegistry.isKnownJobId(jobId)
+    if !known {
+      throw CompressVideoError(
+        code: "unknown",
+        message:
+          "awaitCompressResult called for unknown jobId \"\(jobId)\": startCompress was never "
+          + "called for it",
+        details: nil
+      )
+    }
     return try await JobRegistry.awaitResult(jobId: jobId)
   }
 

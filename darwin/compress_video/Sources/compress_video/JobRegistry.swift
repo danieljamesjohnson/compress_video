@@ -126,6 +126,43 @@ enum JobRegistry {
   @MainActor private static var resultWaiters:
     [String: [CheckedContinuation<CompressResultMessage, Error>]] = [:]
 
+  /// Every job id `registerJob` has ever been called for (CR-02), kept even after its outcome
+  /// is delivered and consumed -- mirrors Android's `JobRegistry.kt` `knownJobIds`. Backs
+  /// `isKnownJobId`: the guard `Compression.awaitCompressResult` checks before ever calling
+  /// `awaitResult`, which would otherwise happily append a continuation to `resultWaiters` that
+  /// nothing will ever resume for a jobId nothing ever started.
+  @MainActor private static var knownJobIds: Set<String> = []
+
+  /// Every job id whose outcome has already been delivered to a caller once -- either via
+  /// `awaitResult` removing it from `resultOutcomes`, or via `completeResult` resuming an
+  /// already-registered waiter (CR-02). Mirrors Android's `JobRegistry.kt` `consumedJobIds`.
+  /// Backs `isConsumedJobId`: a second `awaitCompressResult` call for the same jobId fails typed
+  /// instead of appending a continuation nothing will ever resume a second time.
+  @MainActor private static var consumedJobIds: Set<String> = []
+
+  /// Registers `jobId` as known -- must be called by `Compression.startCompress` before any
+  /// async work begins (mirrors Android's `resultDeferredFor` pre-registration, called at the
+  /// same point in `Compression.kt`), so a concurrent `awaitCompressResult` call for this jobId
+  /// is told apart from one for a jobId nothing ever started (CR-02).
+  @MainActor static func registerJob(jobId: String) {
+    knownJobIds.insert(jobId)
+  }
+
+  /// True if `registerJob` was ever called for `jobId` -- i.e. one `Compression.startCompress`
+  /// pre-registered -- regardless of whether its outcome has since been consumed. `false` for a
+  /// jobId nothing ever started, the CR-02 guard `Compression.awaitCompressResult` checks before
+  /// ever calling `awaitResult`.
+  @MainActor static func isKnownJobId(_ jobId: String) -> Bool {
+    knownJobIds.contains(jobId)
+  }
+
+  /// True once `jobId`'s outcome has already been delivered to a caller once (CR-02) -- i.e. a
+  /// second `awaitCompressResult` call for the same jobId. Checked before `isKnownJobId` so the
+  /// two cases get distinct, diagnosable error messages instead of both silently hanging.
+  @MainActor static func isConsumedJobId(_ jobId: String) -> Bool {
+    consumedJobIds.contains(jobId)
+  }
+
   /// Completes `jobId`'s outcome with `result` -- delivered immediately to every continuation
   /// already waiting (`awaitResult` called first), or stashed for a not-yet-arrived
   /// `awaitResult` call to claim (the job finished first) -- a no-op if `jobId`'s outcome was
@@ -135,6 +172,11 @@ enum JobRegistry {
   @MainActor static func completeResult(jobId: String, result: Result<CompressResultMessage, Error>)
   {
     if let waiters = resultWaiters.removeValue(forKey: jobId), !waiters.isEmpty {
+      // CR-02: this jobId's outcome is delivered exactly once here -- nothing will ever call
+      // completeResult for it again, so mark it consumed the same way the resultOutcomes path
+      // below does, rather than leaving a later awaitCompressResult call free to register a
+      // waiter that will never be resumed.
+      consumedJobIds.insert(jobId)
       for waiter in waiters {
         waiter.resume(with: result)
       }
@@ -146,9 +188,13 @@ enum JobRegistry {
   }
 
   /// Awaits `jobId`'s terminal outcome, returning immediately if `completeResult` already ran
-  /// for it, otherwise suspending until it does. Backs `Compression.awaitCompressResult`.
+  /// for it, otherwise suspending until it does. Backs `Compression.awaitCompressResult`, which
+  /// must confirm `isKnownJobId`/`isConsumedJobId` (CR-02) before ever calling this -- unlike
+  /// those checks, this method itself still has no way to distinguish "known, not yet finished"
+  /// from "unknown" once it reaches the continuation branch.
   @MainActor static func awaitResult(jobId: String) async throws -> CompressResultMessage {
     if let outcome = resultOutcomes.removeValue(forKey: jobId) {
+      consumedJobIds.insert(jobId)
       return try outcome.get()
     }
     return try await withCheckedThrowingContinuation { continuation in

@@ -133,8 +133,12 @@ object JobRegistry {
         }
         // Also clears any completed-but-unconsumed result deferreds (D-17): a background-isolate
         // job's caller that never got around to calling awaitCompressResult should not keep this
-        // plugin's own map entries alive past detach.
+        // plugin's own map entries alive past detach. knownJobIds/consumedJobIds (CR-02) reset
+        // alongside it, so a jobId from before detach is simply unknown afterwards rather than
+        // stuck reporting a stale "already consumed" outcome.
         resultDeferreds.clear()
+        knownJobIds.clear()
+        consumedJobIds.clear()
     }
 
     /**
@@ -171,13 +175,50 @@ object JobRegistry {
     private val resultDeferreds = LinkedHashMap<String, CompletableDeferred<Result<CompressResultMessage>>>()
 
     /**
+     * Every job id [resultDeferredFor] has ever been called for, kept even after [forgetResult]
+     * removes the completed deferred from [resultDeferreds] (CR-02). Backs [isKnownJobId]: the
+     * guard that stops [Compression.awaitCompressResult] from manufacturing a fresh, never-to-
+     * complete deferred (via `getOrPut`) for a jobId nothing ever started.
+     */
+    private val knownJobIds = LinkedHashSet<String>()
+
+    /**
+     * Every job id [forgetResult] has been called for -- i.e. one whose result was already
+     * consumed by a previous [Compression.awaitCompressResult] call (CR-02). Backs
+     * [isConsumedJobId], so a second call for the same jobId fails typed instead of hanging on a
+     * freshly manufactured deferred that nothing will ever complete a second time.
+     */
+    private val consumedJobIds = LinkedHashSet<String>()
+
+    /**
      * Returns (creating on first call for [jobId]) the deferred that will resolve to [jobId]'s
      * terminal outcome. Safe to call from either [Compression.startCompress] (to pre-register
      * before the job's own async work starts) or [Compression.awaitCompressResult] (to await
-     * it) -- both run on the main thread, so `getOrPut` here is not racing itself.
+     * it, once it has confirmed via [isKnownJobId]/[isConsumedJobId] that [jobId] is actually
+     * awaitable) -- both run on the main thread, so `getOrPut` here is not racing itself.
      */
-    fun resultDeferredFor(jobId: String): CompletableDeferred<Result<CompressResultMessage>> =
-        resultDeferreds.getOrPut(jobId) { CompletableDeferred() }
+    fun resultDeferredFor(jobId: String): CompletableDeferred<Result<CompressResultMessage>> {
+        knownJobIds.add(jobId)
+        return resultDeferreds.getOrPut(jobId) { CompletableDeferred() }
+    }
+
+    /**
+     * True if [jobId] is one [resultDeferredFor] was ever called for -- i.e. one
+     * [Compression.startCompress] pre-registered -- regardless of whether its result has since
+     * been forgotten via [forgetResult]. `false` for a jobId nothing ever started, which is the
+     * CR-02 guard [Compression.awaitCompressResult] checks before ever calling
+     * [resultDeferredFor], which would otherwise happily manufacture a deferred for it that
+     * nothing will ever complete.
+     */
+    fun isKnownJobId(jobId: String): Boolean = jobId in knownJobIds
+
+    /**
+     * True once [forgetResult] has removed [jobId]'s completed result -- i.e. a second
+     * [Compression.awaitCompressResult] call for a job whose outcome was already consumed once
+     * (CR-02). Checked before [isKnownJobId] so the two cases get distinct, diagnosable error
+     * messages instead of both silently hanging.
+     */
+    fun isConsumedJobId(jobId: String): Boolean = jobId in consumedJobIds
 
     /**
      * Completes [jobId]'s result deferred with [result] -- a no-op if it is already completed,
@@ -196,8 +237,13 @@ object JobRegistry {
         }
     }
 
-    /** Forgets [jobId]'s result deferred once consumed by [awaitCompressResult]. */
+    /**
+     * Forgets [jobId]'s result deferred once consumed by [awaitCompressResult], and marks it
+     * [isConsumedJobId] (CR-02) so a second call for the same jobId fails typed instead of
+     * hanging on a freshly manufactured deferred.
+     */
     fun forgetResult(jobId: String) {
         resultDeferreds.remove(jobId)
+        consumedJobIds.add(jobId)
     }
 }
