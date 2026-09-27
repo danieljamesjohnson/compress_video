@@ -421,6 +421,68 @@ for a file that was actually the untouched original, masking exactly this failur
 dishonest flag. Fixed to match `TransformerEngine.finishSuccess`'s own identical guard on
 Android.
 
+## Hard-input parity exclusions (04-05)
+
+`example/integration_test/hard_inputs_test.dart` gained its own `_compressionParity` accumulator
+and `PARITY_JSON` emission in 04-05, extending `tool/check_parity.sh`'s `COMPRESSION_EXACT_FIELDS`
+with `toneMapped`/`hevcFallback`. Per this plan's own instruction, **a case is only wired into the
+accumulator when this phase's own CI evidence (04-01 through 04-04's SUMMARY files) shows all
+three legs — the Android emulator, the iOS simulator and the macOS host — reported identical
+values for every field being recorded.** Every other case in this suite is deliberately never
+emitted, the same way `truncated_mdat.mp4`'s error-reason divergence above is deliberately never
+emitted, and is named here with its reason so the omission is a written decision, not something
+indistinguishable from an oversight six months later.
+
+**Recorded:** `surround51_480p` (`transmuxed: false`, `audioReencoded: true`, `audioCodec: 'aac'`,
+`channels: 2`), `pcm_audio_480p` (`audioReencoded: true`, `audioCodec: 'aac'`), `noaudio_720p`
+(`audioReencoded: false`) — all three are 04-04-SUMMARY.md's own "strong candidates": the unusual
+audio and no-audio cases passed identically on every platform from the first attempt that ran the
+suite at all, per that summary's own case-by-case accounting. `surround51_480p`'s `outputBytes` is
+NOT itself a recorded field (it is not in `COMPRESSION_EXACT_FIELDS`); the few-percent Android/
+Apple byte delta 04-04-SUMMARY.md measured (`outputBytes=319886` Android vs `~337,123–342,568`
+Apple) is well inside the existing `outputBytes` `+/-50%` envelope documented above, so no new
+tolerance was needed for it.
+
+**Excluded — HDR tone-map with default options (`hdr_hlg10`, `hdr_pq10`):** a genuine platform
+capability divergence, not a difference this gate should tolerate. On the `compress_video_api35`
+Android emulator both tone-map attempts exhaust (a typed `unsupportedInput` `CompressVideoException`
+— see the HDR tone-mapping section above), so no `CompressResult` is ever produced at all. On
+Apple, the reader's own 8-bit BGRA decode path makes the system tone-map automatically (Phase 3
+D-08), so the export succeeds and reports `toneMapped: true`. One platform throws where the other
+returns a result — there is no field-level comparison that could express this honestly; forcing
+one would either fail the whole suite on a documented environment limitation or require excluding
+the field entirely, hiding a real regression in either direction.
+
+**Excluded — `HdrMode.keepHdr` (`hdr_hlg10`, `hdr_pq10`):** the entire design of this case is that
+the keep branch and the fallback/exhausted branch are BOTH legitimate outcomes depending on
+hardware capability. 04-04-SUMMARY.md's own CI evidence (run 36279264836) shows the macOS host
+taking `KEEP_HDR_BRANCH=keep` (real HEVC Main10 HDR output) while the iOS simulator takes
+`KEEP_HDR_BRANCH=fallback` on both clips, and the Android emulator exhausts the same OpenGL-then-
+MediaCodec chain the plain tone-map case above does. Recording this case would either force a
+false cross-platform failure (a capable device disagreeing with an incapable one is not a bug) or
+require a tolerance wide enough to accept "keep" and "fallback" as equivalent, which would hide a
+genuine regression on the capable branch.
+
+**Excluded — HEVC opt-in (`portrait_hibitrate_1080p60` with `VideoCodec.hevc`):** the same
+capability-dependent divergence as keep-HDR, one layer simpler. 04-04-SUMMARY.md's CI evidence
+shows the macOS host reporting `HEVC_BRANCH=success` (a genuine hardware HEVC encode) while the
+Android emulator and iOS simulator both report `HEVC_BRANCH=fallback` (`hevcFallback: true`,
+H.264 output) — neither is wrong, and gating on it would fail every run on every environment this
+project's CI actually has access to.
+
+**Excluded — `uhd_4k60` (default options):** unlike the recorded audio cases, this test's own body
+is written as an `if (result.usedOriginal) { ... } else { ... }` branch specifically because the
+never-larger outcome is not asserted to be a single value — the test itself hedges. This clip's
+resolved encode sits close to the never-larger boundary (a 4K60 source capped down to the p720
+preset), and `doc/PRESETS.md`'s own measured, opposite-direction encoder-delivery characteristics
+(Android's emulator undershoots a nominal bitrate target to ~71%, while both Apple devices
+overshoot it 103-110%) mean a marginal case like this one is not known, from this phase's own
+evidence, to land on the same side of the never-larger threshold on every platform. Recording it
+without that evidence would risk either a spurious cross-platform failure on a legitimate
+encoder-delivery difference, or silently accepting a real regression under a tolerance wide enough
+to paper over it. This case is a candidate for a future plan to record explicitly once a
+per-platform `usedOriginal` observation is captured from a real CI run and confirmed to agree.
+
 ## Reserved slots
 
 `hdr_dolbyvision_p8.mp4` (Dolby Vision profile 8) is a **reserved name, not a generated file**.

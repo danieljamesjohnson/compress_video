@@ -246,6 +246,69 @@ else
   echo "PASS: a compression case present on only one platform correctly fails loudly (FATAL, T-03-35)"
 fi
 
+# --- toneMapped / hevcFallback (04-05, CDEC-01/02/03): fixture cases proving check_parity.sh's
+# extended COMPRESSION_EXACT_FIELDS list catches a divergence in either new field, in both
+# directions (a matching pair passes, a flipped value fails naming the field) -- the same
+# both-directions proof every other exact field above already gets.
+
+# Case 11: toneMapped matching (both true) plus hevcFallback matching (both false). Must PASS.
+{
+  echo 'PARITY_JSON {"compression":{"hdr_ok":{"toneMapped":true,"hevcFallback":false}}}'
+} > "$TMP/a_compression_hdr_ok.txt"
+{
+  echo 'PARITY_JSON {"compression":{"hdr_ok":{"toneMapped":true,"hevcFallback":false}}}'
+} > "$TMP/b_compression_hdr_ok.txt"
+
+if PARITY_CORPUS_DIR="$TMP/corpus" bash "$SCRIPT_DIR/check_parity.sh" "$TMP/a_compression_hdr_ok.txt" "$TMP/b_compression_hdr_ok.txt" > "$TMP/compression_hdr_ok.out" 2>&1; then
+  echo "PASS: matching toneMapped/hevcFallback fixture correctly passes"
+else
+  echo "SELF-TEST FAILED: expected the matching toneMapped/hevcFallback fixture to PASS. Output:" >&2
+  cat "$TMP/compression_hdr_ok.out" >&2
+  FAILED=1
+fi
+
+# Case 12: toneMapped flipped (true vs false), hevcFallback still matching. Must FAIL naming
+# toneMapped specifically.
+{
+  echo 'PARITY_JSON {"compression":{"tonemap_bad":{"toneMapped":true,"hevcFallback":false}}}'
+} > "$TMP/a_compression_tonemap.txt"
+{
+  echo 'PARITY_JSON {"compression":{"tonemap_bad":{"toneMapped":false,"hevcFallback":false}}}'
+} > "$TMP/b_compression_tonemap.txt"
+
+if PARITY_CORPUS_DIR="$TMP/corpus" bash "$SCRIPT_DIR/check_parity.sh" "$TMP/a_compression_tonemap.txt" "$TMP/b_compression_tonemap.txt" > "$TMP/compression_tonemap.out" 2>&1; then
+  echo "SELF-TEST FAILED: expected the flipped-toneMapped fixture to FAIL. Output:" >&2
+  cat "$TMP/compression_tonemap.out" >&2
+  FAILED=1
+elif ! grep -q 'compression.tonemap_bad.toneMapped' "$TMP/compression_tonemap.out"; then
+  echo "SELF-TEST FAILED: flipped-toneMapped failure did not name the field. Output:" >&2
+  cat "$TMP/compression_tonemap.out" >&2
+  FAILED=1
+else
+  echo "PASS: flipped toneMapped correctly fails and names compression.tonemap_bad.toneMapped"
+fi
+
+# Case 13 (teeth demonstration, plan-required): hevcFallback flipped (false vs true), toneMapped
+# still matching. Must FAIL naming hevcFallback specifically.
+{
+  echo 'PARITY_JSON {"compression":{"hevc_bad":{"toneMapped":false,"hevcFallback":false}}}'
+} > "$TMP/a_compression_hevcfallback.txt"
+{
+  echo 'PARITY_JSON {"compression":{"hevc_bad":{"toneMapped":false,"hevcFallback":true}}}'
+} > "$TMP/b_compression_hevcfallback.txt"
+
+if PARITY_CORPUS_DIR="$TMP/corpus" bash "$SCRIPT_DIR/check_parity.sh" "$TMP/a_compression_hevcfallback.txt" "$TMP/b_compression_hevcfallback.txt" > "$TMP/compression_hevcfallback.out" 2>&1; then
+  echo "SELF-TEST FAILED: expected the flipped-hevcFallback fixture to FAIL. Output:" >&2
+  cat "$TMP/compression_hevcfallback.out" >&2
+  FAILED=1
+elif ! grep -q 'compression.hevc_bad.hevcFallback' "$TMP/compression_hevcfallback.out"; then
+  echo "SELF-TEST FAILED: flipped-hevcFallback failure did not name the field. Output:" >&2
+  cat "$TMP/compression_hevcfallback.out" >&2
+  FAILED=1
+else
+  echo "PASS: flipped hevcFallback correctly fails and names compression.hevc_bad.hevcFallback (04-05 teeth demonstration)"
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   echo "check_parity.sh self-test: FAILED" >&2
   exit 1

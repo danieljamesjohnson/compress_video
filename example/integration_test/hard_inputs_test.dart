@@ -8,6 +8,7 @@
 // This plan (04-01) does NOT emit a cross-platform parity record: the Apple engine cannot yet
 // produce matching values for these clips, and the parity gate treats a case present on one
 // platform only as a failure. Emission is added in 04-05, once both engines agree.
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -17,6 +18,43 @@ import 'package:compress_video/compress_video.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+
+/// Accumulates one `CompressResult`-shaped record per named compression case under a single
+/// "compression" top-level key (03-08, D-16; this plan's own copy of compress_test.dart's
+/// `_compressionParity`, per this repository's no-shared-test-helpers convention). Extended over
+/// that file's field set with `toneMapped`/`hevcFallback` (04-05, CDEC-01/02/03) since this suite
+/// is the only one that ever exercises either flag as a non-default value.
+///
+/// **Only cases where all three platforms are known, from this phase's own CI evidence, to
+/// report identical values for every recorded field are given a call to
+/// [_recordCompressionParity] at all** (04-05-PLAN.md task 1's own instruction: "a case records
+/// only when all three legs reported identical values for the fields being recorded"). Every
+/// case that is NOT recorded here is named with its reason in `corpus/README.md`'s "Hard-input
+/// parity exclusions" section -- an exclusion nobody wrote down is indistinguishable from an
+/// oversight six months later.
+final SplayTreeMap<String, dynamic> _compressionParity =
+    SplayTreeMap<String, dynamic>();
+
+void _recordCompressionParity(
+  String caseName, {
+  bool? transmuxed,
+  bool? usedOriginal,
+  bool? audioReencoded,
+  bool? toneMapped,
+  bool? hevcFallback,
+  String? audioCodec,
+  int? channels,
+}) {
+  final SplayTreeMap<String, dynamic> record = SplayTreeMap<String, dynamic>();
+  if (transmuxed != null) record['transmuxed'] = transmuxed;
+  if (usedOriginal != null) record['usedOriginal'] = usedOriginal;
+  if (audioReencoded != null) record['audioReencoded'] = audioReencoded;
+  if (toneMapped != null) record['toneMapped'] = toneMapped;
+  if (hevcFallback != null) record['hevcFallback'] = hevcFallback;
+  if (audioCodec != null) record['audioCodec'] = audioCodec;
+  if (channels != null) record['channels'] = channels;
+  _compressionParity[caseName] = record;
+}
 
 // 04-02: this plan adds real compression cases (HDR tone-map, fidelity, unusual audio, 4K60)
 // alongside 04-01's media-info-only cases above. Through 04-03, every new case asserted
@@ -484,6 +522,17 @@ void main() {
 
   const CompressVideo compressVideo = CompressVideo();
 
+  // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
+  // (03-08, D-16; extended 04-05 with toneMapped/hevcFallback) can diff exactly what this
+  // platform observed against the other two platforms' own PARITY_JSON lines from this same
+  // suite. Mirrors compress_test.dart's/compress_audio_test.dart's identical tearDownAll idiom.
+  tearDownAll(() {
+    // ignore: avoid_print
+    print(
+      'PARITY_JSON ${jsonEncode(<String, dynamic>{'compression': _compressionParity})}',
+    );
+  });
+
   group('HDR clips report isHdr from a real platform media-info call', () {
     testWidgets(
       'hdr_hlg10.mp4 (HEVC Main10, HLG) reports isHdr, dimensions and codec',
@@ -594,6 +643,11 @@ void main() {
 
         final Map<String, dynamic> sidecar = await _loadSidecar(clipName);
         await _expectHdrFidelity(compressVideo, result, sidecar);
+        // NOT recorded in PARITY_JSON (04-05): this case's own two branches (a CompressResult
+        // here, a CompressVideoException below) are exactly the capability-dependent divergence
+        // corpus/README.md's "Hard-input parity exclusions" documents -- the Android emulator
+        // exhausts the fallback chain (catch branch) while Apple's engine tone-maps at decode
+        // time and succeeds (this branch), so the two platforms cannot emit a comparable record.
       } on CompressVideoException catch (e) {
         expect(
           e.reason,
@@ -688,6 +742,12 @@ void main() {
           );
           expect(outputInfo.isHdr, isTrue);
         }
+        // NOT recorded in PARITY_JSON (04-05): the whole point of this case is that the keep
+        // branch and the fallback branch are BOTH legitimate outcomes depending on hardware
+        // capability -- the macOS host takes "keep", the Android emulator and iOS simulator take
+        // "fallback"/"exhausted" (04-04-SUMMARY.md). Recording it would either force a false
+        // failure across platforms or require a tolerance that hides a real HDR regression. See
+        // corpus/README.md's "Hard-input parity exclusions".
       } on CompressVideoException catch (e) {
         // ignore: avoid_print
         print('KEEP_HDR_BRANCH=exhausted');
@@ -754,6 +814,18 @@ void main() {
               'read from the esds AudioSpecificConfig, the authoritative channel count '
               '-- not the mp4a sample entry\'s own (possibly unreliable) field',
         );
+
+        // Recorded (04-05): 04-04-SUMMARY.md confirmed all three legs downmix to 2-channel AAC
+        // and never transmux for this clip -- outputBytes is NOT recorded (it is not one of
+        // check_parity.sh's COMPRESSION_EXACT_FIELDS; its own +/-50% envelope already absorbs
+        // the few-percent Android/Apple byte delta 04-04-SUMMARY.md documented).
+        _recordCompressionParity(
+          'surround51_480p',
+          transmuxed: false,
+          audioReencoded: true,
+          audioCodec: 'aac',
+          channels: 2,
+        );
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -772,6 +844,15 @@ void main() {
 
         expect(result.audioReencoded, isTrue);
         expect(result.audioCodec, 'aac');
+
+        // Recorded (04-05): both assertions above are the only fields this case's own evidence
+        // (04-04-SUMMARY.md: "LPCM... passed on every attempt from the point the suite ran at
+        // all") confirms identical on every platform.
+        _recordCompressionParity(
+          'pcm_audio_480p',
+          audioReencoded: true,
+          audioCodec: 'aac',
+        );
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -795,6 +876,12 @@ void main() {
           result.outputPath,
         );
         expect(outputInfo.hasAudio, isFalse);
+
+        // Recorded (04-05): audioReencoded:false is the only field this test itself asserts as
+        // a fixed (non-branching) expectation -- audioCodec is omitted from the record rather
+        // than passed as an explicit null, since check_parity.sh treats an absent key and a JSON
+        // null identically via jq's missing-key semantics.
+        _recordCompressionParity('noaudio_720p', audioReencoded: false);
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -827,6 +914,10 @@ void main() {
             reason: 'the default p720 preset caps the long side at 1280',
           );
         }
+
+        // NOT recorded in PARITY_JSON (04-05): this test's own if/else exists BECAUSE the
+        // never-larger outcome is not known to agree across all three legs -- see
+        // corpus/README.md's "Hard-input parity exclusions" for the full reasoning.
       },
       timeout: const Timeout(Duration(seconds: 120)),
     );
@@ -880,6 +971,10 @@ void main() {
           );
           expect(outputInfo.videoCodec, 'hevc');
         }
+        // NOT recorded in PARITY_JSON (04-05): same capability-dependent divergence as the
+        // keep-HDR case above -- the macOS host reports HEVC_BRANCH=success, the Android
+        // emulator and iOS simulator report fallback (04-04-SUMMARY.md). See corpus/README.md's
+        // "Hard-input parity exclusions".
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );

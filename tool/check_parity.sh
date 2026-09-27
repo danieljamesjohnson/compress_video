@@ -187,6 +187,19 @@ fi
 # -- Android `io`, Apple `unsupportedInput`, see corpus/README.md) is deliberately never emitted
 # into a PARITY_JSON record at all, so it never reaches this gate. `elapsedMs`, if present, is
 # recorded for the log only and is never read here.
+#
+# `toneMapped`/`hevcFallback` (04-05, CDEC-01/02/03) join the exact-field list below for the same
+# reason every other flag here does: each is a discrete boolean describing the delivered file, not
+# an approximate measurement. Unlike every other exact field, most `hard_inputs_test.dart` cases
+# that COULD populate these two flags never emit a record at all -- HDR tone-mapping, keep-HDR and
+# the HEVC opt-in are capability-dependent by design (a genuinely capable device answers `false`/
+# `false`; an incapable one answers `true`/`true` or exhausts a fallback chain entirely), so the
+# only cases wired into that suite's `_compressionParity` accumulator are the ones already proven,
+# across all three CI legs, to report identical values for every field they carry (see
+# `hard_inputs_test.dart`'s own per-case comments and corpus/README.md's "Hard-input parity
+# exclusions"). This mirrors the `truncated_mdat.mp4` treatment above exactly: a capability- or
+# hardware-dependent case is excluded by simply never emitting it, never by widening a tolerance
+# to force a false agreement.
 if printf '%s' "$MERGED_A" | jq -e 'has("compression")' >/dev/null; then
   CASES_A="$(printf '%s' "$MERGED_A" | jq -r '.compression | keys[]' | sort)"
   CASES_B="$(printf '%s' "$MERGED_B" | jq -r '.compression | keys[]' | sort)"
@@ -200,7 +213,7 @@ if printf '%s' "$MERGED_A" | jq -e 'has("compression")' >/dev/null; then
   # durationToleranceMs is included here (not just used below) because it is itself derived
   # identically on every platform from the same corpus sidecar convention -- a divergence in
   # the tolerance value itself would indicate a real bug in the test, not a platform difference.
-  COMPRESSION_EXACT_FIELDS="widthPx heightPx videoCodec audioCodec transmuxed usedOriginal audioReencoded channels reason durationToleranceMs wouldTransmux wouldUseOriginal"
+  COMPRESSION_EXACT_FIELDS="widthPx heightPx videoCodec audioCodec transmuxed usedOriginal audioReencoded toneMapped hevcFallback channels reason durationToleranceMs wouldTransmux wouldUseOriginal"
   BYTES_TOLERANCE_PCT=50
 
   for case_name in $CASES_A; do
