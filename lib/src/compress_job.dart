@@ -39,15 +39,33 @@ String generateJobId() {
 /// Ensures a [CompressVideoFlutterApiImpl] is registered on [binaryMessenger] (the default
 /// platform messenger when `null`), registering one the first time this is called for a given
 /// messenger.
+///
+/// On a background isolate, registration itself is impossible: `BinaryMessenger.setMessageHandler`
+/// (what `messages.CompressVideoFlutterApi.setUp` calls internally to receive the unsolicited
+/// `onProgress` push from native) throws `UnsupportedError` on
+/// `BackgroundIsolateBinaryMessenger` unconditionally -- "Messages from the host platform always
+/// go to the root isolate" (confirmed against the Flutter SDK source,
+/// `_background_isolate_binary_messenger_io.dart`, during 05-02 execution). This is a structural
+/// engine limitation, not a bug in this package, and not something a `SendPort`/`ReceivePort`
+/// relay should paper over (05-RESEARCH.md's "Don't Hand-Roll" table explicitly rules that out).
+/// Catching it here and continuing lets `compress()`'s actual platform call -- an outgoing,
+/// `send()`-based request/reply that works off-root -- still run and resolve a correct
+/// [CompressResult]; the job started this way simply never receives progress events, which
+/// [createQueuedCompressJob]'s caller-facing contract (see `CompressVideo.compress` dartdoc and
+/// this package's README) documents rather than hides.
 void _ensureFlutterApiRegistered(BinaryMessenger? binaryMessenger) {
   if (_flutterApiRegistry.containsKey(binaryMessenger)) {
     return;
   }
   final CompressVideoFlutterApiImpl impl = CompressVideoFlutterApiImpl();
-  messages.CompressVideoFlutterApi.setUp(
-    impl,
-    binaryMessenger: binaryMessenger,
-  );
+  try {
+    messages.CompressVideoFlutterApi.setUp(
+      impl,
+      binaryMessenger: binaryMessenger,
+    );
+  } on UnsupportedError {
+    // Background isolate: no progress channel can be registered here. See dartdoc above.
+  }
   _flutterApiRegistry[binaryMessenger] = impl;
 }
 

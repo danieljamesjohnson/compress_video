@@ -230,6 +230,36 @@ class CompressVideo {
     _pumpQueue();
   }
 
+  /// Makes every call in this package usable from a background isolate (one spawned with
+  /// `Isolate.run`, `compute`, or any other non-root-isolate mechanism).
+  ///
+  /// This must be the FIRST statement inside any such isolate's callback that will use this
+  /// plugin, before constructing a [CompressVideo] or calling any of its methods. [token] is
+  /// obtained on the ROOT isolate with `RootIsolateToken.instance` -- that property is `null`
+  /// off the root isolate, so it must be captured before spawning and passed into the
+  /// closure, not looked up from inside it.
+  ///
+  /// Safe to call more than once per isolate. Unnecessary (and a no-op you never need to
+  /// write) on the root isolate itself -- the root isolate's platform messenger is already
+  /// bound. Skipping this call on a background isolate does not silently succeed: the first
+  /// platform call that isolate makes through this plugin fails with a typed
+  /// [CompressVideoException] rather than completing, so a caller who forgot it gets a
+  /// diagnosable error rather than a hang or a `null` (see this package's background-isolate
+  /// section in README.md for the observed failure shape).
+  ///
+  /// Example:
+  /// ```dart
+  /// final RootIsolateToken token = RootIsolateToken.instance!;
+  /// final CompressResult result = await Isolate.run(() async {
+  ///   CompressVideo.ensureInitializedInBackgroundIsolate(token);
+  ///   final CompressVideo compressVideo = CompressVideo();
+  ///   return compressVideo.compress(path, options: options).result;
+  /// });
+  /// ```
+  static void ensureInitializedInBackgroundIsolate(RootIsolateToken token) {
+    BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+  }
+
   /// Returns a pre-flight [CompressEstimate] for compressing the video at [path] per
   /// [options], without running an actual encode, decoding a single frame, or building a
   /// native transcoder.
