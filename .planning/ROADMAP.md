@@ -231,7 +231,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — JOBS-03: the Dart-side FIFO job queue in `CompressVideo` with `maxConcurrentJobs`, a queued state on `CompressJob`, a cancel-while-queued path that never reaches the platform, and per-instance independence — proven in unit tests with no device and on the Android emulator
+- [x] 05-01-PLAN.md — JOBS-03: the Dart-side FIFO job queue in `CompressVideo` with `maxConcurrentJobs`, a queued state on `CompressJob`, a cancel-while-queued path that never reaches the platform, and per-instance independence — proven in unit tests with no device and on the Android emulator — complete, not yet pushed to CI
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
