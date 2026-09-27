@@ -262,6 +262,18 @@ jobs:
       - name: Run Dart unit tests
         run: flutter test
 
+      - name: Verify README preset table matches the preset constants (RELS-02)
+        # D-05: the README's preset table is generated from kPresetSpecs, CompressOptions().maxFps
+        # and doc/PRESETS.md's measured tables, never typed by hand. This regenerates it and
+        # fails on any difference, so a preset constant cannot change without the README.
+        # To fix a failure, run from the package root and commit the result:
+        #   flutter test tool/generate_preset_table.dart
+        # This step must stay BEFORE the `git checkout -- .` reset below, which would erase
+        # exactly the diff this step looks for.
+        run: |
+          flutter test tool/generate_preset_table.dart
+          git diff --exit-code README.md || { echo "FATAL: README preset table is stale -- run: flutter test tool/generate_preset_table.dart" >&2; exit 1; }
+
       - name: Reset files Flutter's own tooling may have rewritten
         # subosito/flutter-action tracks "stable", which moves forward independently of the
         # Flutter version docs/TOOLCHAIN.md pins for local development. Newer Flutter tooling
