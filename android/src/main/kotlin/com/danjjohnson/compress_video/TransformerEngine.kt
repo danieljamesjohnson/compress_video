@@ -41,6 +41,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Builds and drives one [Transformer] per compression job, entirely on the main Looper.
@@ -139,21 +140,33 @@ class TransformerEngine(
         // right, which is the common case for an already-small or already-compressed input.
         if (target.wouldUseOriginal) {
             copyFileAtomically(inputFile, destinationFile)
-            onProgress(100.0)
-            return buildResultFromDestination(
-                destinationFile = destinationFile,
-                inputBytes = inputBytes,
-                startElapsedMs = startElapsedMs,
-                transmuxed = false,
-                usedOriginal = true,
-                audioReencoded = false,
-                // No Transformer ever runs on this fast path -- nothing could have been
-                // tone-mapped or have fallen back to anything. finishSuccess's own !usedOriginal
-                // guard would compute the same answer for both flags, but there is no
-                // ExportResult here to compute it from.
-                toneMapped = NO_TRANSFORM_ATTEMPTED,
-                hevcFallback = NO_TRANSFORM_ATTEMPTED,
-            )
+            val result =
+                buildResultFromDestination(
+                    destinationFile = destinationFile,
+                    inputBytes = inputBytes,
+                    startElapsedMs = startElapsedMs,
+                    transmuxed = false,
+                    usedOriginal = true,
+                    audioReencoded = false,
+                    // No Transformer ever runs on this fast path -- nothing could have been
+                    // tone-mapped or have fallen back to anything. finishSuccess's own
+                    // !usedOriginal guard would compute the same answer for both flags, but
+                    // there is no ExportResult here to compute it from.
+                    toneMapped = NO_TRANSFORM_ATTEMPTED,
+                    hevcFallback = NO_TRANSFORM_ATTEMPTED,
+                )
+            // Recorded BEFORE the onProgress push below (05-02): see JobRegistry.resultDeferredFor.
+            // Still a direct (awaited) call, not fire-and-forget -- that was tried and reverted
+            // after empirically finding it let this coroutine reply to startCompress's caller
+            // BEFORE Dart's progress listener had necessarily processed this final event, a real
+            // regression against 02-06-PLAN.md's "progress reaches exactly 100 before/as result
+            // completes" invariant (caught by compress_jobs_test.dart on the root isolate).
+            // Bounded (05-02, PROGRESS_ACK_TIMEOUT_MS doc comment) so a background isolate, which
+            // can never send this acknowledgement at all, still lets this coroutine proceed and
+            // reply to startCompress's own caller in a short, known time.
+            JobRegistry.completeResult(jobId, Result.success(result))
+            withTimeoutOrNull(PROGRESS_ACK_TIMEOUT_MS) { onProgress(100.0) }
+            return result
         }
 
         val videoBitrateBps = target.videoBitrateBps
@@ -519,19 +532,24 @@ class TransformerEngine(
                 }
             }
             is ExportOutcome.Success -> {
-                onProgress(100.0)
-                finishSuccess(
-                    finalOutcome.exportResult,
-                    tempFile,
-                    destinationFile,
-                    inputFile,
-                    inputBytes,
-                    startElapsedMs,
-                    inputWasHdr = inputInfo.isHdr,
-                    hevcFallbackFromRequest = hevcFallback,
-                    audioEncodeForced =
-                        request.audioMode == AudioModeMessage.REENCODE || audioForcedReencode,
-                )
+                val result =
+                    finishSuccess(
+                        finalOutcome.exportResult,
+                        tempFile,
+                        destinationFile,
+                        inputFile,
+                        inputBytes,
+                        startElapsedMs,
+                        inputWasHdr = inputInfo.isHdr,
+                        hevcFallbackFromRequest = hevcFallback,
+                        audioEncodeForced =
+                            request.audioMode == AudioModeMessage.REENCODE || audioForcedReencode,
+                    )
+                // Recorded BEFORE the onProgress push below, bounded the same way and for the
+                // same reason -- see the fast-path comment above and JobRegistry.resultDeferredFor.
+                JobRegistry.completeResult(jobId, Result.success(result))
+                withTimeoutOrNull(PROGRESS_ACK_TIMEOUT_MS) { onProgress(100.0) }
+                result
             }
         }
     }
@@ -1103,6 +1121,18 @@ class TransformerEngine(
 
     internal companion object {
         private const val PROGRESS_POLL_INTERVAL_MS = 250L
+
+        /**
+         * Bounds the terminal `onProgress(100.0)` acknowledgement wait (05-02). On the root
+         * isolate this never fires -- Dart's ack arrives in well under a second in every observed
+         * run, so this bound changes nothing there. From a background isolate, no ack can ever
+         * arrive at all (no isolate can register a handler to send one), and confirmed live that
+         * really is unbounded, not merely slow -- a 30-second wait for it never resolved. This
+         * bound exists purely so that case still settles in a known, short time rather than
+         * hanging the job indefinitely; `CompressJob._run`'s own Dart-side wait (kept
+         * deliberately unbounded there) only has to outlast THIS bound, not an unknown one.
+         */
+        private const val PROGRESS_ACK_TIMEOUT_MS = 3_000L
 
         /**
          * The value of `toneMapped` AND `hevcFallback` when [compress]'s never-larger pre-check

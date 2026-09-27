@@ -338,6 +338,24 @@ abstract class CompressHostApi {
   @async
   void cancel(String jobId);
 
+  /// Resolves once the job identified by [jobId] reaches a terminal outcome -- success, a typed
+  /// failure, or cancellation -- returning the SAME [CompressResultMessage] a successful
+  /// [startCompress] call would have returned, or throwing the same typed error/cancellation
+  /// [startCompress] would have thrown.
+  ///
+  /// This exists because [startCompress]'s own reply cannot be delivered to a background
+  /// isolate: its native implementation reports progress through [CompressVideoFlutterApi
+  /// .onProgress] before returning, and a background isolate can never register a handler to
+  /// acknowledge that push (`BackgroundIsolateBinaryMessenger.setMessageHandler` throws
+  /// unconditionally off-root) -- so [startCompress]'s own suspended reply never resolves there
+  /// (05-02, confirmed empirically). A caller on a background isolate should still call
+  /// [startCompress] to START the job (its own reply is simply never awaited in that case), then
+  /// call this method to learn the outcome. On the root isolate [startCompress]'s own reply
+  /// continues to work exactly as before; this method exists purely as the background-isolate
+  /// escape hatch, not a general replacement.
+  @async
+  CompressResultMessage awaitCompressResult(String jobId);
+
   /// Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
   /// [request], without running an actual encode.
   @async

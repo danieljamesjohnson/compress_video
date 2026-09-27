@@ -870,6 +870,24 @@ interface CompressHostApi {
   /** Cancels the job identified by [jobId]. A no-op if the job has already finished. */
   suspend fun cancel(jobId: String)
   /**
+   * Resolves once the job identified by [jobId] reaches a terminal outcome -- success, a typed
+   * failure, or cancellation -- returning the SAME [CompressResultMessage] a successful
+   * [startCompress] call would have returned, or throwing the same typed error/cancellation
+   * [startCompress] would have thrown.
+   *
+   * This exists because [startCompress]'s own reply cannot be delivered to a background
+   * isolate: its native implementation reports progress through [CompressVideoFlutterApi
+   * .onProgress] before returning, and a background isolate can never register a handler to
+   * acknowledge that push (`BackgroundIsolateBinaryMessenger.setMessageHandler` throws
+   * unconditionally off-root) -- so [startCompress]'s own suspended reply never resolves there
+   * (05-02, confirmed empirically). A caller on a background isolate should still call
+   * [startCompress] to START the job (its own reply is simply never awaited in that case), then
+   * call this method to learn the outcome. On the root isolate [startCompress]'s own reply
+   * continues to work exactly as before; this method exists purely as the background-isolate
+   * escape hatch, not a general replacement.
+   */
+  suspend fun awaitCompressResult(jobId: String): CompressResultMessage
+  /**
    * Returns a pre-flight [EstimateMessage] for compressing the media at [path] with
    * [request], without running an actual encode.
    */
@@ -917,6 +935,25 @@ interface CompressHostApi {
               val wrapped: List<Any?> = try {
                 api.cancel(jobIdArg)
                 listOf(null)
+              } catch (exception: Throwable) {
+                MessagesPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.compress_video.CompressHostApi.awaitCompressResult$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val jobIdArg = args[0] as String
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.awaitCompressResult(jobIdArg))
               } catch (exception: Throwable) {
                 MessagesPigeonUtils.wrapError(exception)
               }

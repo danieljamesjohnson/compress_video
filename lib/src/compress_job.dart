@@ -40,17 +40,25 @@ String generateJobId() {
 /// platform messenger when `null`), registering one the first time this is called for a given
 /// messenger.
 ///
-/// On a background isolate, registration itself is impossible: `BinaryMessenger.setMessageHandler`
-/// (what `messages.CompressVideoFlutterApi.setUp` calls internally to receive the unsolicited
-/// `onProgress` push from native) throws `UnsupportedError` on
-/// `BackgroundIsolateBinaryMessenger` unconditionally -- "Messages from the host platform always
-/// go to the root isolate" (confirmed against the Flutter SDK source,
-/// `_background_isolate_binary_messenger_io.dart`, during 05-02 execution). This is a structural
-/// engine limitation, not a bug in this package, and not something a `SendPort`/`ReceivePort`
-/// relay should paper over (05-RESEARCH.md's "Don't Hand-Roll" table explicitly rules that out).
-/// Catching it here and continuing lets `compress()`'s actual platform call -- an outgoing,
-/// `send()`-based request/reply that works off-root -- still run and resolve a correct
-/// [CompressResult]; the job started this way simply never receives progress events, which
+/// On a background isolate, registration itself is impossible, one of two ways depending on
+/// whether `ensureInitializedInBackgroundIsolate` was called first:
+///
+/// - Called, but `BinaryMessenger.setMessageHandler` (what `messages.CompressVideoFlutterApi
+///   .setUp` calls internally to receive the unsolicited `onProgress` push from native) throws
+///   `UnsupportedError` on `BackgroundIsolateBinaryMessenger` unconditionally -- "Messages from
+///   the host platform always go to the root isolate" (confirmed against the Flutter SDK
+///   source, `_background_isolate_binary_messenger_io.dart`, during 05-02 execution).
+/// - Never called at all: resolving the default messenger itself throws `StateError` first --
+///   `BackgroundIsolateBinaryMessenger.instance`'s own guard for "not initialised yet" -- before
+///   `setMessageHandler` is ever reached (confirmed live: the omitted-initialisation case threw
+///   this, untyped, until this method also caught it).
+///
+/// Both are structural engine limitations, not a bug in this package, and not something a
+/// `SendPort`/`ReceivePort` relay should paper over (05-RESEARCH.md's "Don't Hand-Roll" table
+/// explicitly rules that out). Catching either here and continuing lets `compress()`'s actual
+/// platform call proceed -- on the root isolate unaffected; on a background isolate, resolved
+/// instead through `awaitCompressResult` (05-02) rather than `startCompress`'s own stranded
+/// reply. The job started this way simply never receives progress events, which
 /// [createQueuedCompressJob]'s caller-facing contract (see `CompressVideo.compress` dartdoc and
 /// this package's README) documents rather than hides.
 void _ensureFlutterApiRegistered(BinaryMessenger? binaryMessenger) {
@@ -64,7 +72,10 @@ void _ensureFlutterApiRegistered(BinaryMessenger? binaryMessenger) {
       binaryMessenger: binaryMessenger,
     );
   } on UnsupportedError {
-    // Background isolate: no progress channel can be registered here. See dartdoc above.
+    // Background isolate, initialised: no progress channel can be registered here.
+  } on StateError {
+    // Background isolate, never initialised: the default messenger itself is unusable. See
+    // dartdoc above.
   }
   _flutterApiRegistry[binaryMessenger] = impl;
 }
@@ -178,6 +189,14 @@ class CompressJob {
   /// Progress, 0 to 100 inclusive, emitted as the job runs. A broadcast stream that closes
   /// when the job ends, whether by success, failure or cancellation. Emits nothing while
   /// [isQueued] is true -- the first event only arrives once the job actually starts.
+  ///
+  /// For a job created on a background isolate (see
+  /// `CompressVideo.ensureInitializedInBackgroundIsolate`), this stream never emits any value
+  /// -- it simply closes once the job settles, exactly like a job whose progress arrived too
+  /// fast to observe. This is a structural Flutter engine limitation, not a bug: a background
+  /// isolate can never register a handler for native's progress push
+  /// (`BackgroundIsolateBinaryMessenger.setMessageHandler` throws unconditionally off-root).
+  /// [result] is unaffected -- it still resolves with the job's real, typed outcome.
   Stream<double> get progress => _progressController.stream;
 
   /// Completes with the job's [CompressResult] on success, or fails with a
@@ -270,11 +289,57 @@ class CompressJob {
     CompressResult? success;
     CompressVideoException? failure;
     try {
-      final messages.CompressResultMessage message = await _api.startCompress(
-        path,
-        id,
-        request,
-      );
+      final messages.CompressResultMessage message;
+      // RootIsolateToken.instance is non-null ONLY on the root isolate (a cheap, synchronous,
+      // per-isolate constant) -- the reliable way to detect this call is running off-root,
+      // independent of whether ensureInitializedInBackgroundIsolate was actually called (05-02).
+      if (RootIsolateToken.instance == null) {
+        // startCompress's own reply is not what this branch reads: its native implementation
+        // delays returning until it has attempted to deliver CompressVideoFlutterApi's progress
+        // push, which no background isolate can ever register a handler for
+        // (BackgroundIsolateBinaryMessenger.setMessageHandler throws unconditionally off-root).
+        // This branch reads the actual outcome from the dedicated escape hatch below instead,
+        // which resolves independently of that push and of startCompress's own reply.
+        //
+        // Native's progress push stays a direct, awaited call there (not fire-and-forget -- that
+        // was tried and reverted) so a ROOT-isolate caller keeps 02-06-PLAN.md's "progress
+        // reaches exactly 100 before or as result completes" guarantee; a fire-and-forget push
+        // cannot promise that ordering (confirmed live: it broke compress_jobs_test.dart's
+        // root-isolate cases). Off-root, that push can never be acknowledged at all, so native
+        // bounds its own wait for it (TransformerEngine.PROGRESS_ACK_TIMEOUT_MS, 3s) and proceeds
+        // regardless once that elapses.
+        final Future<messages.CompressResultMessage> startCompressFuture = _api
+            .startCompress(path, id, request);
+        // Attached immediately, before anything below can throw first: a Future's error is
+        // reported as "unhandled" the moment nothing has observed it, not only once its value is
+        // read, so this must run even if awaitCompressResult throws before the explicit wait a
+        // few lines down ever executes (Futures support multiple independent listeners, so this
+        // does not interfere with that separate wait).
+        unawaited(
+          startCompressFuture.then<void>(
+            (_) {},
+            onError: (Object _, StackTrace _) {},
+          ),
+        );
+        message = await _api.awaitCompressResult(id);
+        // Genuinely waited for (bounded, comfortably longer than native's own
+        // PROGRESS_ACK_TIMEOUT_MS bound above), not just marked handled above -- confirmed
+        // empirically (05-02) that letting this isolate exit while startCompress's own reply is
+        // still in flight crashes the WHOLE process natively: `[FATAL:flutter/lib/ui/window/
+        // platform_message_response_dart_port.cc] Check failed: did_send.`, once Isolate.run
+        // tears the isolate down before that reply can be delivered to it. The bound here is a
+        // backstop, not the primary defence -- native's own bound above is what actually keeps
+        // this short; this margin only protects against IPC/dispatch overhead on top of it. The
+        // awaited value/error is discarded either way -- awaitCompressResult above is
+        // authoritative for the result.
+        try {
+          await startCompressFuture.timeout(const Duration(seconds: 15));
+        } catch (_) {
+          // Ignore: this wait exists only to delay isolate teardown, not to source the result.
+        }
+      } else {
+        message = await _api.startCompress(path, id, request);
+      }
       success = CompressResult(
         outputPath: message.outputPath,
         inputBytes: message.inputBytes,

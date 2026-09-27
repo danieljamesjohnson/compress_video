@@ -111,6 +111,8 @@ class CompressVideo {
       throw _wrapPlatformException(e, 'getMediaInfo');
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'getMediaInfo');
+    } catch (e) {
+      throw _wrapUnexpected(e, 'getMediaInfo');
     }
   }
 
@@ -151,6 +153,8 @@ class CompressVideo {
       throw _wrapPlatformException(e, 'getThumbnail');
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'getThumbnail');
+    } catch (e) {
+      throw _wrapUnexpected(e, 'getThumbnail');
     }
   }
 
@@ -302,6 +306,8 @@ class CompressVideo {
       throw _wrapPlatformException(e, 'estimate');
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'estimate');
+    } catch (e) {
+      throw _wrapUnexpected(e, 'estimate');
     }
   }
 
@@ -327,6 +333,8 @@ class CompressVideo {
       throw _wrapPlatformException(e, 'clearCache');
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'clearCache');
+    } catch (e) {
+      throw _wrapUnexpected(e, 'clearCache');
     }
   }
 
@@ -417,6 +425,8 @@ class CompressVideo {
       throw _wrapPlatformException(e, 'getThumbnailFile');
     } on MissingPluginException catch (e) {
       throw _wrapMissingPlugin(e, 'getThumbnailFile');
+    } catch (e) {
+      throw _wrapUnexpected(e, 'getThumbnailFile');
     }
   }
 
@@ -489,6 +499,22 @@ class CompressVideo {
       reason: CompressVideoErrorReason.unknown,
       message: 'No platform implementation found for $callName',
       platformDetail: e.runtimeType.toString(),
+    );
+  }
+
+  /// Last-resort wrap for any exception that is neither a [PlatformException] nor a
+  /// [MissingPluginException] -- mirrors [CompressJob._run]'s own WR-03 catch-all. Added in
+  /// 05-02 after empirically confirming a background isolate's omitted-initialisation case
+  /// throws a raw `StateError` (from `BackgroundIsolateBinaryMessenger.instance` itself, before
+  /// ever reaching a platform channel) that neither of the two `on` clauses above matches; every
+  /// future-returning public call in this class must still resolve to a typed
+  /// [CompressVideoException] rather than let that (or any other unanticipated exception type)
+  /// escape untyped.
+  CompressVideoException _wrapUnexpected(Object e, String callName) {
+    return CompressVideoException(
+      reason: CompressVideoErrorReason.unknown,
+      message: 'Unexpected error during $callName',
+      platformDetail: '${e.runtimeType}: $e',
     );
   }
 }

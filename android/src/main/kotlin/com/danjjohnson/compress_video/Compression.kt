@@ -29,34 +29,74 @@ class Compression(
         requireValidJobId(jobId)
         Arguments.requireValidCompressRequest(request)
 
-        val inputFile = Arguments.requireReadableMediaFile(path)
-        val inputInfo = probe.getMediaInfo(path)
+        // Pre-registered BEFORE any async/suspending work below, so a concurrent
+        // awaitCompressResult(jobId) call -- issued by a caller on a background isolate right
+        // after firing this call, per 05-02 -- can never lose a race against a fast job finishing
+        // first (confirmed live: a cheap clip can finish in ~220ms). See
+        // JobRegistry.resultDeferredFor.
+        JobRegistry.resultDeferredFor(jobId)
 
-        val cacheDir = PluginFiles.cacheSubDir(context)
-        val destinationFile =
-            if (request.outputPath != null) {
-                Arguments.requireWritableOutputParent(request.outputPath)
-            } else {
-                File(cacheDir, "$jobId.mp4")
-            }
+        return try {
+            val inputFile = Arguments.requireReadableMediaFile(path)
+            val inputInfo = probe.getMediaInfo(path)
 
-        // Pre-flight space check (D-18): after validation and probing, before a Transformer
-        // exists -- a job that cannot possibly fit is never even attempted.
-        requireSufficientFreeSpace(inputFile, inputInfo, request, destinationFile)
+            val cacheDir = PluginFiles.cacheSubDir(context)
+            val destinationFile =
+                if (request.outputPath != null) {
+                    Arguments.requireWritableOutputParent(request.outputPath)
+                } else {
+                    File(cacheDir, "$jobId.mp4")
+                }
 
-        return engine.compress(
-            jobId = jobId,
-            inputFile = inputFile,
-            inputInfo = inputInfo,
-            request = request,
-            destinationFile = destinationFile,
-        ) { percent -> flutterApi.onProgress(jobId, percent) }
+            // Pre-flight space check (D-18): after validation and probing, before a Transformer
+            // exists -- a job that cannot possibly fit is never even attempted.
+            requireSufficientFreeSpace(inputFile, inputInfo, request, destinationFile)
+
+            val result =
+                engine.compress(
+                    jobId = jobId,
+                    inputFile = inputFile,
+                    inputInfo = inputInfo,
+                    request = request,
+                    destinationFile = destinationFile,
+                ) { percent -> flutterApi.onProgress(jobId, percent) }
+            // A no-op when engine.compress()'s own success branch already recorded this (the
+            // normal case): completeResult only ever accepts the first value. Reached directly
+            // (not a no-op) for the wouldUseOriginal/finishSuccess branches is impossible to
+            // skip -- restated here only as the single point every return value flows through,
+            // for callers reasoning about this function rather than TransformerEngine's
+            // internals.
+            JobRegistry.completeResult(jobId, Result.success(result))
+            result
+        } catch (e: Throwable) {
+            // Every exception path here (validation, free-space, cancellation, encode failure)
+            // reaches this catch WITHOUT ever awaiting an onProgress push, so -- unlike the
+            // success paths above -- this outer catch-all alone is sufficient to make the
+            // outcome available to awaitCompressResult; no separate per-branch hook is needed.
+            JobRegistry.completeResult(jobId, Result.failure(e))
+            throw e
+        }
     }
 
     override suspend fun cancel(jobId: String) {
         requireMainLooper("cancel")
         requireValidJobId(jobId)
         JobRegistry.cancel(jobId)
+    }
+
+    /**
+     * Resolves once the job identified by [jobId] reaches a terminal outcome, per
+     * [CompressHostApi.awaitCompressResult]'s contract -- see that dartdoc for the full
+     * rationale. Reads from the SAME [JobRegistry.resultDeferredFor] deferred [startCompress]
+     * completes, so this never depends on [CompressVideoFlutterApi.onProgress] being
+     * acknowledged.
+     */
+    override suspend fun awaitCompressResult(jobId: String): CompressResultMessage {
+        requireMainLooper("awaitCompressResult")
+        requireValidJobId(jobId)
+        val outcome = JobRegistry.resultDeferredFor(jobId).await()
+        JobRegistry.forgetResult(jobId)
+        return outcome.getOrElse { throw it }
     }
 
     /**

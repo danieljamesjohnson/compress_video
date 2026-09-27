@@ -98,4 +98,50 @@ enum JobRegistry {
   static func liveTempFilePaths() -> Set<String> {
     Set(jobs.values.map { $0.tempFile.resolvingSymlinksInPath().path })
   }
+
+  // MARK: - Result deferred (05-02, backs CompressHostApi.awaitCompressResult)
+
+  /// A job's outcome once known but not yet claimed by `awaitResult`, or the continuations
+  /// already waiting for a job whose outcome is not yet known -- never both at once for the
+  /// same `jobId`. Backs `CompressHostApi.awaitCompressResult`, added because a background
+  /// isolate can never receive `CompressVideoFlutterApi.onProgress`'s push -- Kotlin's mirror
+  /// (`JobRegistry.kt`'s `resultDeferreds`) needed this for the different reason that its own
+  /// `startCompress` blocks on that push before returning; this Swift engine's `onProgress` is
+  /// already fire-and-forget (`Compression.swift`'s `AsyncStream`-fed `Task`), so
+  /// `startCompress`'s own reply was never blocked here -- `awaitCompressResult` exists purely
+  /// as the documented, symmetric escape hatch Pigeon's contract promises on every platform.
+  @MainActor private static var resultOutcomes: [String: Result<CompressResultMessage, Error>] =
+    [:]
+  @MainActor private static var resultWaiters:
+    [String: [CheckedContinuation<CompressResultMessage, Error>]] = [:]
+
+  /// Completes `jobId`'s outcome with `result` -- delivered immediately to every continuation
+  /// already waiting (`awaitResult` called first), or stashed for a not-yet-arrived
+  /// `awaitResult` call to claim (the job finished first) -- a no-op if `jobId`'s outcome was
+  /// already recorded once. Callers hop to `MainActor` explicitly (matching every other
+  /// `JobRegistry` access in this file, e.g. `Compression.cancel`), since `Compression
+  /// .startCompress` itself is not `MainActor`-isolated.
+  @MainActor static func completeResult(jobId: String, result: Result<CompressResultMessage, Error>)
+  {
+    if let waiters = resultWaiters.removeValue(forKey: jobId), !waiters.isEmpty {
+      for waiter in waiters {
+        waiter.resume(with: result)
+      }
+      return
+    }
+    if resultOutcomes[jobId] == nil {
+      resultOutcomes[jobId] = result
+    }
+  }
+
+  /// Awaits `jobId`'s terminal outcome, returning immediately if `completeResult` already ran
+  /// for it, otherwise suspending until it does. Backs `Compression.awaitCompressResult`.
+  @MainActor static func awaitResult(jobId: String) async throws -> CompressResultMessage {
+    if let outcome = resultOutcomes.removeValue(forKey: jobId) {
+      return try outcome.get()
+    }
+    return try await withCheckedThrowingContinuation { continuation in
+      resultWaiters[jobId, default: []].append(continuation)
+    }
+  }
 }

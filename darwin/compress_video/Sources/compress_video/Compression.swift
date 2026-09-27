@@ -29,7 +29,37 @@ final class Compression: CompressHostApi {
   {
     try Self.requireValidJobId(jobId)
     try Arguments.requireValidCompressRequest(request)
+    do {
+      let result = try await Self.runCompress(
+        path: path, jobId: jobId, request: request, flutterApi: flutterApi, engine: engine)
+      await JobRegistry.completeResult(jobId: jobId, result: .success(result))
+      return result
+    } catch {
+      // Every path through runCompress below reaches this catch without depending on any
+      // Dart-side acknowledgement (this engine's onProgress push is already fire-and-forget --
+      // see the AsyncStream comment below), so this outer wrapper alone is sufficient to make
+      // the outcome available to awaitCompressResult; no further per-branch hook is needed
+      // (05-02, mirrors Compression.kt's identical outer catch-all).
+      await JobRegistry.completeResult(jobId: jobId, result: .failure(error))
+      throw error
+    }
+  }
 
+  /// Resolves once the job identified by `jobId` reaches a terminal outcome, per
+  /// `CompressHostApi.awaitCompressResult`'s contract (05-02) -- see that Pigeon dartdoc for the
+  /// full rationale. On this platform `startCompress`'s own reply was never blocked on any
+  /// Dart-side acknowledgement in the first place (unlike Android, whose native progress push
+  /// IS awaited directly before returning) -- this exists as the documented, symmetric escape
+  /// hatch Pigeon's cross-platform contract promises regardless.
+  func awaitCompressResult(jobId: String) async throws -> CompressResultMessage {
+    try Self.requireValidJobId(jobId)
+    return try await JobRegistry.awaitResult(jobId: jobId)
+  }
+
+  private static func runCompress(
+    path: String, jobId: String, request: CompressRequestMessage,
+    flutterApi: CompressVideoFlutterApi, engine: CompressionEngine
+  ) async throws -> CompressResultMessage {
     let standardizedPath = try Arguments.requireReadableMediaFile(path)
     let inputInfo = try await Probe().getMediaInfo(path: standardizedPath)
 
@@ -44,9 +74,9 @@ final class Compression: CompressHostApi {
 
     // Pre-flight space check (D-10): after validation and probing, before a reader, writer or
     // export session is ever built -- a job that cannot possibly fit is never even attempted.
-    try await requireSufficientFreeSpace(
+    try await Self.requireSufficientFreeSpace(
       inputURL: URL(fileURLWithPath: standardizedPath), inputInfo: inputInfo, request: request,
-      destinationURL: destinationURL)
+      destinationURL: destinationURL, engine: engine)
 
     // WR-01: a fresh unstructured `Task` per `onProgress` call has no ordering guarantee
     // relative to any other such `Task` -- if an earlier call's `await flutterApi.onProgress`
@@ -138,9 +168,9 @@ final class Compression: CompressHostApi {
   /// The 1.2x safety margin (not a bare 1.0x) leaves headroom for the destination filesystem's
   /// own block-size rounding and any other concurrent writer, mirroring Android's own
   /// `FREE_SPACE_SAFETY_FACTOR` exactly.
-  private func requireSufficientFreeSpace(
+  private static func requireSufficientFreeSpace(
     inputURL: URL, inputInfo: MediaInfoMessage, request: CompressRequestMessage,
-    destinationURL: URL
+    destinationURL: URL, engine: CompressionEngine
   ) async throws {
     let plan = await engine.resolvePlan(inputURL: inputURL, inputInfo: inputInfo, request: request)
     let requiredBytes = Int64(

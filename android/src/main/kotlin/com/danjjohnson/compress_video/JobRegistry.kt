@@ -2,6 +2,7 @@ package com.danjjohnson.compress_video
 
 import android.os.Handler
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * Main-thread-confined registry of live compression jobs, keyed by job id.
@@ -120,6 +121,10 @@ object JobRegistry {
         for (jobId in jobs.keys.toList()) {
             cancel(jobId)
         }
+        // Also clears any completed-but-unconsumed result deferreds (D-17): a background-isolate
+        // job's caller that never got around to calling awaitCompressResult should not keep this
+        // plugin's own map entries alive past detach.
+        resultDeferreds.clear()
     }
 
     /**
@@ -129,4 +134,60 @@ object JobRegistry {
      * here.
      */
     fun liveTempFilePaths(): Set<String> = jobs.values.map { it.tempFile.canonicalPath }.toSet()
+
+    /**
+     * One deferred per job id, resolving to that job's terminal outcome, backing
+     * [CompressHostApi.awaitCompressResult] (05-02). This exists because a background isolate
+     * can never receive [CompressVideoFlutterApi.onProgress]'s push
+     * (`BackgroundIsolateBinaryMessenger.setMessageHandler` throws unconditionally off-root),
+     * and [Compression.startCompress]'s own success paths await that push before returning --
+     * so its own reply can never reach a background isolate. [awaitCompressResult] reads the
+     * SAME outcome from here instead, a path that never depends on any Dart-side handler.
+     *
+     * Pre-created via [resultDeferredFor] (`getOrPut`) the moment a job starts, BEFORE any
+     * async work runs, specifically to close the race where the job finishes (and calls
+     * [completeResult]) before a caller ever calls [awaitCompressResult] for it -- confirmed
+     * live during 05-02 that this is not a theoretical race: a cheap clip's real compression
+     * completed in ~220ms.
+     *
+     * Retention note: a job whose caller never calls [awaitCompressResult] (the normal
+     * root-isolate path, which reads the result straight from [Compression.startCompress]'s own
+     * reply instead) leaves its completed deferred in this map until [cancelAll] runs (plugin
+     * detach) -- a small, bounded object per job, not reclaimed proactively. Accepted for 05-02
+     * rather than adding a time-based eviction policy: unlike [jobs] (which holds a live
+     * `Transformer`/temp file), a stale entry here is one small completed [CompletableDeferred]
+     * wrapping a value already reported once, not a resource leak in the traditional sense.
+     */
+    private val resultDeferreds = LinkedHashMap<String, CompletableDeferred<Result<CompressResultMessage>>>()
+
+    /**
+     * Returns (creating on first call for [jobId]) the deferred that will resolve to [jobId]'s
+     * terminal outcome. Safe to call from either [Compression.startCompress] (to pre-register
+     * before the job's own async work starts) or [Compression.awaitCompressResult] (to await
+     * it) -- both run on the main thread, so `getOrPut` here is not racing itself.
+     */
+    fun resultDeferredFor(jobId: String): CompletableDeferred<Result<CompressResultMessage>> =
+        resultDeferreds.getOrPut(jobId) { CompletableDeferred() }
+
+    /**
+     * Completes [jobId]'s result deferred with [result] -- a no-op if it is already completed,
+     * since both a `TransformerEngine.compress()` success branch (called BEFORE the blocking
+     * onProgress push) and `Compression.startCompress`'s own outer catch-all (for every
+     * exception path, none of which block on a push) may independently try to complete the same
+     * job's outcome; whichever reaches it first wins, and it is always the same value either way.
+     */
+    fun completeResult(
+        jobId: String,
+        result: Result<CompressResultMessage>,
+    ) {
+        val deferred = resultDeferredFor(jobId)
+        if (!deferred.isCompleted) {
+            deferred.complete(result)
+        }
+    }
+
+    /** Forgets [jobId]'s result deferred once consumed by [awaitCompressResult]. */
+    fun forgetResult(jobId: String) {
+        resultDeferreds.remove(jobId)
+    }
 }
