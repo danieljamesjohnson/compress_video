@@ -232,7 +232,7 @@ void main() {
   // trim exactness (the 2000-7000ms sidecar-driven case below) in 03-07 -- every case in this
   // file now runs unskipped on iOS and macOS.
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
   // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'

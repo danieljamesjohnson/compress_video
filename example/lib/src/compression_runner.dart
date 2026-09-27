@@ -55,7 +55,7 @@ class RealCompressionRunner implements CompressionRunner {
   /// Creates a [RealCompressionRunner].
   const RealCompressionRunner();
 
-  static const CompressVideo _compressVideo = CompressVideo();
+  static final CompressVideo _compressVideo = CompressVideo();
 
   @override
   CompressionHandle compress(String path, {required CompressOptions options}) {

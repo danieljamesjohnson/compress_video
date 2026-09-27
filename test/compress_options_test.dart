@@ -15,7 +15,7 @@ const String _startCompressChannelName =
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

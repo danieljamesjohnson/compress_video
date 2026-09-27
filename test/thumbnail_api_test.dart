@@ -15,7 +15,7 @@ const String _getThumbnailFileChannelName =
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   setUp(() {
     // Any invocation is itself the test failure: a validation bug let a bad argument reach

@@ -51,12 +51,56 @@ void _ensureFlutterApiRegistered(BinaryMessenger? binaryMessenger) {
   _flutterApiRegistry[binaryMessenger] = impl;
 }
 
+/// No-op default for [CompressJob._onCancelWhileQueued] -- a job created via [CompressJob.start]
+/// is never in a queued state by the time a caller could observe it, so its cancel-while-queued
+/// hook is never actually invoked, but the field still needs a non-null default.
+void _noOpCancelWhileQueued() {}
+
+/// Creates a [CompressJob] in a queued state -- registered in the job registry immediately (so
+/// progress routing and the registry-cleanup path behave identically whether or not the job
+/// ever waits) but with its platform call deferred -- and returns it together with a closure
+/// that issues that deferred call.
+///
+/// The returned `admit` closure is deliberately NOT a member of [CompressJob]: this plan's own
+/// discretion section limits the class to exactly one new public member, [CompressJob.isQueued].
+/// Returning the admission capability as a plain closure lets `CompressVideo`'s queue start a
+/// job it created without [CompressJob] exposing a public "start now" method any caller could
+/// invoke directly on a job they merely hold a reference to.
+({CompressJob job, void Function() admit}) createQueuedCompressJob({
+  required messages.CompressHostApi api,
+  required BinaryMessenger? binaryMessenger,
+  required String path,
+  required messages.CompressRequestMessage request,
+  required CompressVideoException Function(PlatformException, String)
+  wrapPlatformException,
+  required CompressVideoException Function(MissingPluginException, String)
+  wrapMissingPlugin,
+  required void Function() onCancelWhileQueued,
+}) {
+  _ensureFlutterApiRegistered(binaryMessenger);
+  final CompressJob job = CompressJob._(generateJobId(), api)
+    .._onCancelWhileQueued = onCancelWhileQueued;
+  _jobRegistry[job.id] = job;
+  return (
+    job: job,
+    admit: () => job._startPlatformCall(
+      path,
+      request,
+      wrapPlatformException,
+      wrapMissingPlugin,
+    ),
+  );
+}
+
 /// A running or finished compression job, returned synchronously by `CompressVideo.compress`
 /// (D-01) while the platform call it wraps proceeds asynchronously.
 ///
 /// There is no global progress stream and no "is compressing" singleton anywhere in this
 /// package -- every [CompressJob] is fully independent, and two jobs started together never
-/// share state.
+/// share state. A job may sit briefly in a queued state (see [isQueued]) before its platform
+/// call is issued, when `CompressVideo`'s own concurrency limit is holding it back; a job's
+/// [progress] and [result] behave identically regardless of whether it started immediately or
+/// waited.
 class CompressJob {
   CompressJob._(this.id, this._api)
     : _progressController = StreamController<double>.broadcast();
@@ -66,6 +110,10 @@ class CompressJob {
   /// platform call proceeds in the background. [wrapPlatformException] and [wrapMissingPlugin]
   /// are `CompressVideo`'s own exception-mapping helpers, reused here rather than forked, so
   /// every call in the package maps a platform failure identically.
+  ///
+  /// This factory always issues its platform call immediately (it is never queued); it is kept
+  /// alongside [createQueuedCompressJob] so this class's own construction contract does not
+  /// change shape for this plan.
   factory CompressJob.start({
     required messages.CompressHostApi api,
     required BinaryMessenger? binaryMessenger,
@@ -76,13 +124,18 @@ class CompressJob {
     required CompressVideoException Function(MissingPluginException, String)
     wrapMissingPlugin,
   }) {
-    _ensureFlutterApiRegistered(binaryMessenger);
-    final CompressJob job = CompressJob._(generateJobId(), api);
-    _jobRegistry[job.id] = job;
-    unawaited(
-      job._run(path, request, wrapPlatformException, wrapMissingPlugin),
-    );
-    return job;
+    final ({CompressJob job, void Function() admit}) queued =
+        createQueuedCompressJob(
+          api: api,
+          binaryMessenger: binaryMessenger,
+          path: path,
+          request: request,
+          wrapPlatformException: wrapPlatformException,
+          wrapMissingPlugin: wrapMissingPlugin,
+          onCancelWhileQueued: _noOpCancelWhileQueued,
+        );
+    queued.admit();
+    return queued.job;
   }
 
   /// This job's id, in the format `<monotonic counter>-<16 lowercase hex characters>`.
@@ -94,8 +147,19 @@ class CompressJob {
       Completer<CompressResult>();
   bool _isCancelled = false;
 
+  /// True from creation until this job's platform call is issued -- either immediately (a job
+  /// created via [CompressJob.start], or one admitted the instant `CompressVideo`'s queue had a
+  /// free slot) or later, once an earlier job from the same `CompressVideo` instance completes.
+  bool _isQueued = true;
+
+  /// Removes this job from `CompressVideo`'s pending queue when [cancel] is called while
+  /// [isQueued] is still true. Set by [createQueuedCompressJob]; never touches the active-job
+  /// count, which only the running-job completion path adjusts (05-RESEARCH.md Pitfall 1).
+  void Function() _onCancelWhileQueued = _noOpCancelWhileQueued;
+
   /// Progress, 0 to 100 inclusive, emitted as the job runs. A broadcast stream that closes
-  /// when the job ends, whether by success, failure or cancellation.
+  /// when the job ends, whether by success, failure or cancellation. Emits nothing while
+  /// [isQueued] is true -- the first event only arrives once the job actually starts.
   Stream<double> get progress => _progressController.stream;
 
   /// Completes with the job's [CompressResult] on success, or fails with a
@@ -106,15 +170,40 @@ class CompressJob {
   /// Whether [cancel] has been called on this job.
   bool get isCancelled => _isCancelled;
 
+  /// Whether this job's platform call has not yet been issued. True from creation until
+  /// `CompressVideo`'s queue admits it -- a job may report progress and resolve a result only
+  /// after this becomes `false`.
+  bool get isQueued => _isQueued;
+
   /// Requests cancellation of this job. A no-op if the job has already finished (successfully,
-  /// with a failure, or by a previous [cancel] call). Native code deletes the job's partial
-  /// output and fails [result] with a cancelled [CompressVideoException]; this call only
+  /// with a failure, or by a previous [cancel] call).
+  ///
+  /// If the job is still [isQueued], it is removed from `CompressVideo`'s pending queue and
+  /// resolved with the same typed [CompressVideoErrorReason.cancelled] failure a natively-
+  /// cancelled job produces, without ever reaching the platform -- a caller cannot tell from the
+  /// exception whether the job had started (D-03). Otherwise, native code deletes the job's
+  /// partial output and fails [result] with a cancelled [CompressVideoException]; this call only
   /// requests that and does not itself wait for [result] to complete.
   Future<void> cancel() async {
     if (_isCancelled || _resultCompleter.isCompleted) {
       return;
     }
     _isCancelled = true;
+    if (_isQueued) {
+      _isQueued = false;
+      _onCancelWhileQueued();
+      _jobRegistry.remove(id);
+      if (!_progressController.isClosed) {
+        await _progressController.close();
+      }
+      _failWith(
+        const CompressVideoException(
+          reason: CompressVideoErrorReason.cancelled,
+          message: 'The compression job was cancelled',
+        ),
+      );
+      return;
+    }
     try {
       await _api.cancel(id);
     } on PlatformException {
@@ -123,6 +212,25 @@ class CompressJob {
     } on MissingPluginException {
       // No native implementation registered; nothing more this call can do.
     }
+  }
+
+  /// Issues this job's deferred platform call. A no-op if already admitted or if the job was
+  /// already resolved (for example, cancelled while queued) before being admitted -- the latter
+  /// should not normally happen since `CompressVideo` removes a cancelled entry from its pending
+  /// queue before it can be admitted, but this guard keeps admission idempotent regardless.
+  void _startPlatformCall(
+    String path,
+    messages.CompressRequestMessage request,
+    CompressVideoException Function(PlatformException, String)
+    wrapPlatformException,
+    CompressVideoException Function(MissingPluginException, String)
+    wrapMissingPlugin,
+  ) {
+    if (!_isQueued) {
+      return;
+    }
+    _isQueued = false;
+    unawaited(_run(path, request, wrapPlatformException, wrapMissingPlugin));
   }
 
   Future<void> _run(

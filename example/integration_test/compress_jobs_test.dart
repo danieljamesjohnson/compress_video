@@ -57,6 +57,13 @@ Future<String> _copyHiBitrateClip(String suffix) => _copyAssetToTempFile(
   'jobs_hibitrate_${suffix}_${DateTime.now().microsecondsSinceEpoch}.mp4',
 );
 
+/// The corpus's least expensive clip -- used by the queue cases (05-01, 05-03) so submitting
+/// several real compressions at once stays cheap enough for this suite's per-test timeout.
+Future<String> _copySmallClip(String suffix) => _copyAssetToTempFile(
+  'assets/corpus/small_480p.mp4',
+  'jobs_small_${suffix}_${DateTime.now().microsecondsSinceEpoch}.mp4',
+);
+
 /// Returns a path inside a fresh temporary directory that no file has ever been written to.
 /// Cancellation and failure cases pass this as `CompressOptions.outputPath` so the exact
 /// destination is known up front and "no file exists here" can be asserted deterministically,
@@ -98,7 +105,7 @@ Future<void> _awaitProgressBelow100(CompressJob job) async {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
   // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
@@ -403,6 +410,101 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
   });
+
+  group(
+    'Queue: default concurrency runs three jobs strictly one at a time',
+    () {
+      testWidgets(
+        'three jobs submitted together from one default-constructed CompressVideo run one '
+        "after another, each with its own output path, and no job's first progress arrives "
+        "before the previous job's result resolved",
+        (WidgetTester tester) async {
+          final String pathA = await _copySmallClip('queue_default_a');
+          final String pathB = await _copySmallClip('queue_default_b');
+          final String pathC = await _copySmallClip('queue_default_c');
+          final String outputA = await _freshOutputPath(
+            'queue_default_a_output.mp4',
+          );
+          final String outputB = await _freshOutputPath(
+            'queue_default_b_output.mp4',
+          );
+          final String outputC = await _freshOutputPath(
+            'queue_default_c_output.mp4',
+          );
+
+          final Stopwatch stopwatch = Stopwatch()..start();
+          final Map<String, int> firstProgressAtMs = <String, int>{};
+          final Map<String, int> resultAtMs = <String, int>{};
+
+          void recordFirstProgress(String label, CompressJob job) {
+            late final StreamSubscription<double> subscription;
+            subscription = job.progress.listen((double value) {
+              firstProgressAtMs.putIfAbsent(
+                label,
+                () => stopwatch.elapsedMilliseconds,
+              );
+            });
+            unawaited(job.result.whenComplete(subscription.cancel));
+          }
+
+          final CompressJob jobA = compressVideo.compress(
+            pathA,
+            options: CompressOptions(outputPath: outputA),
+          );
+          final CompressJob jobB = compressVideo.compress(
+            pathB,
+            options: CompressOptions(outputPath: outputB),
+          );
+          final CompressJob jobC = compressVideo.compress(
+            pathC,
+            options: CompressOptions(outputPath: outputC),
+          );
+          // Submitted together, from a single default-constructed instance (maxConcurrentJobs
+          // 1): only job A may run yet. Asserted here, before any job settles, so a pump that
+          // started all three at once cannot hide behind a later, coincidentally-ordered await.
+          expect(jobA.isQueued, isFalse);
+          expect(jobB.isQueued, isTrue);
+          expect(jobC.isQueued, isTrue);
+
+          recordFirstProgress('A', jobA);
+          recordFirstProgress('B', jobB);
+          recordFirstProgress('C', jobC);
+
+          final CompressResult resultA = await jobA.result;
+          resultAtMs['A'] = stopwatch.elapsedMilliseconds;
+          final CompressResult resultB = await jobB.result;
+          resultAtMs['B'] = stopwatch.elapsedMilliseconds;
+          final CompressResult resultC = await jobC.result;
+          resultAtMs['C'] = stopwatch.elapsedMilliseconds;
+
+          expect(resultA.outputPath, isNot(resultB.outputPath));
+          expect(resultB.outputPath, isNot(resultC.outputPath));
+          expect(resultA.outputPath, isNot(resultC.outputPath));
+          expect(await File(resultA.outputPath).exists(), isTrue);
+          expect(await File(resultB.outputPath).exists(), isTrue);
+          expect(await File(resultC.outputPath).exists(), isTrue);
+
+          // The real proof this test exists for: compared TIMESTAMPS, not await-order alone. A
+          // build whose pump started all three jobs at once would still satisfy every await
+          // above in order, but job B's first progress would arrive far earlier than job A's
+          // result -- these comparisons catch exactly that.
+          expect(
+            firstProgressAtMs['B']!,
+            greaterThanOrEqualTo(resultAtMs['A']!),
+            reason:
+                "job B's platform call must not be issued until job A's result resolved",
+          );
+          expect(
+            firstProgressAtMs['C']!,
+            greaterThanOrEqualTo(resultAtMs['B']!),
+            reason:
+                "job C's platform call must not be issued until job B's result resolved",
+          );
+        },
+        timeout: const Timeout(Duration(seconds: 60)),
+      );
+    },
+  );
 
   group('Real failures: every one is typed, none logs, none leaves a file behind', () {
     testWidgets(

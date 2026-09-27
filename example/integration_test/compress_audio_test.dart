@@ -331,7 +331,7 @@ double _measuredAudioBitrateBps(
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   Future<String> copySmallClip() => _copyAssetToTempFile(
     'assets/corpus/small_480p.mp4',

@@ -56,7 +56,7 @@ Future<int> _sourceBytes(String clipName) async {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   const List<String> clips = <String>[
     'small_480p',

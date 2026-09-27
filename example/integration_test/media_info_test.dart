@@ -138,7 +138,7 @@ void _expectTolerantWithinBounds(MediaInfo info, Map<String, dynamic> sidecar) {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   // Emitted once, after every clip's crossPlatform assertions have run, so tool/check_parity.sh
   // (01-07) can diff exactly what this platform observed against the other platform's own

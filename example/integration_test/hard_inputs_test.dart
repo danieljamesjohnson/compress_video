@@ -520,7 +520,7 @@ void _expectCodecFallbackInvariant(
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
   // (03-08, D-16; extended 04-05 with toneMapped/hevcFallback) can diff exactly what this

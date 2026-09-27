@@ -5,6 +5,9 @@
 /// plans in this phase and in phases 2-6.
 library;
 
+import 'dart:async';
+import 'dart:collection';
+
 import 'package:flutter/services.dart';
 
 import 'src/compress_job.dart';
@@ -27,17 +30,50 @@ export 'src/presets.dart';
 /// No static singleton and no global state: construct an instance where you need it. The
 /// optional [binaryMessenger] parameter exists so a later phase can inject a background-isolate
 /// messenger without changing this class's shape.
+///
+/// [compress] jobs submitted through one instance run through that instance's own FIFO queue,
+/// gated by [maxConcurrentJobs]; two instances queue completely independently, so one instance
+/// is the normal choice for an app (D-04). Because that queue is per-instance mutable state,
+/// this constructor is not `const` -- see CHANGELOG.md for the migration note if an existing
+/// call site declared `const CompressVideo()`.
 class CompressVideo {
   /// Creates a [CompressVideo]. [binaryMessenger] is normally left `null`, which routes calls
-  /// to the default host platform messenger.
-  const CompressVideo({BinaryMessenger? binaryMessenger})
+  /// to the default host platform messenger. [maxConcurrentJobs] must be at least 1 (the
+  /// default); it throws a [CompressVideoException] with reason
+  /// [CompressVideoErrorReason.unsupportedInput] otherwise, matching how every other invalid
+  /// argument in this package is rejected.
+  CompressVideo({BinaryMessenger? binaryMessenger, this.maxConcurrentJobs = 1})
     // The public parameter name `binaryMessenger` is the documented API shape;
     // `this._binaryMessenger` would make the private field name the public parameter
     // name instead, so an initializing formal is deliberately not used here.
     // ignore: prefer_initializing_formals
-    : _binaryMessenger = binaryMessenger;
+    : _binaryMessenger = binaryMessenger {
+    if (maxConcurrentJobs < 1) {
+      throw const CompressVideoException(
+        reason: CompressVideoErrorReason.unsupportedInput,
+        message: 'maxConcurrentJobs must be at least 1',
+      );
+    }
+  }
 
   final BinaryMessenger? _binaryMessenger;
+
+  /// The maximum number of [compress] jobs this instance runs at once (default 1, strictly
+  /// sequential). Extra submissions beyond this limit wait in FIFO submission order until a
+  /// running job's [CompressJob.result] settles -- successfully, with a failure, or by
+  /// cancellation -- freeing a slot for the next queued job (D-02).
+  final int maxConcurrentJobs;
+
+  /// This instance's own FIFO queue of jobs admitted but not yet started, paired with the
+  /// closure that starts each one. Two [CompressVideo] instances never share a queue (D-04).
+  final Queue<({CompressJob job, void Function() admit})> _pending =
+      Queue<({CompressJob job, void Function() admit})>();
+
+  /// The number of jobs from this instance currently running (admitted, not yet settled).
+  /// Never exceeds [maxConcurrentJobs]. Only [_onJobSettled] decrements it, and only
+  /// [_pumpQueue] increments it -- the cancel-while-queued path in [CompressJob.cancel] never
+  /// touches this count, since it never incremented it either (05-RESEARCH.md Pitfall 1).
+  int _activeJobCount = 0;
 
   /// Returns media info for the video at [path].
   ///
@@ -119,16 +155,24 @@ class CompressVideo {
   }
 
   /// Compresses the video at [path] per [options], returning a [CompressJob] synchronously,
-  /// with no `Future` wrapping it (D-01), while the platform call proceeds in the background.
+  /// with no `Future` wrapping it (D-01), whether it starts immediately or waits behind other
+  /// jobs from this same instance.
   ///
   /// [path] and [options] are validated before anything crosses the platform channel: a blank
   /// [path] and any invalid [options] combination both throw a [CompressVideoException] with
   /// reason [CompressVideoErrorReason.unsupportedInput] synchronously, from this call itself,
   /// not from the returned job's [CompressJob.result]. [options]'s preset is resolved to
   /// concrete `maxLongSidePx`/`videoBitrateBps` values here -- no preset enum crosses the
-  /// channel. The returned job's [CompressJob.progress] stream and
-  /// [CompressJob.result] are both fully independent of any other job; there is no global
-  /// progress stream and no "is compressing" singleton anywhere in this package.
+  /// channel.
+  ///
+  /// The job may be queued behind earlier jobs submitted to this same instance: with the
+  /// default [maxConcurrentJobs] of 1, jobs run strictly one at a time in submission order; a
+  /// higher limit runs that many at once. [CompressJob.isQueued] reports whether a job is still
+  /// waiting, and its [CompressJob.progress] stream emits only once it actually starts. Every
+  /// job's [CompressJob.progress] and [CompressJob.result] are fully independent of every other
+  /// job regardless of queue position; there is no global progress stream and no "is
+  /// compressing" singleton anywhere in this package. Two [CompressVideo] instances queue
+  /// completely independently (D-04).
   CompressJob compress(
     String path, {
     CompressOptions options = const CompressOptions(),
@@ -145,14 +189,45 @@ class CompressVideo {
       binaryMessenger: _binaryMessenger,
     );
 
-    return CompressJob.start(
+    late final ({CompressJob job, void Function() admit}) entry;
+    entry = createQueuedCompressJob(
       api: api,
       binaryMessenger: _binaryMessenger,
       path: path,
       request: _buildRequestMessage(options),
       wrapPlatformException: _wrapPlatformException,
       wrapMissingPlugin: _wrapMissingPlugin,
+      onCancelWhileQueued: () => _pending.remove(entry),
     );
+    _pending.add(entry);
+    _pumpQueue();
+    return entry.job;
+  }
+
+  /// Starts entries from the front of [_pending] while [_activeJobCount] is below
+  /// [maxConcurrentJobs], in FIFO submission order. The only call site that increments
+  /// [_activeJobCount]; [_onJobSettled] is the only one that decrements it and is what calls
+  /// back in here once a running job frees its slot.
+  void _pumpQueue() {
+    while (_activeJobCount < maxConcurrentJobs && _pending.isNotEmpty) {
+      final ({CompressJob job, void Function() admit}) entry = _pending
+          .removeFirst();
+      _activeJobCount++;
+      entry.admit();
+      unawaited(
+        entry.job.result.then(
+          (_) => _onJobSettled(),
+          onError: (Object _, StackTrace _) => _onJobSettled(),
+        ),
+      );
+    }
+  }
+
+  /// Frees the slot a completed, failed, or cancelled running job held, then pumps the queue
+  /// again so the next waiting job (if any) can start.
+  void _onJobSettled() {
+    _activeJobCount--;
+    _pumpQueue();
   }
 
   /// Returns a pre-flight [CompressEstimate] for compressing the video at [path] per

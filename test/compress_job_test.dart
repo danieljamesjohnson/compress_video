@@ -89,7 +89,17 @@ CompressResultMessage _fakeResultMessage() => CompressResultMessage(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  // A fresh instance per test (05-01-PLAN.md deviation), not one shared for the whole file: this
+  // package's compress() calls now go through a per-instance FIFO queue with a default
+  // concurrency of 1 (D-02). Several cases below deliberately never resolve a job (a hanging
+  // `startCompress` mock, used to exercise progress routing without caring about completion) --
+  // sharing one instance across the whole file would permanently occupy that instance's one
+  // concurrency slot and starve every later test's own compress() call.
+  late CompressVideo compressVideo;
+
+  setUp(() {
+    compressVideo = CompressVideo();
+  });
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

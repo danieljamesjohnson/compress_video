@@ -20,7 +20,7 @@ void _setHandler(Future<ByteData?> Function(ByteData? message) handler) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

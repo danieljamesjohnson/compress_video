@@ -96,7 +96,7 @@ bool _rgbDiffersBy(List<int> a, List<int> b, int tolerance) {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   tearDownAll(() {
     // ignore: avoid_print

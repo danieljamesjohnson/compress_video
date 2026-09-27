@@ -107,7 +107,7 @@ void main() {
   // this suite now runs on Android, the iOS simulator and the macOS host with no platform
   // guard at all.
 
-  const CompressVideo compressVideo = CompressVideo();
+  final CompressVideo compressVideo = CompressVideo();
 
   // Emitted once, after every recorded case's own assertions have run, so tool/check_parity.sh
   // (03-08, D-16) can diff exactly what this platform observed against the other two platforms'
