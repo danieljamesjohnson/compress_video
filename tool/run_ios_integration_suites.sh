@@ -59,6 +59,7 @@ else
     integration_test/jobs_background_test.dart
     integration_test/compress_output_test.dart
     integration_test/hard_inputs_test.dart
+    integration_test/video_compress_compat_test.dart
   )
 fi
 

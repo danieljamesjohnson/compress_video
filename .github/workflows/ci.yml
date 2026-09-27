@@ -494,6 +494,11 @@ jobs:
             integration_test/jobs_background_test.dart
 
       - name: Run corpus integration tests on the iOS simulator (part 2)
+        # 06-02: the video_compress compat suite is the fourth suite here. It is short (six
+        # cases, about 10 s of test time on the Android emulator), so it was added to part 2
+        # rather than given a third step. No budget changed. If a run shows this step close to
+        # its budget, a third split step is the next move, not a higher timeout.
+        #
         # Second disjoint subset (see the step above for the full rationale, including why this
         # step also keeps a full 90-minute budget): the remaining three suites, including
         # hard_inputs_test.dart, into their own log so both steps' PARITY_JSON lines survive to
@@ -505,7 +510,8 @@ jobs:
             "${{ steps.ios_sim.outputs.udid }}" \
             integration_test/compress_jobs_test.dart \
             integration_test/compress_output_test.dart \
-            integration_test/hard_inputs_test.dart
+            integration_test/hard_inputs_test.dart \
+            integration_test/video_compress_compat_test.dart
 
       - name: Extract cross-platform parity records (Apple)
         # Captures the PARITY_JSON lines media_info_test.dart/thumbnail_test.dart emitted above,
@@ -612,6 +618,10 @@ jobs:
             integration_test/jobs_background_test.dart
 
       - name: Run corpus integration tests on macOS (part 2)
+        # 06-02: the video_compress compat suite is the fourth suite here, added to part 2
+        # rather than given a third step, for the reason given on the iOS part 2 step above. No
+        # budget changed.
+        #
         # Second disjoint subset (see the step above for the full rationale, including the
         # 90-minute budget): the remaining three suites, including hard_inputs_test.dart, into
         # their own log.
@@ -621,7 +631,8 @@ jobs:
           LOG=/tmp/macos_integration_2.log bash ../tool/run_ios_integration_suites.sh macos \
             integration_test/compress_jobs_test.dart \
             integration_test/compress_output_test.dart \
-            integration_test/hard_inputs_test.dart
+            integration_test/hard_inputs_test.dart \
+            integration_test/video_compress_compat_test.dart
 
       - name: Extract cross-platform parity records (macOS)
         # Captures the PARITY_JSON lines the macOS runs above emitted, for the `parity` job
