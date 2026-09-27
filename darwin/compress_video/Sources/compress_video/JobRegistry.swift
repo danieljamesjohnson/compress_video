@@ -17,7 +17,10 @@ enum JobRegistry {
   /// writing to. A class (not a struct) so mutating `cancelled`/`terminal` through a dictionary
   /// lookup is visible to every holder of the same instance, mirroring Kotlin's `LiveJob` class.
   final class LiveJob {
-    let cancel: () -> Void
+    /// Cancels the operation driving this job, given the reason the caller cancelled it for --
+    /// mirrors Kotlin's `LiveJob.onCancelled: (reason: String) -> Unit` (05-04, D-11): the
+    /// reason rides the same closure that already existed rather than a second parallel one.
+    let cancel: (String) -> Void
     let tempFile: URL
 
     /// Set the instant `JobRegistry.cancel(jobId:)` actually cancels this job -- guards against
@@ -33,7 +36,7 @@ enum JobRegistry {
     /// into place.
     fileprivate(set) var terminal = false
 
-    init(cancel: @escaping () -> Void, tempFile: URL) {
+    init(cancel: @escaping (String) -> Void, tempFile: URL) {
       self.cancel = cancel
       self.tempFile = tempFile
     }
@@ -42,7 +45,7 @@ enum JobRegistry {
   private static var jobs: [String: LiveJob] = [:]
 
   /// Registers `job` under `jobId`. Must be called on the main queue.
-  static func register(jobId: String, cancel: @escaping () -> Void, tempFile: URL) {
+  static func register(jobId: String, cancel: @escaping (String) -> Void, tempFile: URL) {
     jobs[jobId] = LiveJob(cancel: cancel, tempFile: tempFile)
   }
 
@@ -67,8 +70,9 @@ enum JobRegistry {
     jobs[jobId]?.terminal = true
   }
 
-  /// Cancels the job identified by `jobId`: marks it cancelled, invokes its cancel closure
-  /// (which `CompressionEngine` wires to flip its own local flag and call
+  /// Cancels the job identified by `jobId`: marks it cancelled, invokes its cancel closure with
+  /// `reason` (which `CompressionEngine` wires to flip its own local flag -- recording `reason`
+  /// into the same job-scoped state its copy loop already polls -- and call
   /// `reader.cancelReading()` -- observed by the copy loop on its next sample, per-sample
   /// latency being an accepted bound, D-08), and forgets it. A no-op if `jobId` is unknown,
   /// already cancelled, or already `terminal` -- so cancelling twice, or cancelling after the
@@ -77,10 +81,17 @@ enum JobRegistry {
   /// the temp file's actual write handle, is responsible for that once it observes the flag
   /// and unwinds; touching the file from here (a different queue than the copy loop runs on)
   /// would race the writer still appending to it.
-  static func cancel(jobId: String) {
+  ///
+  /// `reason` defaults to `"cancelled"` -- an ordinary cancel, from `Compression.cancel` or
+  /// `cancelAll` on plugin detach. `Compression`'s iOS-only background-task expiration handler
+  /// (D-11) is the only other call site, passing `"interrupted"` for the system taking the
+  /// job's execution time away, which the typed error the suspended `startCompress` call throws
+  /// then names as retryable -- mirrors Android's `JobRegistry.cancel(jobId, reason)` (05-03)
+  /// exactly, including the default.
+  static func cancel(jobId: String, reason: String = "cancelled") {
     guard let job = jobs[jobId], !job.cancelled, !job.terminal else { return }
     job.cancelled = true
-    job.cancel()
+    job.cancel(reason)
     jobs.removeValue(forKey: jobId)
   }
 

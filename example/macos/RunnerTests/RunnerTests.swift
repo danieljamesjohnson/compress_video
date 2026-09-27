@@ -1156,7 +1156,7 @@ class RunnerTests: XCTestCase {
   func testJobRegistryRegisterThenFindReturnsTheJob() {
     let jobId = "jobregistry-\(UUID().uuidString)"
     let tempFile = makeTempFileURLForJobRegistryTest()
-    JobRegistry.register(jobId: jobId, cancel: {}, tempFile: tempFile)
+    JobRegistry.register(jobId: jobId, cancel: { _ in }, tempFile: tempFile)
     defer { JobRegistry.remove(jobId: jobId) }
 
     let found = JobRegistry.find(jobId: jobId)
@@ -1172,18 +1172,48 @@ class RunnerTests: XCTestCase {
     let jobId = "jobregistry-\(UUID().uuidString)"
     var invocationCount = 0
     JobRegistry.register(
-      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+      jobId: jobId, cancel: { _ in invocationCount += 1 },
+      tempFile: makeTempFileURLForJobRegistryTest())
 
     JobRegistry.cancel(jobId: jobId)
 
     XCTAssertEqual(invocationCount, 1)
   }
 
+  // 05-04 (D-11): JobRegistry.cancel's reason parameter, mirroring Android's identical
+  // JobRegistry.cancel(jobId, reason) (05-03). A default cancel still names the ordinary
+  // reason, and an explicit reason -- the one Compression.swift's iOS-only background-task
+  // expiration handler passes -- reaches the registered closure unchanged.
+  func testJobRegistryCancelWithDefaultReasonPassesTheOrdinaryCancellationReason() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    var receivedReason: String?
+    JobRegistry.register(
+      jobId: jobId, cancel: { reason in receivedReason = reason },
+      tempFile: makeTempFileURLForJobRegistryTest())
+
+    JobRegistry.cancel(jobId: jobId)
+
+    XCTAssertEqual(receivedReason, "cancelled")
+  }
+
+  func testJobRegistryCancelWithAnExplicitReasonPassesThatReasonToTheClosure() {
+    let jobId = "jobregistry-\(UUID().uuidString)"
+    var receivedReason: String?
+    JobRegistry.register(
+      jobId: jobId, cancel: { reason in receivedReason = reason },
+      tempFile: makeTempFileURLForJobRegistryTest())
+
+    JobRegistry.cancel(jobId: jobId, reason: "interrupted")
+
+    XCTAssertEqual(receivedReason, "interrupted")
+  }
+
   func testJobRegistryASecondCancelOfTheSameIdInvokesNothingAndDoesNotThrow() {
     let jobId = "jobregistry-\(UUID().uuidString)"
     var invocationCount = 0
     JobRegistry.register(
-      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+      jobId: jobId, cancel: { _ in invocationCount += 1 },
+      tempFile: makeTempFileURLForJobRegistryTest())
 
     JobRegistry.cancel(jobId: jobId)
     JobRegistry.cancel(jobId: jobId)
@@ -1200,7 +1230,8 @@ class RunnerTests: XCTestCase {
     let jobId = "jobregistry-\(UUID().uuidString)"
     var invocationCount = 0
     JobRegistry.register(
-      jobId: jobId, cancel: { invocationCount += 1 }, tempFile: makeTempFileURLForJobRegistryTest())
+      jobId: jobId, cancel: { _ in invocationCount += 1 },
+      tempFile: makeTempFileURLForJobRegistryTest())
     defer { JobRegistry.remove(jobId: jobId) }
 
     JobRegistry.markTerminal(jobId: jobId)
@@ -1219,9 +1250,9 @@ class RunnerTests: XCTestCase {
     var invokedA = false
     var invokedB = false
     JobRegistry.register(
-      jobId: jobIdA, cancel: { invokedA = true }, tempFile: makeTempFileURLForJobRegistryTest())
+      jobId: jobIdA, cancel: { _ in invokedA = true }, tempFile: makeTempFileURLForJobRegistryTest())
     JobRegistry.register(
-      jobId: jobIdB, cancel: { invokedB = true }, tempFile: makeTempFileURLForJobRegistryTest())
+      jobId: jobIdB, cancel: { _ in invokedB = true }, tempFile: makeTempFileURLForJobRegistryTest())
 
     JobRegistry.cancelAll()
 
@@ -1236,8 +1267,8 @@ class RunnerTests: XCTestCase {
     let jobIdB = "jobregistry-\(UUID().uuidString)"
     let tempFileA = makeTempFileURLForJobRegistryTest()
     let tempFileB = makeTempFileURLForJobRegistryTest()
-    JobRegistry.register(jobId: jobIdA, cancel: {}, tempFile: tempFileA)
-    JobRegistry.register(jobId: jobIdB, cancel: {}, tempFile: tempFileB)
+    JobRegistry.register(jobId: jobIdA, cancel: { _ in }, tempFile: tempFileA)
+    JobRegistry.register(jobId: jobIdB, cancel: { _ in }, tempFile: tempFileB)
     defer {
       JobRegistry.remove(jobId: jobIdA)
       JobRegistry.remove(jobId: jobIdB)

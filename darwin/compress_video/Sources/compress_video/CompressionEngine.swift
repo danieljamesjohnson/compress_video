@@ -509,8 +509,8 @@ final class CompressionEngine {
     await MainActor.run {
       JobRegistry.register(
         jobId: jobId,
-        cancel: {
-          cancelState.markCancelled()
+        cancel: { reason in
+          cancelState.markCancelled(reason: reason)
           reader.cancelReading()
         },
         tempFile: tempURL
@@ -548,7 +548,9 @@ final class CompressionEngine {
       PluginFiles.quietDelete(tempURL)
       await MainActor.run { JobRegistry.remove(jobId: jobId) }
       if cancelState.isCancelled {
-        throw CompressVideoError(code: "cancelled", message: "The compression job was cancelled", details: nil)
+        throw CompressVideoError(
+          code: cancelState.reason, message: Self.cancellationMessage(reason: cancelState.reason),
+          details: nil)
       }
       throw Self.mapToCompressVideoError(error)
     }
@@ -558,7 +560,9 @@ final class CompressionEngine {
       writer.cancelWriting()
       PluginFiles.quietDelete(tempURL)
       await MainActor.run { JobRegistry.remove(jobId: jobId) }
-      throw CompressVideoError(code: "cancelled", message: "The compression job was cancelled", details: nil)
+      throw CompressVideoError(
+        code: cancelState.reason, message: Self.cancellationMessage(reason: cancelState.reason),
+        details: nil)
     }
 
     let finishResult: Result<Void, Error> = await withCheckedContinuation { continuation in
@@ -633,8 +637,16 @@ final class CompressionEngine {
 
     onProgress(0.0)
 
+    let cancelState = CancelState()
     await MainActor.run {
-      JobRegistry.register(jobId: jobId, cancel: { session.cancelExport() }, tempFile: tempURL)
+      JobRegistry.register(
+        jobId: jobId,
+        cancel: { reason in
+          cancelState.markCancelled(reason: reason)
+          session.cancelExport()
+        },
+        tempFile: tempURL
+      )
     }
 
     do {
@@ -657,7 +669,9 @@ final class CompressionEngine {
       PluginFiles.quietDelete(tempURL)
       await MainActor.run { JobRegistry.remove(jobId: jobId) }
       if session.status == .cancelled {
-        throw CompressVideoError(code: "cancelled", message: "The compression job was cancelled", details: nil)
+        throw CompressVideoError(
+          code: cancelState.reason, message: Self.cancellationMessage(reason: cancelState.reason),
+          details: nil)
       }
       throw Self.mapToCompressVideoError(error)
     }
@@ -1002,13 +1016,21 @@ final class CompressionEngine {
     }
   }
 
-  /// A tiny cross-queue cancellation flag: `JobRegistry.cancel(jobId:)`'s closure sets it from
-  /// the main queue; the copy loop above reads it from `jobQueue`. A plain `NSLock` rather than
-  /// an actor -- this needs to be checked synchronously from inside a non-`async`
-  /// `requestMediaDataWhenReady` callback, where `await`ing an actor is not an option.
+  /// A tiny cross-queue cancellation flag: `JobRegistry.cancel(jobId:reason:)`'s closure sets it
+  /// from the main queue; the copy loop above (and `runTransmux`'s own catch block) reads it
+  /// from `jobQueue`/the calling context. A plain `NSLock` rather than an actor -- this needs to
+  /// be checked synchronously from inside a non-`async` `requestMediaDataWhenReady` callback,
+  /// where `await`ing an actor is not an option.
+  ///
+  /// `reason` (D-11, 05-04) is recorded alongside `cancelled` in the SAME locked state, rather
+  /// than a second parallel flag -- the job-scoped state the plan text refers to. Defaults to
+  /// `"cancelled"` so a `CancelState` that is never marked (the ordinary, non-cancelled
+  /// completion path) still reports a sensible reason if ever read, though every real read site
+  /// checks `isCancelled` first.
   private final class CancelState {
     private let lock = NSLock()
     private var cancelled = false
+    private var cancelReason = "cancelled"
 
     var isCancelled: Bool {
       lock.lock()
@@ -1016,11 +1038,28 @@ final class CompressionEngine {
       return cancelled
     }
 
-    func markCancelled() {
+    var reason: String {
+      lock.lock()
+      defer { lock.unlock() }
+      return cancelReason
+    }
+
+    func markCancelled(reason: String) {
       lock.lock()
       cancelled = true
+      cancelReason = reason
       lock.unlock()
     }
+  }
+
+  /// The typed error message for a cancelled job, chosen by `reason` -- mirrors
+  /// `TransformerEngine.compress`'s identical `if (finalOutcome.reason == "interrupted")` branch
+  /// (Android, 05-03) exactly, so a caller sees the same wording on both platforms for the same
+  /// situation.
+  private static func cancellationMessage(reason: String) -> String {
+    reason == "interrupted"
+      ? "The compression job was interrupted by the system before it completed and can be retried"
+      : "The compression job was cancelled"
   }
 
   /// Awaits legacy (`loadValuesAsynchronously`) loading of `keys` on `keyValueLoadable` (the

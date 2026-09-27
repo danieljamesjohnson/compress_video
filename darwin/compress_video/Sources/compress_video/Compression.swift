@@ -2,8 +2,66 @@ import Foundation
 
 #if os(iOS)
   import Flutter
+  import UIKit
 #elseif os(macOS)
   import FlutterMacOS
+#endif
+
+#if os(iOS)
+  /// Wraps one iOS background task for the lifetime of a single running compression job (D-11,
+  /// D-12): begun on the main actor immediately before `engine.compress` starts, ended from
+  /// exactly one call path -- `end()` -- covering every terminal path (success, typed failure,
+  /// cancellation) via a `defer` at the call site. `end()` is idempotent and safe to call twice
+  /// (once from the expiration handler below, once from that `defer`) and guards against ending
+  /// an identifier the system declined to grant (`UIBackgroundTaskIdentifier.invalid`), so a
+  /// short-lived job that never gets backgrounded, or a device that refuses the request outright,
+  /// is handled rather than crashing on an invalid identifier.
+  ///
+  /// `UIApplication.beginBackgroundTask`/`endBackgroundTask` are documented safe to call from any
+  /// thread; only the expiration handler itself is guaranteed by the system to run on the main
+  /// thread -- the same thread `JobRegistry`'s own main-queue-confinement discipline assumes, so
+  /// `JobRegistry.cancel` is called directly from it with no further hop. A plain `NSLock`, not
+  /// an actor: `end()` must be callable synchronously from that handler and from `defer`, neither
+  /// of which can `await`.
+  ///
+  /// macOS applications are never suspended, so this whole type -- and every `UIApplication`/
+  /// `UIKit` reference in this file -- exists only inside `#if os(iOS)`; macOS compiles to
+  /// exactly the code it ran before this plan.
+  private final class IOSBackgroundTaskGuard {
+    private let lock = NSLock()
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+
+    /// Begins the background task under `name`, wiring `onExpiration` to run when the system
+    /// revokes the extra execution time. Must be called on the main actor (`beginBackgroundTask`
+    /// itself is thread-safe, but the plan calls for beginning it there explicitly).
+    func begin(name: String, onExpiration: @escaping () -> Void) {
+      let id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+        onExpiration()
+        self?.end()
+      }
+      lock.lock()
+      identifier = id
+      lock.unlock()
+    }
+
+    /// Ends the background task exactly once, no matter how many times this is called or from
+    /// which of the two call sites (the expiration handler, or the normal `defer` unwind) --
+    /// a no-op if it was already ended or if the system never granted a valid identifier.
+    func end() {
+      lock.lock()
+      guard !ended, identifier != .invalid else {
+        ended = true
+        lock.unlock()
+        return
+      }
+      ended = true
+      let id = identifier
+      identifier = .invalid
+      lock.unlock()
+      UIApplication.shared.endBackgroundTask(id)
+    }
+  }
 #endif
 
 /// `CompressHostApi` implementation -- the counterpart of Android's `Compression.kt`.
@@ -94,6 +152,23 @@ final class Compression: CompressHostApi {
       }
     }
     defer { progressContinuation.finish() }
+
+    #if os(iOS)
+      // iOS-only background task (D-11/D-12): asks the system for extra execution time so a job
+      // that is still running when the app is backgrounded gets a chance to finish. When that
+      // time runs out, the expiration handler cancels THIS job through the existing
+      // cancellation path with the retryable "interrupted" reason -- the suspended
+      // `engine.compress` call below then resolves with a typed, retryable failure instead of
+      // hanging or being killed mid-write. macOS is never suspended, so none of this exists
+      // there.
+      let backgroundTaskGuard = IOSBackgroundTaskGuard()
+      await MainActor.run {
+        backgroundTaskGuard.begin(name: "compress_video.job.\(jobId)") {
+          JobRegistry.cancel(jobId: jobId, reason: "interrupted")
+        }
+      }
+      defer { backgroundTaskGuard.end() }
+    #endif
 
     return try await engine.compress(
       jobId: jobId,
