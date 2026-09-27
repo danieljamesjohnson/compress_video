@@ -43,6 +43,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:compress_video/compress_video.dart' hide MediaInfo;
 import 'package:compress_video/compress_video.dart' as cv;
@@ -295,7 +296,10 @@ class IVideoCompress {
   final ObservableBuilder<double> compressProgress$ =
       ObservableBuilder<double>();
 
-  final bool _isCompressing = false;
+  bool _isCompressing = false;
+
+  /// The compression in flight, or `null`. Set and cleared together with [_isCompressing].
+  CompressJob? _currentJob;
 
   /// Whether a compression started through this object is in flight.
   ///
@@ -325,6 +329,201 @@ class IVideoCompress {
       duration: info.durationMs.toDouble(),
       file: File(path),
     );
+  }
+
+  /// Compresses the video at [path] and returns the output as a [MediaInfo].
+  ///
+  /// Runs [CompressVideo.compress] with the options [quality] resolves to (see
+  /// [VideoQualityCompressOptions.compressOptions]) and these parameters applied on top:
+  ///
+  /// - [startTime] and [duration] are in **seconds**, as in the incumbent, and [duration] is
+  ///   the length of the span to keep. They become `trimStartMs = startTime * 1000` and
+  ///   `trimEndMs = (startTime + duration) * 1000`.
+  /// - [includeAudio] `false` removes the audio track; `true` or `null` keeps it.
+  /// - [frameRate] is a cap (`maxFps`), never a target: a slower source is not sped up.
+  /// - [deleteOrigin] deletes the input after a successful compression, and only when the
+  ///   output is a different file from the input.
+  ///
+  /// What differs from the incumbent:
+  ///
+  /// - A failure throws a typed [CompressVideoException]. It is never swallowed into `null`.
+  /// - A cancelled compression resolves to a [MediaInfo] with [MediaInfo.isCancel] `true` and
+  ///   a `null` [MediaInfo.path].
+  /// - Trimming works on every platform.
+  /// - The output is never larger than the input. When compressing would not make the file
+  ///   smaller, the output is a copy of the input.
+  /// - [VideoQuality.HighestQuality] caps the long side at 1920 instead of not resizing.
+  ///
+  /// What is kept: only one compression runs at a time. Calling this while [isCompressing] is
+  /// `true` fails with a [StateError], before anything reaches the platform. Like every
+  /// other failure of this call, it is delivered through the returned `Future`.
+  @Deprecated(
+    'Use CompressVideo().compress(path, options: ...).result -- see '
+    'MIGRATION.md',
+  )
+  Future<MediaInfo> compressVideo(
+    String path, {
+    VideoQuality quality = VideoQuality.DefaultQuality,
+    bool deleteOrigin = false,
+    int? startTime,
+    int? duration,
+    bool? includeAudio,
+    int frameRate = 30,
+  }) async {
+    if (_isCompressing) {
+      throw StateError(
+        '''VideoCompress Error: 
+      Method: compressVideo
+      Already have a compression process, you need to wait for the process to finish or stop it''',
+      );
+    }
+
+    // CompressOptions has no copyWith, so the base options are copied field by field.
+    final CompressOptions base = quality.compressOptions;
+    final CompressOptions options = CompressOptions(
+      preset: base.preset,
+      maxLongSidePx: base.maxLongSidePx,
+      videoBitrateBps: base.videoBitrateBps,
+      targetSizeMb: base.targetSizeMb,
+      maxFps: frameRate,
+      audio: includeAudio == false
+          ? const AudioStrip()
+          : const AudioPassthrough(),
+      trimStartMs: startTime == null ? null : startTime * 1000,
+      trimEndMs: duration == null ? null : ((startTime ?? 0) + duration) * 1000,
+      outputPath: base.outputPath,
+      codec: base.codec,
+      hdr: base.hdr,
+      androidForegroundService: base.androidForegroundService,
+    );
+
+    // Throws for an invalid argument before the state below is touched, so a rejected call
+    // can never leave isCompressing stuck at true.
+    final CompressJob job = _engine.compress(path, options: options);
+    _currentJob = job;
+    _isCompressing = true;
+    final StreamSubscription<double> forwarding = job.progress.listen(
+      compressProgress$.next,
+    );
+
+    try {
+      final CompressResult result = await job.result;
+      if (deleteOrigin) {
+        await _deleteOrigin(path, result.outputPath);
+      }
+      return MediaInfo(
+        path: result.outputPath,
+        width: result.widthPx,
+        height: result.heightPx,
+        filesize: result.outputBytes,
+        duration: result.durationMs.toDouble(),
+        isCancel: false,
+        file: File(result.outputPath),
+      );
+    } on CompressVideoException catch (e) {
+      if (e.reason == CompressVideoErrorReason.cancelled) {
+        return MediaInfo(path: null, isCancel: true);
+      }
+      rethrow;
+    } finally {
+      _currentJob = null;
+      _isCompressing = false;
+      await forwarding.cancel();
+    }
+  }
+
+  /// Deletes the input at [path], unless [outputPath] is that same file.
+  ///
+  /// The two are compared as files, not as strings, so a second name for the input (a
+  /// symbolic link, or a differently spelled path) is recognised. When that comparison cannot
+  /// be made, the input is kept: keeping a file the caller asked to delete is recoverable,
+  /// deleting their only copy is not.
+  Future<void> _deleteOrigin(String path, String outputPath) async {
+    if (outputPath == path) {
+      return;
+    }
+    try {
+      // Resolved first: FileSystemEntity.identical does not follow a symbolic link, so on its
+      // own it reports a link and its target as two different files.
+      final String resolvedInput = await File(path).resolveSymbolicLinks();
+      final String resolvedOutput = await File(
+        outputPath,
+      ).resolveSymbolicLinks();
+      if (resolvedInput == resolvedOutput ||
+          await FileSystemEntity.identical(resolvedInput, resolvedOutput)) {
+        return;
+      }
+      await File(path).delete();
+    } on FileSystemException {
+      // The input is already gone, or cannot be compared or deleted. The compression itself
+      // succeeded, so its result is still returned.
+    }
+  }
+
+  /// Stops the compression in flight. Does nothing when there is none.
+  ///
+  /// The pending [compressVideo] call then resolves to a [MediaInfo] with
+  /// [MediaInfo.isCancel] `true`.
+  @Deprecated('Use CompressJob.cancel() -- see MIGRATION.md')
+  Future<void> cancelCompression() async {
+    await _currentJob?.cancel();
+  }
+
+  /// Returns a JPEG thumbnail of the video at [path], as bytes.
+  ///
+  /// [quality] is JPEG quality, 1 to 100. [position] is in milliseconds; a negative value
+  /// (the incumbent's default of -1, "let the platform choose") means the first frame.
+  ///
+  /// Throws a [CompressVideoException] on any failure, including a [quality] outside 1 to
+  /// 100. Never resolves to `null`.
+  @Deprecated(
+    'Use CompressVideo().getThumbnail(path, positionMs: ..., quality: ...) '
+    '-- see MIGRATION.md',
+  )
+  Future<Uint8List> getByteThumbnail(
+    String path, {
+    int quality = 100,
+    int position = -1,
+  }) {
+    return _engine.getThumbnail(
+      path,
+      positionMs: position < 0 ? 0 : position,
+      quality: quality,
+    );
+  }
+
+  /// Writes a JPEG thumbnail of the video at [path] to a file in the plugin's cache directory
+  /// and returns it.
+  ///
+  /// [quality] and [position] behave as in [getByteThumbnail].
+  ///
+  /// Throws a [CompressVideoException] on any failure.
+  @Deprecated(
+    'Use CompressVideo().getThumbnailFile(path, positionMs: ..., quality: '
+    '...) -- see MIGRATION.md',
+  )
+  Future<File> getFileThumbnail(
+    String path, {
+    int quality = 100,
+    int position = -1,
+  }) async {
+    final String thumbnailPath = await _engine.getThumbnailFile(
+      path,
+      positionMs: position < 0 ? 0 : position,
+      quality: quality,
+    );
+    return File(thumbnailPath);
+  }
+
+  /// Deletes every file this plugin wrote to its own cache directory, compression outputs
+  /// and thumbnails alike, and returns `true`.
+  ///
+  /// Throws a [CompressVideoException] when the platform fails to clear the directory; it
+  /// never returns `false` or `null` for a failure.
+  @Deprecated('Use CompressVideo().clearCache() -- see MIGRATION.md')
+  Future<bool> deleteAllCache() async {
+    await _engine.clearCache();
+    return true;
   }
 
   /// Does nothing. Kept so existing calls compile; the engine has no log level to set.
