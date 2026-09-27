@@ -1,35 +1,38 @@
 ## Unreleased
 
-* **Background execution and app suspension (Phase 5, JOBS-05)** —
-  `CompressVideoErrorReason.interrupted` (reserved since Phase 3) is now a real outcome on both
-  native engines, both retryable: on Android, opting a job into
-  `CompressOptions.androidForegroundService` runs it inside a real `mediaProcessing` foreground
-  service that survives the app moving to the background, ended honestly with `interrupted` if
-  the system's own six-hour-per-24-hour quota for that service type ever expires mid-job; on
-  iOS, every running job now holds a system background task (`beginBackgroundTask`) so a short
-  export usually finishes after the app is backgrounded, and resolves with `interrupted` — its
-  partial output deleted — when that extra time runs out or AVFoundation itself reports the
-  interruption. Neither platform requests a background entitlement or capability the host app
-  did not already have; macOS is unaffected (it is never suspended). See the README's
-  "Background execution and app suspension" section for the caller-facing contract.
-* **Background isolates (Phase 5)** — `CompressVideo.ensureInitializedInBackgroundIsolate
-  (RootIsolateToken)` is new: call it as the first statement inside an `Isolate.run`/`compute`
-  closure and every call in this package, including `compress()`, works from that isolate.
-  Progress is never delivered to a background isolate's job (a permanent Flutter engine
-  constraint, not a bug here); `result` resolves normally. Skipping the call fails the first
-  platform call with a typed `CompressVideoException` rather than a hang or `null`. Closes the
-  incumbent `video_compress`'s issue #242 ("cannot run in a background isolate").
-* **Job queue (Phase 5)** — `CompressVideo({int maxConcurrentJobs = 1})` and
-  `CompressJob.isQueued` are new: submitting more jobs than `maxConcurrentJobs` now queues the
-  extras in FIFO order on the Dart side instead of requiring the caller to serialise calls
-  manually, with each job's `progress`/`result` staying fully independent regardless of queue
-  position and cancelling a still-queued job resolving the same typed `cancelled` failure a
-  cancelled running job produces, without ever reaching the platform. `maxConcurrentJobs` must be
-  at least 1; the native engines are unchanged — the queue is Dart-only.
-  **Breaking:** `CompressVideo`'s constructor is no longer `const` (the queue is per-instance
-  mutable state, and Dart's `const` canonicalisation would otherwise make two `const
-  CompressVideo()` expressions silently share one queue, contradicting per-instance
-  independence). Any `const CompressVideo(...)` call site needs to drop the `const`.
+* **Jobs, isolates and background execution (Phase 5)** — three additions, landed together and
+  documented together in the README's "Jobs beyond the foreground" section, in the order a caller
+  runs into them:
+  * **Job queue (JOBS-03)** — `CompressVideo({int maxConcurrentJobs = 1})` and
+    `CompressJob.isQueued` are new: submitting more jobs than `maxConcurrentJobs` now queues the
+    extras in FIFO order on the Dart side instead of requiring the caller to serialise calls
+    manually, with each job's `progress`/`result` staying fully independent regardless of queue
+    position and cancelling a still-queued job resolving the same typed `cancelled` failure a
+    cancelled running job produces, without ever reaching the platform. `maxConcurrentJobs` must
+    be at least 1; the native engines are unchanged — the queue is Dart-only.
+    **Breaking:** `CompressVideo`'s constructor is no longer `const` (the queue is per-instance
+    mutable state, and Dart's `const` canonicalisation would otherwise make two `const
+    CompressVideo()` expressions silently share one queue, contradicting per-instance
+    independence). Any `const CompressVideo(...)` call site needs to drop the `const`.
+  * **Background isolates (JOBS-04)** — `CompressVideo.ensureInitializedInBackgroundIsolate
+    (RootIsolateToken)` is new: call it as the first statement inside an `Isolate.run`/`compute`
+    closure and every call in this package, including `compress()`, works from that isolate.
+    Progress is never delivered to a background isolate's job (a permanent Flutter engine
+    constraint, not a bug here); `result` resolves normally. Skipping the call fails the first
+    platform call with a typed `CompressVideoException` rather than a hang or `null`. Closes the
+    incumbent `video_compress`'s issue #242 ("cannot run in a background isolate").
+  * **Background execution and app suspension (JOBS-05)** —
+    `CompressVideoErrorReason.interrupted` (reserved since Phase 3) is now a real outcome on both
+    native engines, both retryable: on Android, opting a job into
+    `CompressOptions.androidForegroundService` runs it inside a real `mediaProcessing` foreground
+    service (Android 15+ only; inert below that) that survives the app moving to the background,
+    ended honestly with `interrupted` if the system's own six-hour-per-24-hour quota for that
+    service type ever expires mid-job; on iOS, every running job now holds a system background
+    task (`beginBackgroundTask`) so a short export usually finishes after the app is backgrounded,
+    and resolves with `interrupted` — its partial output deleted — when that extra time runs out
+    or AVFoundation itself reports the interruption. Neither platform requests a background
+    entitlement or capability the host app did not already have; macOS is unaffected (it is never
+    suspended).
 * **Codecs, HDR and hard inputs (Phase 4)** — HEVC is now an opt-in (`VideoCodec.hevc`), used
   only when the device has a hardware HEVC encoder and falling back to H.264 with
   `hevcFallback: true` reported otherwise, on both Android (`CodecCapabilities`/`EncoderUtil`)

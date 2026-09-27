@@ -98,6 +98,16 @@ including cancellation, resolves `job.result` with a typed [`CompressVideoExcept
 output is never larger than the input — see `doc/PRESETS.md` and the "same on every platform"
 section below.
 
+### Jobs beyond the foreground: queueing, isolates and backgrounding
+
+The four subsections below are one story, in the order a caller runs into them: how to submit
+more than one compression and bound how many run at once; how to run any call from a background
+isolate rather than the UI isolate; how to opt an Android job into a foreground service so it
+survives the app itself going to the background; and what happens to a running job on iOS when
+the system suspends the app. None of this changes `compress()`'s basic contract — every job still
+has its own `progress` stream and its own typed `result`, still never returns `null`, and the
+output is still never larger than the input.
+
 ### Queueing several compressions
 
 Every `CompressVideo` instance owns its own FIFO job queue, gated by `maxConcurrentJobs`:
@@ -175,10 +185,21 @@ platform and are honestly reported rather than hidden:
   background capabilities.
 * **Android:** the counterpart is opt-in per job via `CompressOptions.androidForegroundService`
   (`AndroidForegroundServiceOptions`), which runs the job inside a real `mediaProcessing`
-  foreground service so it survives the app moving to the background — see that class's own
-  dartdoc for the notification and API-level details. Android's own six-hour-per-24-hour quota
-  for that service type ends a job the same way iOS suspension does: `interrupted`, retryable,
-  partial output deleted.
+  foreground service so it survives the app moving to the background. **This applies only on
+  Android 15 (API 35) and above.** Below API 35 the option is accepted but inert: no service
+  starts, no permission is exercised, and the job runs exactly as it would without the option —
+  the same never-larger, typed-result contract, just without the background survival. Android's
+  own six-hour-per-24-hour quota for that service type ends a job the same way iOS suspension
+  does: `interrupted`, retryable, partial output deleted. The notification itself may not be
+  visible to the user if the host app has never been granted its own `POST_NOTIFICATIONS`
+  permission — this plugin never requests that permission (whether to ask the user is the host
+  app's decision, not this library's) — but the compression keeps running and completing
+  regardless of whether the notification is shown. To make this work, the plugin's own manifest
+  declares two permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`) and one
+  non-exported `mediaProcessing`-typed `<service>`, all of which merge into the consuming app's
+  own manifest through Gradle's standard manifest merger; the service's class name is fully
+  namespaced under this plugin's own package, so a name collision with app-level code is not a
+  realistic concern.
 * **macOS** is never suspended by the system, so none of this applies there — a running job keeps
   running for as long as the app process is alive, exactly as before this plugin ever added it.
 

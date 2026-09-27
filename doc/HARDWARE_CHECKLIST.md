@@ -160,6 +160,48 @@ none exists yet because there is nothing to run it against.
 
 **When run:** not yet run — no real Dolby Vision clip exists on danserver yet (QUESTIONS.md #4).
 
+## Real Android phone backgrounding walkthrough (05-03/05-05, JOBS-05)
+
+**Status: not yet run — proven on the `compress_video_api35` emulator (locally and in CI run
+36321581676) but never on a physical phone.**
+
+05-03 proved the `mediaProcessing` foreground service end to end on the emulator: a live `adb
+shell dumpsys activity services` capture showed `isForeground=true types=0x00002000` while a job
+was running, backgrounding the app mid-encode measured 1 progress event before and 22 after
+(reaching 100), and a deterministic `aapt2`-based assertion confirmed the built APK's merged
+manifest really carries both permissions and the non-exported service. What none of that proves is
+the one thing only a physical device has: the OS actually keeping the process's priority elevated
+and the notification actually rendering to a real status bar, under a real device's own battery
+optimizer / OEM background-kill policy (e.g. manufacturer-specific "app hibernation" settings that
+the emulator does not model).
+
+**To verify on a physical Android phone running Android 15 or above (QUESTIONS.md #3):**
+
+```bash
+adb install -r example/build/app/outputs/flutter-apk/app-debug.apk
+# In the example app: enable "Android foreground service" for the job, then start a compression
+# of a clip long enough to still be running several seconds later (e.g.
+# portrait_hibitrate_1080p60.mp4). While it is running:
+adb shell dumpsys activity services | grep -A5 ForegroundServiceHost
+```
+
+1. **With the option on:** press Home, then lock the screen. Confirm the notification (title/text
+   from `AndroidForegroundServiceOptions`) is visible in the status bar/lock screen, unlock and
+   reopen the app, and confirm the job completed with a typed `CompressResult` (not `interrupted`,
+   not a hang) and the output file exists at `result.outputPath`.
+2. **With the option off (or on a pre-Android-15 device):** repeat the same background/lock/unlock
+   sequence and confirm the job is NOT protected — depending on the device's own background-kill
+   policy it may complete slower, be delayed, or fail with `interrupted` once the app process
+   itself is deprioritized or killed by the OS, which is the documented, expected difference this
+   option exists to prevent.
+
+**Expected result:** with the option on, the notification appears, `dumpsys` shows
+`isForeground=true` with the `mediaProcessing` type for the whole backgrounded duration, and the
+job completes normally. With the option off, no such guarantee holds — record whatever the device
+actually does, since that is itself the point of the comparison.
+
+**When run:** not yet run. Record the device model, Android version, and result here once tested.
+
 ## Real iPhone suspension mid-export (05-04, D-13)
 
 **Status: not yet run — no reachable Mac this phase (QUESTIONS.md #7, #8); the iOS Simulator
