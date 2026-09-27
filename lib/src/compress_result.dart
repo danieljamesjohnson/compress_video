@@ -87,12 +87,36 @@ class CompressResult {
   /// under its own cache directory, or the caller's requested `outputPath`) -- never the
   /// caller's original input path, so a caller who deletes [outputPath] never destroys their
   /// original.
+  ///
+  /// **`usedOriginal: true` forces [transmuxed], [audioReencoded], [toneMapped] and
+  /// [hevcFallback] all `false`** -- no Transformer (Android) or `AVAssetWriter` (Apple) session
+  /// ever ran to produce this file, so none of those flags describe anything that happened. This
+  /// interacts with HDR in one way worth naming explicitly: an HDR source whose tone-mapped
+  /// re-encode would come out larger than the original HDR file is returned as the ORIGINAL HDR
+  /// bytes, `usedOriginal: true`, `toneMapped: false` -- the caller gets back HDR video they did
+  /// not ask to keep, reported honestly via [toneMapped] being `false`, rather than a silently
+  /// tone-mapped file that never happened. This is CORE-05's never-larger guarantee applied
+  /// unconditionally; it has no carve-out for HDR.
   final bool usedOriginal;
 
-  /// Reserved for Phase 4's HDR tone-mapping. Always `false` in this phase.
+  /// Whether the output's colour was tone-mapped from HDR (Dolby Vision profile 8, HLG, or
+  /// HDR10/PQ) down to SDR. Read from a re-probe of the delivered file's own colour transfer
+  /// characteristic, never from the request -- an [CompressOptions] default (`HdrMode.
+  /// toneMapToSdr`) that successfully tone-maps an HDR source reports `true` here exactly like an
+  /// [HdrMode.keepHdr] request that fell back would. Always `false` for an already-SDR source,
+  /// and always `false` when [usedOriginal] is `true` (see that field's dartdoc).
+  ///
+  /// A caller who requested [HdrMode.keepHdr] and sees `toneMapped: true` back is reading "the
+  /// device could not keep HDR" -- check [hevcFallback] too: a genuine keep-HDR fallback reports
+  /// both flags `true` together (tone-mapped SDR H.264), never one without the other.
   final bool toneMapped;
 
-  /// Reserved for Phase 4's HEVC hardware-fallback handling. Always `false` in this phase.
+  /// Whether an HEVC request -- either an explicit `VideoCodec.hevc`, or the HEVC output an
+  /// [HdrMode.keepHdr] request needs to actually keep HDR -- fell back to H.264 because this
+  /// device has no hardware HEVC encoder. This package never uses a software HEVC encoder, so a
+  /// device with no hardware HEVC encoder for the requested profile always reports this `true`
+  /// rather than attempting a slow software encode. Always `false` for a plain H.264 request
+  /// (the default), and always `false` when [usedOriginal] is `true` (see that field's dartdoc).
   final bool hevcFallback;
 
   /// Whether the audio track was re-encoded (as opposed to passed through or stripped). Read

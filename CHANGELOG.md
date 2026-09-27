@@ -1,5 +1,20 @@
 ## Unreleased
 
+* **Codecs, HDR and hard inputs (Phase 4)** — HEVC is now an opt-in (`VideoCodec.hevc`), used
+  only when the device has a hardware HEVC encoder and falling back to H.264 with
+  `hevcFallback: true` reported otherwise, on both Android (`CodecCapabilities`/`EncoderUtil`)
+  and Apple (`CodecCapabilities`/`VTCopyVideoEncoderList`). HDR input (Dolby Vision profile 8,
+  HLG, HDR10) is tone-mapped to SDR by default (`toneMapped: true`), with an `HdrMode.keepHdr`
+  opt-in that outputs HEVC Main10 HDR (HLG or PQ transfer, BT.2020 primaries) on a capable device
+  and falls back to tone-mapped SDR, reported via both flags, on one that isn't. Sources with 5.1
+  audio, PCM/uncompressed audio, or no audio track at all compress successfully by downmixing or
+  re-encoding to 2-channel AAC (`audioReencoded: true`) rather than failing. A committed corpus of
+  HDR, unusual-audio and 4K60 clips runs through `example/integration_test/hard_inputs_test.dart`
+  on the Android emulator, the iOS simulator and the macOS host in CI, with cross-platform
+  compression parity records for every case proven identical across all three; the macOS CI
+  runner's real Apple Silicon Media Engine is the first place this project's own CI has proven the
+  HEVC-success and keep-HDR-success paths. `doc/HARDWARE_CHECKLIST.md` documents what only a
+  physical Android phone and a real Dolby Vision clip can still prove.
 * **Apple compression engine** — `AVAssetReader`/`AVAssetWriter` on iOS (13+) and macOS (11+),
   sharing one Swift core with the media-info/thumbnail code from the initial release:
   presets and explicit targets (max long side, bitrate, target file size), never-larger,

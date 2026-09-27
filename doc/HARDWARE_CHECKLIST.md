@@ -68,24 +68,94 @@ actually succeeds (each attempt is independently observable via the standard And
 
 **When run:** not yet run. Record the device model, Android version, and result here once tested.
 
-## HEVC hardware encode and keep-HDR output (deferred to 04-03)
+## HEVC hardware encode and keep-HDR output
+
+**Status: CI-proven on the macOS host's real Apple Silicon Media Engine (04-04); the physical
+Android phone half is still not yet run.**
 
 Neither the Android emulator nor the iOS Simulator has any hardware HEVC encoder
 (04-RESEARCH.md Summary — confirmed live by pulling this project's own AVD's
-`media_codecs.xml`). CDEC-01/CDEC-03's hardware-success paths need either a physical Android
-phone or the macOS CI host's Apple Silicon Media Engine (already exercised by CI once 04-03/04-04
-land the HEVC opt-in). This section will be filled in by the plan that implements CDEC-01/03.
+`media_codecs.xml`), so both CI targets always exercise the fallback branch
+(`hevcFallback: true`). The macOS CI host (`macos-latest`, Apple Silicon, confirmed `arm64` via
+CI's own `uname -m` step) DOES have a genuine hardware HEVC encoder, and CI run 36279264836
+(04-04-SUMMARY.md) confirmed it takes the real success branch for both cases in
+`hard_inputs_test.dart`: `HEVC_BRANCH=success` for the HEVC opt-in request on
+`portrait_hibitrate_1080p60.mp4` (re-probed `videoCodec: hevc`, `hevcFallback: false`), and
+`KEEP_HDR_BRANCH=keep` for both HLG and PQ keep-HDR requests (re-probed `isHdr: true`,
+`toneMapped: false`, `hevcFallback: false`, HEVC Main10 output with the source's own transfer
+function and BT.2020 primaries). **This closes the "has a hardware-capable success path ever
+executed" half of CDEC-01/CDEC-03 on a CI runner Dan does not control** — it is real hardware
+evidence, not a simulator/emulator fallback, but it is still not a physical phone, and it does not
+measure a bitrate or byte count (see `doc/PRESETS.md`'s "HEVC and HDR" section, which stays
+explicitly unmeasured for exactly this reason).
+
+**What remains unproven and needs a physical Android phone (QUESTIONS.md #3):**
+
+```bash
+adb install -r example/build/app/outputs/flutter-apk/app-debug.apk
+adb push corpus/portrait_hibitrate_1080p60.mp4 corpus/hdr_hlg10.mp4 corpus/hdr_pq10.mp4 /sdcard/Download/
+cd example && flutter test integration_test/hard_inputs_test.dart -d <device-id>
+```
+
+**Expected result on a phone with a hardware HEVC encoder:** the `HEVC opt-in` group's
+`HEVC_BRANCH=success` print line appears (not `fallback`), `result.hevcFallback` is `false`, and a
+re-probe of the output reports `videoCodec: hevc`. For the keep-HDR group: `KEEP_HDR_BRANCH=keep`
+for both HLG and PQ, `result.toneMapped` and `result.hevcFallback` both `false`, and a re-probe
+reports `isHdr: true`.
+
+**When run:** not yet run on a physical Android phone. Record the device model, Android version,
+and result here once tested.
 
 ## `targetSizeMb` / `estimate()` tolerances on a hardware encoder (QUESTIONS.md #3)
 
+**Status: not yet run on a physical Android phone.**
+
 Carried forward from Phase 2 (02-03-SUMMARY.md, 02-07-SUMMARY.md): the emulator's software H.264
 encoder's rate control diverges from the documented ±15% design tolerance by a wide margin
-(measured 7.9-67.0% across presets). Whether a physical device's hardware encoder holds closer to
-the designed tolerance is unproven. Re-run `compress_test.dart`'s `targetSizeMb` cases and
-`compress_output_test.dart`'s `estimate()`-accuracy cases on a physical phone once available.
+(measured 7.9-67.0% across presets, `compress_test.dart`'s own comment documents the emulator's
+widened ±35%/±75% tolerances used in place of the ±15% design target). Whether a physical device's
+hardware encoder holds closer to the designed tolerance is unproven.
+
+```bash
+adb install -r example/build/app/outputs/flutter-apk/app-debug.apk
+cd example && flutter test integration_test/compress_test.dart -d <device-id>
+flutter test integration_test/compress_output_test.dart -d <device-id>
+```
+
+**Expected result on capable hardware:** re-run the `targetSizeMb` 1.0/2.0 MB cases in
+`compress_test.dart` and the `estimate()`-accuracy cases in `compress_output_test.dart`; compare
+the printed relative-error percentages against this emulator's own documented 7.9-67.0% spread
+(`doc/PRESETS.md`'s "Requested vs. delivered bitrate" section) and the iOS Simulator's 2.2-5.8%
+spread (`doc/PRESETS.md`'s Apple section) — if hardware holds within the original ±15%/±75%
+design tolerance, tighten `CompressOptions.targetSizeMb`'s dartdoc and the test's own tolerance
+comment accordingly; if it does not, document the new measured number the same way the emulator
+and simulator measurements already are.
+
+**When run:** not yet run on a physical Android phone. Record the device model, Android version,
+and the measured relative-error percentages here once tested.
 
 ## Dolby Vision profile 8 (QUESTIONS.md #4)
 
+**Status: not yet run — no real Dolby Vision clip exists on danserver.**
+
 `hdr_dolbyvision_p8.mp4` is a reserved corpus slot (`corpus/README.md`), not a generated file —
 ffmpeg cannot author Dolby Vision RPU metadata. This case is real-iPhone-clip-only until Dan
-drops one.
+drops one. Do not attempt to synthesize it with ffmpeg (`corpus/README.md`'s "Reserved slots").
+
+**Once the real clip exists, drop it in as `corpus/hdr_dolbyvision_p8.mp4`, regenerate the
+sidecar, and run:**
+
+```bash
+bash corpus/verify_corpus.sh --write && bash corpus/sync_to_example.sh
+cd example && flutter test integration_test/hard_inputs_test.dart -d <device-id>
+```
+
+**Expected result:** `getMediaInfo` reports `isHdr: true`; a default-options compress reports
+`toneMapped: true` and a re-probe of the output shows `isHdr: false`; a `HdrMode.keepHdr` request
+either keeps genuine Dolby Vision/HDR10 HEVC on a capable device or falls back to tone-mapped SDR
+H.264 reporting both `toneMapped: true` and `hevcFallback: true` — the same dual-outcome contract
+`hard_inputs_test.dart`'s synthetic HLG/PQ cases already assert, extended to a real profile-8 file
+once one exists. A new test case for this clip belongs in `hard_inputs_test.dart` at that point;
+none exists yet because there is nothing to run it against.
+
+**When run:** not yet run — no real Dolby Vision clip exists on danserver yet (QUESTIONS.md #4).

@@ -115,17 +115,25 @@ quality at a meaningfully lower bitrate than H.264 for the same content. A calle
 HEVC at `p720`'s nominal 2,500,000bps should not expect the same file size or quality as the
 H.264 `p720` row above; this project has not re-derived a separate HEVC bitrate ladder.
 
-**No HEVC or keep-HDR bitrate has been measured yet.** Both `compress_video_api35` (the danserver
-Android emulator) and the iOS Simulator report zero hardware HEVC encoders of any kind
-(04-RESEARCH.md, verified live), so every HEVC opt-in and keep-HDR case in `hard_inputs_test.dart`
-exercises the fallback branch on both CI targets, never a genuine HEVC encode. The numbers this
-section would need — real HEVC output size, real keep-HDR output size, both against the same
-corpus clips the H.264 tables above use — do not exist yet. Do not invent them.
+**The HEVC-success and keep-HDR-success branches are now CI-proven, but no bitrate or byte-size
+number has been measured for either yet (04-05).** `compress_video_api35` (the danserver Android
+emulator) and the iOS Simulator both still report zero hardware HEVC encoders of any kind
+(04-RESEARCH.md, verified live), so on those two CI targets every HEVC opt-in and keep-HDR case
+in `hard_inputs_test.dart` still exercises the fallback branch. The macOS CI host, however, DOES
+have a genuine hardware HEVC encoder (Apple Silicon Video Toolbox), and 04-04's CI run 36279264836
+confirmed it takes the real success branch for both: `HEVC_BRANCH=success` for the HEVC opt-in
+case, and `KEEP_HDR_BRANCH=keep` (both HLG and PQ) for the keep-HDR case. This is branch-level
+evidence only — `hard_inputs_test.dart`'s assertions confirm the *outcome* (`hevcFallback: false`,
+`toneMapped: false`, a re-probed `videoCodec: hevc`/`isHdr: true`) but do not measure or log the
+produced file's byte count or bitrate the way `tool/measure_presets.dart` does for the H.264
+ladder above. **Do not infer a bitrate ladder from this** — no HEVC/keep-HDR row has been added to
+either table above, and none should be added until a dedicated measurement run captures real
+numbers, the same way the H.264 tables above were built.
 
 **Where the real numbers will come from:**
-- The macOS CI host (an Apple Silicon runner with a genuine hardware HEVC encoder,
-  04-RESEARCH.md) is expected to exercise the HEVC-success and keep-HDR-success paths for the
-  first time once 04-04 lands the Apple engine side of this opt-in.
+- A future plan could extend `tool/measure_presets.dart` (or an equivalent) to run the HEVC
+  opt-in and keep-HDR requests on the macOS CI host and log their real output bytes/bitrate,
+  mirroring the existing H.264 measurement harness.
 - `doc/HARDWARE_CHECKLIST.md` owns the physical-Android-phone measurement (QUESTIONS.md #3):
   HEVC hardware encode, keep-HDR output, and a re-measured bitrate ladder for both once a
   physical device with a hardware HEVC encoder is available.

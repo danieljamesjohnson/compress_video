@@ -150,6 +150,38 @@ the point a caller reads those fields, and `doc/PRESETS.md` for the actual per-p
 tables (including a real, measured Apple-overshoots/Android-undershoots bitrate divergence) that
 substantiate this section rather than assert it.
 
+## Codecs, HDR and unusual audio
+
+* **Codec:** H.264 is the default output codec on every platform. `CompressOptions.codec` can
+  opt into `VideoCodec.hevc`, but HEVC is used **only when the device has a hardware HEVC
+  encoder** (Android: `EncoderUtil`/`MediaCodecList`; Apple: `VTCopyVideoEncoderList`). On a
+  device with no hardware HEVC encoder, the request falls back to H.264 and
+  `CompressResult.hevcFallback` reports `true` — never a silent substitution, and never a
+  software HEVC encode (this package does not use one).
+* **HDR:** an HDR input (Dolby Vision profile 8, HLG, HDR10/PQ) is **tone-mapped to SDR by
+  default**, so the output is never washed out; `CompressResult.toneMapped` reports `true` when
+  this happened. `CompressOptions.hdr = HdrMode.keepHdr` opts into keeping the source's HDR
+  transfer function as HEVC 10-bit (Main10) with the correct HDR colour properties (HLG or PQ,
+  BT.2020) — again, hardware-gated: on a device that cannot keep HDR, the request falls back to
+  tone-mapped SDR H.264 and reports it with **both** `toneMapped: true` and
+  `hevcFallback: true`. Requesting `keepHdr` and seeing `toneMapped: true` back always means "the
+  device could not keep HDR," never a bug.
+* **Unusual audio:** a source with 5.1 (or other >2-channel) audio, PCM/uncompressed audio, or no
+  audio track at all compresses successfully rather than failing. More-than-stereo or non-AAC
+  audio is downmixed/re-encoded to 2-channel AAC at 128 kbps and reported via
+  `CompressResult.audioReencoded: true`; a source with no audio track produces an output with no
+  audio track and a `null` `audioCodec`, unchanged from the plugin's first release.
+* **`usedOriginal: true` forces every conversion flag false.** When the never-larger rule (see
+  above) substitutes the original input bytes for the output, no Transformer/AVAssetWriter ever
+  ran — so `transmuxed`, `audioReencoded`, `toneMapped` and `hevcFallback` are all `false` on that
+  result, even for an HDR source that would otherwise have tone-mapped. This can genuinely happen
+  for an HDR clip whose tone-mapped re-encode would come out larger than the original HDR file:
+  the caller gets the original HDR bytes back, `usedOriginal: true`, and `toneMapped: false` —
+  reported honestly, not silently, because the never-larger guarantee has no exception for HDR.
+
+See `doc/HARDWARE_CHECKLIST.md` for exactly what has and has not been proven on real hardware for
+HEVC and HDR, and `doc/PRESETS.md` for measured bitrate/byte tables.
+
 ## What this plugin deliberately does not do
 
 * **Bundle FFmpeg.** No GPL dependency, no ~100 MB binary blob, no software-only encode path.
