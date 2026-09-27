@@ -126,6 +126,38 @@ final batchCompressVideo = CompressVideo(maxConcurrentJobs: 3);
 * `maxConcurrentJobs` must be at least 1 (the default); anything less throws
   `CompressVideoException` with reason `unsupportedInput` from the constructor.
 
+### Calling from a background isolate
+
+Platform channels are bound per isolate, so calling this plugin from an isolate spawned with
+`Isolate.run` (or `compute`) needs one extra call first — otherwise the first platform call fails
+with a typed `CompressVideoException`, never a hang or a `null`:
+
+```dart
+final RootIsolateToken token = RootIsolateToken.instance!;
+final CompressResult result = await Isolate.run(() async {
+  CompressVideo.ensureInitializedInBackgroundIsolate(token);
+  final compressVideo = CompressVideo();
+  final job = compressVideo.compress(path, options: options);
+  return job.result;
+});
+```
+
+* Capture `RootIsolateToken.instance` on the ROOT isolate before spawning — that property is
+  `null` everywhere else — and pass it into the closure.
+* Call `CompressVideo.ensureInitializedInBackgroundIsolate(token)` as the closure's first
+  statement, before constructing a `CompressVideo` or calling any of its methods.
+* This works for every call in the package, not only `compress()`.
+* A job started on a background isolate is owned by that isolate: `result` resolves normally, but
+  `progress` never emits any value on that isolate (it just closes when the job settles) — a
+  background isolate can never receive the platform's progress push at all
+  (`BackgroundIsolateBinaryMessenger.setMessageHandler` throws unconditionally off-root, a
+  permanent Flutter engine constraint, not a bug in this plugin). Observe progress from the root
+  isolate if you need it.
+* Skipping `ensureInitializedInBackgroundIsolate` entirely: the first call fails with a typed
+  `CompressVideoException` (reason `unknown`) — observed as a `StateError` from
+  `BackgroundIsolateBinaryMessenger.instance` itself, wrapped rather than left to escape untyped
+  or hang.
+
 ### `MediaInfo` fields
 
 | Field | Unit | Unknown sentinel |

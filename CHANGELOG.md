@@ -1,5 +1,12 @@
 ## Unreleased
 
+* **Background isolates (Phase 5)** — `CompressVideo.ensureInitializedInBackgroundIsolate
+  (RootIsolateToken)` is new: call it as the first statement inside an `Isolate.run`/`compute`
+  closure and every call in this package, including `compress()`, works from that isolate.
+  Progress is never delivered to a background isolate's job (a permanent Flutter engine
+  constraint, not a bug here); `result` resolves normally. Skipping the call fails the first
+  platform call with a typed `CompressVideoException` rather than a hang or `null`. Closes the
+  incumbent `video_compress`'s issue #242 ("cannot run in a background isolate").
 * **Job queue (Phase 5)** — `CompressVideo({int maxConcurrentJobs = 1})` and
   `CompressJob.isQueued` are new: submitting more jobs than `maxConcurrentJobs` now queues the
   extras in FIFO order on the Dart side instead of requiring the caller to serialise calls
