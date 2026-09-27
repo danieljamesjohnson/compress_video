@@ -70,9 +70,20 @@ import Foundation
 /// `Transformer` (Media3's own constraint), Pigeon delivers every call here already on the
 /// `MainActor` (`CompressHostApiSetup.setUp` wraps every handler in `Task { @MainActor in ...
 /// }`, confirmed in `Messages.g.swift`) -- so `startCompress` instead hops OFF the `MainActor`
-/// by `await`ing `engine.compress`, whose own copy loop runs on a job-scoped serial queue
-/// (03-RESEARCH.md Pattern 1). `JobRegistry` access happens only via explicit `MainActor` hops,
-/// both here (`cancel`) and inside `CompressionEngine`.
+/// by `await`ing `runCompress` (nonisolated), whose engine's own copy loop runs on a job-scoped
+/// serial queue (03-RESEARCH.md Pattern 1).
+///
+/// `startCompress` and `awaitCompressResult` are themselves `@MainActor`, and `startCompress`
+/// registers its jobId SYNCHRONOUSLY, before its first suspension point (quick task 260927-r4k).
+/// A caller on a background isolate fires `startCompress` without awaiting it and immediately
+/// calls `awaitCompressResult` for the same jobId; when both methods were nonisolated, each
+/// hopped off the `MainActor` the moment Pigeon called it and then hopped back for its own
+/// `JobRegistry` access, so nothing ordered `registerJob` before `isKnownJobId` and the second
+/// call could win, failing a perfectly good job with "unknown jobId" (CI run 36349558026).
+/// Staying on the `MainActor` with no suspension before `registerJob` makes registration
+/// complete before the next channel message's handler can run at all -- the same ordering
+/// Android's `Compression.kt` gets from the main Looper. Every other `JobRegistry` access
+/// happens via explicit `MainActor` hops, both here (`cancel`) and inside `CompressionEngine`.
 final class Compression: CompressHostApi {
   private let flutterApi: CompressVideoFlutterApi
   private let engine: CompressionEngine
@@ -82,20 +93,30 @@ final class Compression: CompressHostApi {
     self.engine = engine
   }
 
+  @MainActor
   func startCompress(path: String, jobId: String, request: CompressRequestMessage) async throws
     -> CompressResultMessage
   {
+    // Stays outside the do/catch below: a jobId that fails this format check is never used as
+    // a registry key or a filename stem, so it cannot be registered at all.
     try Self.requireValidJobId(jobId)
-    try Arguments.requireValidCompressRequest(request)
-    // CR-02: registered BEFORE any async work below, mirroring Android's Compression.kt
-    // (`JobRegistry.resultDeferredFor(jobId)` at the same point) -- so a concurrent
-    // awaitCompressResult(jobId) call, issued by a caller on a background isolate right after
-    // this call fires, is told apart from one for a jobId nothing ever started.
-    await JobRegistry.registerJob(jobId: jobId)
+    // CR-02: registered synchronously, on the MainActor, BEFORE this method's first suspension
+    // point and before request validation (260927-r4k) -- mirroring Android's Compression.kt
+    // (`JobRegistry.resultDeferredFor(jobId)` ahead of its own first suspension) -- so a
+    // concurrent awaitCompressResult(jobId) call, issued by a caller on a background isolate
+    // right after this call fires, always finds the jobId known. No `await` here on purpose:
+    // an `await` is a suspension point, and a suspension point is exactly where the second
+    // call's handler used to overtake this one.
+    JobRegistry.registerJob(jobId: jobId)
     do {
+      // Inside the do/catch so a request that fails validation is still a known job whose
+      // typed failure completeResult records, rather than an "unknown jobId".
+      try Arguments.requireValidCompressRequest(request)
+      // runCompress is nonisolated, so awaiting it hops OFF the MainActor: none of the probing,
+      // free-space or engine work moves onto the main thread because this method is isolated.
       let result = try await Self.runCompress(
         path: path, jobId: jobId, request: request, flutterApi: flutterApi, engine: engine)
-      await JobRegistry.completeResult(jobId: jobId, result: .success(result))
+      JobRegistry.completeResult(jobId: jobId, result: .success(result))
       return result
     } catch {
       // Every path through runCompress below reaches this catch without depending on any
@@ -103,7 +124,7 @@ final class Compression: CompressHostApi {
       // see the AsyncStream comment below), so this outer wrapper alone is sufficient to make
       // the outcome available to awaitCompressResult; no further per-branch hook is needed
       // (05-02, mirrors Compression.kt's identical outer catch-all).
-      await JobRegistry.completeResult(jobId: jobId, result: .failure(error))
+      JobRegistry.completeResult(jobId: jobId, result: .failure(error))
       throw error
     }
   }
@@ -114,6 +135,10 @@ final class Compression: CompressHostApi {
   /// Dart-side acknowledgement in the first place (unlike Android, whose native progress push
   /// IS awaited directly before returning) -- this exists as the documented, symmetric escape
   /// hatch Pigeon's cross-platform contract promises regardless.
+  ///
+  /// `@MainActor` so the consumed/known checks below run in channel-handler order with no hop
+  /// (260927-r4k) -- see this class's own doc comment.
+  @MainActor
   func awaitCompressResult(jobId: String) async throws -> CompressResultMessage {
     try Self.requireValidJobId(jobId)
     // CR-02: requireValidJobId only checks the <counter>-<hex> FORMAT, not whether
@@ -122,7 +147,7 @@ final class Compression: CompressHostApi {
     // `withCheckedThrowingContinuation`, appending a continuation nothing will ever resume --
     // an unbounded hang with no typed error, directly contradicting this project's "never
     // hangs, never returns null" core value.
-    if await JobRegistry.isConsumedJobId(jobId) {
+    if JobRegistry.isConsumedJobId(jobId) {
       throw CompressVideoError(
         code: "unknown",
         message:
@@ -131,7 +156,18 @@ final class Compression: CompressHostApi {
         details: nil
       )
     }
-    let known = await JobRegistry.isKnownJobId(jobId)
+    // Belt and braces (260927-r4k): startCompress's synchronous MainActor registration already
+    // orders itself ahead of this call whenever the two messages arrive in the order Dart sent
+    // them. Should anything in the messenger ever deliver them the other way round, wait a
+    // bounded 2 s (40 x 50 ms) for the registration to land before concluding the jobId is
+    // genuinely unknown -- still typed, still never a hang.
+    var known = JobRegistry.isKnownJobId(jobId)
+    var remainingPolls = Self.knownJobIdGracePolls
+    while !known && remainingPolls > 0 {
+      try await Task.sleep(nanoseconds: Self.knownJobIdGracePollNanoseconds)
+      known = JobRegistry.isKnownJobId(jobId)
+      remainingPolls -= 1
+    }
     if !known {
       throw CompressVideoError(
         code: "unknown",
@@ -296,6 +332,12 @@ final class Compression: CompressHostApi {
   }
 
   private static let freeSpaceSafetyFactor: Double = 1.2
+
+  /// `awaitCompressResult`'s bounded grace for a jobId `startCompress` has not registered yet:
+  /// 40 polls 50 ms apart, 2 s in total. Mirrors `Compression.kt`'s
+  /// `KNOWN_JOB_ID_GRACE_POLLS`/`KNOWN_JOB_ID_GRACE_POLL_MS` exactly.
+  private static let knownJobIdGracePolls = 40
+  private static let knownJobIdGracePollNanoseconds: UInt64 = 50_000_000
 
   /// Reads the available capacity of the volume containing `directory`, preferring the
   /// "important usage" key (the one that accounts for space the system could reclaim if asked,
