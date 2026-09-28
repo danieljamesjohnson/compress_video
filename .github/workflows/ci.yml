@@ -3,31 +3,33 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '.planning/**'
-      - '**/*.md'
-      # WR-07: these three documents are guarded by CI gates (the README preset-table drift
-      # gate and test/migration_doc_test.dart), so a push that changes only one of them must
-      # still start a run. A `!` pattern after '**/*.md' takes the file back out of the
-      # ignore list; every other Markdown file stays ignored.
-      - '!README.md'
-      - '!MIGRATION.md'
-      - '!doc/PRESETS.md'
-      - 'QUESTIONS.md'
-      - '.mission-control/**'
+    # WR-07: `paths` with `!` patterns, not `paths-ignore`. GitHub documents `!` negation
+    # only for `paths`, and `paths` and `paths-ignore` cannot both filter the same event.
+    # Order matters: a later pattern overrides an earlier one. So: everything, then the
+    # exclusions, then the three documents taken back in. Those three are guarded by CI
+    # gates (the README preset-table drift gate and test/migration_doc_test.dart), so a
+    # push that changes only one of them must still start a run. Every other Markdown file
+    # stays excluded.
+    paths:
+      - '**'
+      - '!.planning/**'
+      - '!**/*.md'
+      - '!QUESTIONS.md'
+      - '!.mission-control/**'
+      - 'README.md'
+      - 'MIGRATION.md'
+      - 'doc/PRESETS.md'
   pull_request:
-    paths-ignore:
-      - '.planning/**'
-      - '**/*.md'
-      # WR-07: these three documents are guarded by CI gates (the README preset-table drift
-      # gate and test/migration_doc_test.dart), so a push that changes only one of them must
-      # still start a run. A `!` pattern after '**/*.md' takes the file back out of the
-      # ignore list; every other Markdown file stays ignored.
-      - '!README.md'
-      - '!MIGRATION.md'
-      - '!doc/PRESETS.md'
-      - 'QUESTIONS.md'
-      - '.mission-control/**'
+    # WR-07: the same list as `push` above, for the same reasons. Keep the two identical.
+    paths:
+      - '**'
+      - '!.planning/**'
+      - '!**/*.md'
+      - '!QUESTIONS.md'
+      - '!.mission-control/**'
+      - 'README.md'
+      - 'MIGRATION.md'
+      - 'doc/PRESETS.md'
   workflow_dispatch:
 
 # The repository's default Actions workflow token permission is already read-only
