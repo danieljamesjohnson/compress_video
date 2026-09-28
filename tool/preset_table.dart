@@ -226,8 +226,9 @@ String renderPresetTable({
   final StringBuffer out = StringBuffer()
     ..writeln(
       '| Preset | Longest side (px) | Video bitrate target | Frame rate cap | '
-      'From a 1080p60 phone clip: Android | From a 1080p60 phone clip: iOS | '
-      'From a 1080p60 phone clip: macOS |',
+      'From the 1080p60 test clip: Android emulator | '
+      'From the 1080p60 test clip: iOS Simulator | '
+      'From the 1080p60 test clip: macOS |',
     )
     ..writeln('|---|---|---|---|---|---|---|');
 
@@ -264,8 +265,10 @@ String renderPresetTable({
     )
     ..writeln()
     ..writeln(
-      "The Android numbers come from the emulator's software encoder. A "
-      "phone's hardware encoder will give different numbers.",
+      'The clip is a generated test pattern, not camera footage. The Android '
+      'and iOS numbers come from software encoders, on an emulator and on a '
+      "simulator. A phone's hardware encoder and a real recording will give "
+      'different numbers.',
     )
     ..writeln()
     ..write('The full measurements are in [doc/PRESETS.md](doc/PRESETS.md).');

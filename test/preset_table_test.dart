@@ -250,8 +250,9 @@ void main() {
       expect(
         render().split('\n').first,
         '| Preset | Longest side (px) | Video bitrate target | Frame rate cap | '
-        'From a 1080p60 phone clip: Android | From a 1080p60 phone clip: iOS | '
-        'From a 1080p60 phone clip: macOS |',
+        'From the 1080p60 test clip: Android emulator | '
+        'From the 1080p60 test clip: iOS Simulator | '
+        'From the 1080p60 test clip: macOS |',
       );
     });
 
@@ -296,7 +297,8 @@ void main() {
       final String table = render();
 
       expect(table, contains('never upscaled'));
-      expect(table, contains("emulator's software encoder"));
+      expect(table, contains('generated test pattern, not camera footage'));
+      expect(table, contains('software encoders, on an emulator and on a'));
       expect(table, contains('doc/PRESETS.md'));
     });
 

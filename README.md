@@ -130,10 +130,10 @@ section below.
 ### Presets at a glance
 
 A preset sets three limits, and the table shows each one next to what that preset really
-produced from a portrait 1080p phone clip recorded at 60 frames per second.
+produced from this package's portrait 1080p test clip at 60 frames per second.
 
 <!-- PRESET_TABLE_START -->
-| Preset | Longest side (px) | Video bitrate target | Frame rate cap | From a 1080p60 phone clip: Android | From a 1080p60 phone clip: iOS | From a 1080p60 phone clip: macOS |
+| Preset | Longest side (px) | Video bitrate target | Frame rate cap | From the 1080p60 test clip: Android emulator | From the 1080p60 test clip: iOS Simulator | From the 1080p60 test clip: macOS |
 |---|---|---|---|---|---|---|
 | p360 | 640 | 0.8 Mbps (at 30 fps) | 30 fps (never raised) | 360×640, 0.75 Mbps | 360×640, 0.86 Mbps | 360×640, 0.84 Mbps |
 | p480 | 854 | 1.2 Mbps (at 30 fps) | 30 fps (never raised) | 480×854, 0.88 Mbps | 480×854, 1.32 Mbps | 480×854, 1.27 Mbps |
@@ -142,7 +142,7 @@ produced from a portrait 1080p phone clip recorded at 60 frames per second.
 
 The bitrate target is what the encoder is asked for, and an encoder lands near it, not on it. The target scales down with the output resolution and frame rate, and a video is never upscaled and never given a higher frame rate than it came with.
 
-The Android numbers come from the emulator's software encoder. A phone's hardware encoder will give different numbers.
+The clip is a generated test pattern, not camera footage. The Android and iOS numbers come from software encoders, on an emulator and on a simulator. A phone's hardware encoder and a real recording will give different numbers.
 
 The full measurements are in [doc/PRESETS.md](doc/PRESETS.md).
 <!-- PRESET_TABLE_END -->
