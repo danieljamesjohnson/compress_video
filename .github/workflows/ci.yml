@@ -297,15 +297,22 @@ jobs:
         # The report is written outside the package directory, because pana copies the
         # directory it scores. On a failure the step prints every section that lost points.
         # To reproduce locally, from the package root:
-        #   dart pub global activate pana
+        #   dart pub global activate pana 0.23.19
         #   dart pub global run pana --flutter-sdk <flutter root> .
+        # pana is pinned (WR-06): an unpinned pana can add or re-weight a check and turn every
+        # push red with no change in this repository. 0.23.19 is the version that scored
+        # 160/160; doc/TOOLCHAIN.md records the pin and how to bump it.
+        # When pana writes no score (a crash, invalid JSON), the step prints pana's own stderr
+        # before failing, so the reason is in the log.
         run: |
-          dart pub global activate pana
+          dart pub global activate pana 0.23.19
           out="${RUNNER_TEMP:-/tmp}/pana-report.json"
+          log="${out%.json}.log"
           code=0
-          dart pub global run pana --exit-code-threshold 0 --flutter-sdk "${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}" --json . > "$out" 2> "${out%.json}.log" || code=$?
+          dart pub global run pana --exit-code-threshold 0 --flutter-sdk "${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}" --json . > "$out" 2> "$log" || code=$?
+          if ! jq -e '.scores' "$out" > /dev/null 2>&1; then echo "FATAL: pana produced no score (exit code $code). Its stderr:" >&2; cat "$log" >&2; exit 1; fi
           jq -r '.scores | "pana: \(.grantedPoints)/\(.maxPoints) pub points"' "$out"
-          if [ "$code" -ne 0 ] || ! jq -e '.scores.maxPoints > 0 and .scores.grantedPoints == .scores.maxPoints' "$out" > /dev/null; then jq -r '.report.sections[] | select(.grantedPoints < .maxPoints) | "## \(.title): \(.grantedPoints)/\(.maxPoints)\n\(.summary)"' "$out"; echo "FATAL: pana did not grant every pub point (exit code $code)" >&2; exit 1; fi
+          if [ "$code" -ne 0 ] || ! jq -e '.scores.maxPoints > 0 and .scores.grantedPoints == .scores.maxPoints' "$out" > /dev/null; then jq -r '.report.sections[] | select(.grantedPoints < .maxPoints) | "## \(.title): \(.grantedPoints)/\(.maxPoints)\n\(.summary)"' "$out"; echo "FATAL: pana did not grant every pub point (exit code $code). Its stderr:" >&2; cat "$log" >&2; exit 1; fi
 
       - name: "dartdoc: zero warnings (RELS-01)"
         # D-07, plan 06-04: pub.dev scores the package's documentation. `dart doc --dry-run`

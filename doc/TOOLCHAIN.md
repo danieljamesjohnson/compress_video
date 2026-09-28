@@ -31,6 +31,7 @@ recur here. Re-check every pin quarterly; the research this table is drawn from
 | `reactivecircus/android-emulator-runner` | `@v2` (latest tagged release `v2.38.0`, 2026-07-05) | `gh api` + raw README | 2026-09-15 |
 | `actions/checkout` | `@v6` | GitHub Actions marketplace | 2026-09-15 |
 | `actions/setup-java` | `@v4` | GitHub Actions marketplace | 2026-09-15 |
+| `pana` (CI gate and local tool, not a package dependency) | 0.23.19, pinned in ci.yml's `pana: 160/160 pub points` step. Bump on purpose: activate the new version locally, confirm 160/160, then change the pin | pub.dev API, publisher `tools.dart.dev`; scored 160/160 locally (06-04) | 2026-09-27 |
 | `actions/upload-artifact` / `actions/download-artifact` | `@v4` (both, added 01-07 for the cross-platform parity gate) | GitHub Actions marketplace, first-party `actions/*` | 2026-09-21 |
 | Flutter (Mac build host, `dans-macbook-air`) | Second SDK at `~/development/flutter-stable`, `3.47.5` stable — matches CI's floating `channel: stable` pin above; Dan's own `~/flutter` (3.41.2, below this package's pubspec floor) is never touched | `tool/mac_sync.sh`/`tool/mac_run.sh`, installed 2026-09-22/25 (03-01 task 1) | 2026-09-25 |
 | Xcode (Mac build host) | 26.2 | `xcodebuild -version` over `ssh dans-macbook-air` | 2026-09-22 |
