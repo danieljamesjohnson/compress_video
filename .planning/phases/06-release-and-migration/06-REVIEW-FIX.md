@@ -396,3 +396,7 @@ compat shim, with no compile error.
 _Fixed: 2026-09-28T01:17:24Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
+
+## Orchestrator CI resolution (2026-09-28)
+
+Run 36366408783 (`7c3f273`, iteration-2 fixes included): all four jobs green. WR-07's trigger proven by `b19e3b1` (CLAUDE.md-only, no run) and `9c58899` (README-only, run 36370914935 started). Review iteration 3: `approved`.

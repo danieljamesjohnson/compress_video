@@ -392,3 +392,9 @@ None - no external service configuration required.
 ---
 *Phase: 06-release-and-migration*
 *Completed: 2026-09-28*
+
+## Orchestrator CI resolution (2026-09-28, after execution and review)
+
+- Run 36362286984 (`913d2a7`) was superseded by run 36363095391 (`e49cc5b`, pana gate), whose Android job failed on a hosted-emulator infrastructure flake (adb "device offline", "Failed to start Dart Development Service" while loading `compress_audio_test.dart`); the publish gates never ran there. That run was superseded by the code-review fix pushes.
+- Run 36366408783 (`7c3f273`, code review iterations 1-2 applied): **all four jobs green**. On the hosted runner the Android job's `Dry-run publish`, `pana: 160/160 pub points (RELS-01)`, `dartdoc: zero warnings (RELS-01)` and `Verify README preset table matches the preset constants (RELS-02)` steps all passed; the Apple job passed the compat suite on the iOS simulator and macOS host; parity green. This is the CI evidence for this plan's pending criteria.
+- WR-07 trigger proof: a `.claude/CLAUDE.md`-only push (`b19e3b1`) started no run, and a README-only push (`9c58899`) started run 36370914935 — the new `paths:` filter behaves as documented.
