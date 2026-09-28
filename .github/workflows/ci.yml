@@ -320,6 +320,9 @@ jobs:
         # 160/160; doc/TOOLCHAIN.md records the pin and how to bump it.
         # When pana writes no score (a crash, invalid JSON), the step prints pana's own stderr
         # before failing, so the reason is in the log.
+        # IN-07: the jq call that lists the sections ends with `|| true` and reads
+        # `.report.sections[]?`. Under `bash -e` a failure of that call would otherwise end
+        # the step before the FATAL line and pana's stderr are printed.
         # shell: bash gives `bash -eo pipefail`, the shell this step was proven under locally.
         shell: bash
         run: |
@@ -330,7 +333,7 @@ jobs:
           dart pub global run pana --exit-code-threshold 0 --flutter-sdk "${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}" --json . > "$out" 2> "$log" || code=$?
           if ! jq -e '.scores' "$out" > /dev/null 2>&1; then echo "FATAL: pana produced no score (exit code $code). Its stderr:" >&2; cat "$log" >&2; exit 1; fi
           jq -r '.scores | "pana: \(.grantedPoints)/\(.maxPoints) pub points"' "$out"
-          if [ "$code" -ne 0 ] || ! jq -e '.scores.maxPoints > 0 and .scores.grantedPoints == .scores.maxPoints' "$out" > /dev/null; then jq -r '.report.sections[] | select(.grantedPoints < .maxPoints) | "## \(.title): \(.grantedPoints)/\(.maxPoints)\n\(.summary)"' "$out"; echo "FATAL: pana did not grant every pub point (exit code $code). Its stderr:" >&2; cat "$log" >&2; exit 1; fi
+          if [ "$code" -ne 0 ] || ! jq -e '.scores.maxPoints > 0 and .scores.grantedPoints == .scores.maxPoints' "$out" > /dev/null; then jq -r '.report.sections[]? | select(.grantedPoints < .maxPoints) | "## \(.title): \(.grantedPoints)/\(.maxPoints)\n\(.summary)"' "$out" || true; echo "FATAL: pana did not grant every pub point (exit code $code). Its stderr:" >&2; cat "$log" >&2; exit 1; fi
 
       - name: "dartdoc: zero warnings (RELS-01)"
         # D-07, plan 06-04: pub.dev scores the package's documentation. `dart doc --dry-run`
