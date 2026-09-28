@@ -229,7 +229,7 @@ checklist entry — not a CI job — is the only path to closing it.
 **To verify on a physical iPhone, once one is reachable via the Mac (QUESTIONS.md #7, #8):**
 
 ```bash
-# On the Mac, with a physical iPhone connected and this repo synced (tool/mac_sync.sh):
+# On the Mac, with a physical iPhone connected and this repository copied to the Mac:
 flutter install -d <device-id>
 # Start a compression of a clip long enough to still be running several seconds later
 # (e.g. portrait_hibitrate_1080p60.mp4 at a low target bitrate), then background the app
