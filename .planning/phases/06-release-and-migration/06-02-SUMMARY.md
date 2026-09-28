@@ -283,3 +283,7 @@ None - no external service configuration required.
 ---
 *Phase: 06-release-and-migration*
 *Completed: 2026-09-27*
+
+## Orchestrator CI resolution (2026-09-27, after execution)
+
+- Run 36357692915 (`28e9a6b`): **all four jobs green** (Android, Detect Apple-relevant changes, Apple, Cross-platform parity). The compat suite ran on the Android emulator, the iOS simulator (part 2) and the macOS host (part 2), and the parity job accepted the `compat_compress_low_quality` record from all three. The "pending" CI criteria above are satisfied by this run.
