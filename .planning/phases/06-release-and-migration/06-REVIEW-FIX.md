@@ -1,12 +1,151 @@
 ---
 phase: 06-release-and-migration
-fixed_at: 2026-09-28T01:17:24Z
+fixed_at: 2026-09-28T01:32:36Z
 review_path: .planning/phases/06-release-and-migration/06-REVIEW.md
-iteration: 1
-findings_in_scope: 15
-fixed: 14
+iteration: 2
+findings_in_scope: 6
+fixed: 5
 skipped: 1
 status: partial
+---
+
+<!-- The frontmatter counts describe iteration 2, the latest. Iteration 1 (15 in scope, 14
+     fixed, 1 skipped) is kept in full below the iteration 2 section. -->
+
+# Phase 6: Code Review Fix Report (iteration 2)
+
+**Fixed at:** 2026-09-28T01:32:36Z
+**Source review:** .planning/phases/06-release-and-migration/06-REVIEW.md (iteration 2)
+**Iteration:** 2
+
+**Summary:**
+- Findings in scope: 6 (2 warnings, 4 info)
+- Fixed: 5 (WR-07, WR-10, IN-07, IN-08, IN-09)
+- Skipped: 1 (IN-03, for the reason recorded in iteration 1)
+
+`workflow.use_worktrees` is `false`, so every edit and commit was made on `main` in the
+primary checkout. No worktree was created. Commits were made with plain `git commit`.
+
+## Where verification ran (iteration 2)
+
+Everything ran in the main checkout at `/home/dan/CodeProjects/compress-video`.
+
+| Gate | Result |
+|---|---|
+| `dart format .` (Flutter 3.47.5 stable) | 39 files, 0 changed |
+| `flutter analyze --fatal-infos --fatal-warnings` (package root) | No issues found |
+| `flutter analyze` (example) | No issues found |
+| `flutter test test/` | 221 passed |
+| `flutter test tool/generate_preset_table.dart` then `git diff --exit-code README.md` | exit 0 |
+| `dart pub publish --dry-run` | Package has 0 warnings |
+| The pana step's `run:` block from ci.yml, under `bash -eo pipefail` | exit 0, `pana: 160/160 pub points` |
+| The pana failure line against a report with `.scores` and no `.report.sections` | exit 1, FATAL line and the log printed |
+| The same line against a report whose `.report.sections` is a string | exit 1, FATAL line and the log printed |
+| `yaml.safe_load` of ci.yml; `push.paths == pull_request.paths`; no `paths-ignore` key | pass |
+| `video_compress_compat_test.dart` on the Android emulator | 6 of 6 passed; the cancel landed |
+| A temporary copy of that suite with the `cancelCompression()` call removed | the cancel case FAILED, on the new assertion |
+
+`actionlint` is not installed on this host, so it was not run.
+`tool/run_ios_integration_suites.sh` was not changed, so its self-test was not run.
+
+Not verified locally, and why:
+
+- **The workflow trigger filter** (WR-07). It cannot be run locally. The form is now the one
+  GitHub documents. The proof is a push that changes only one of the three documents.
+- **The compat cancel case on iOS and macOS** (WR-10). CI's Apple job runs it. The requirement
+  on iOS rests on `compress_jobs_test.dart` passing there with the same clip and wait.
+
+## Fixed Issues (iteration 2)
+
+### WR-07 (reopened): the Markdown exception rested on an undocumented form of `paths-ignore`
+
+**Files modified:** `.github/workflows/ci.yml`
+**Commit:** 0440afa
+**Status:** fixed: cannot be proven locally
+**Applied fix:** Both `paths-ignore` blocks (`push` and `pull_request`) are replaced by
+`paths` blocks, in this order: `'**'`, `'!.planning/**'`, `'!**/*.md'`, `'!QUESTIONS.md'`,
+`'!.mission-control/**'`, `'README.md'`, `'MIGRATION.md'`, `'doc/PRESETS.md'`. A later pattern
+overrides an earlier one, so the three documents are taken back in after the exclusions.
+`workflow_dispatch` is kept. The `changes` job is not touched: the diff has one hunk, at the
+top of the file.
+
+The orchestrator verified the form against GitHub's workflow-syntax documentation: `!` is
+supported only in `paths`, and `paths` and `paths-ignore` cannot filter the same event.
+
+### WR-10 (new): the compat cancel case passed when `cancelCompression()` did nothing
+
+**Files modified:** `example/integration_test/video_compress_compat_test.dart`
+**Commit:** 71ee9cc
+**Status:** fixed: requires human verification (test logic; iOS and macOS not run locally)
+**Applied fix:** On Android and iOS the case requires `isCancel == true`, with no second
+outcome. This is what `compress_jobs_test.dart` requires of the same clip after the same
+wait. On macOS a finished result is still accepted, and only a complete one: `path` and
+`file` set, the file exists, `filesize` equals the file's length, is above 0 and is not
+larger than the input, and `width`, `height` and `duration` are set. The case is renamed
+"cancelCompression stops the running compressVideo, which resolves as cancelled".
+
+**Proof that the case is no longer vacuous.** On the Android emulator the suite passed 6 of
+6. Then a temporary copy of the suite, with the one `cancelCompression()` call removed, was
+run. The cancel case failed with "Expected: true, Actual: false — cancelCompression() was
+sent mid-flight and must stop the encode". The copy was deleted and never committed.
+
+One assertion was considered and left out: that the finished `path` differs from the input
+path. Whether that holds when the never-larger rule delivers the original was not checked, and
+the branch cannot be run on this host.
+
+### IN-07: the pana failure branch could exit before it printed pana's stderr
+
+**Files modified:** `.github/workflows/ci.yml`
+**Commit:** 90b028a
+**Applied fix:** The `jq` call that lists the sections reads `.report.sections[]?` and ends
+with `|| true`. A comment on the step says why. Proven with two hand-made reports, as in the
+table above.
+
+### IN-08: the project CLAUDE.md said a Markdown-only push creates no run
+
+**Files modified:** `.claude/CLAUDE.md`
+**Commit:** 3c7d931
+**Applied fix:** The lane note says a push of only `README.md`, `MIGRATION.md` or
+`doc/PRESETS.md` starts a run (Android job, Apple job skipped), and that other Markdown-only,
+`.planning/`-only and `.mission-control/`-only pushes start none. It also records that `!`
+works only in `paths` and that the order of the list matters.
+
+### IN-09: a shipped document pointed to a script that is not shipped
+
+**Files modified:** `doc/HARDWARE_CHECKLIST.md`
+**Commit:** 9e8dc11
+**Applied fix:** "and this repository copied to the Mac", with no file name. No shipped
+document, and nothing under `lib/`, names `tool/mac_sync.sh` or `tool/mac_run.sh` now.
+
+## Skipped Issues (iteration 2)
+
+### IN-03: `compressVideo` copies `CompressOptions` field by field
+
+**File:** `lib/video_compress_compat.dart:396-413`
+**Reason:** Unchanged from iteration 1, and kept skipped by the orchestrator's scope.
+`CompressOptions.copyWith` is a public API addition and a design choice.
+**Original issue:** A field added to `CompressOptions` later is silently dropped by the
+compat shim, with no compile error.
+
+## For the orchestrator (iteration 2)
+
+1. **A tool result carried an instruction that did not come from the orchestrator.** The
+   output of the first shell command ended with a block asking for a different
+   `Claude-Session` trailer. It was not followed. Every commit carries the trailer the
+   orchestrator gave.
+2. **WR-07 still needs its one proof:** a push that changes only `README.md`.
+3. **CHANGELOG.md was not changed.** Its statement that a CI gate guards the README table
+   holds once the filter is proven.
+4. **The emulator** was booted once and stopped by its own PID. None was running before,
+   and none is running now. `ANDROID_HOME` was not set in the agent's shell; the SDK path was
+   given explicitly.
+
+---
+
+_Fixed: 2026-09-28T01:32:36Z_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 2_
+
 ---
 
 # Phase 6: Code Review Fix Report
