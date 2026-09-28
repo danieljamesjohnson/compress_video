@@ -80,9 +80,14 @@ import Foundation
 /// hopped off the `MainActor` the moment Pigeon called it and then hopped back for its own
 /// `JobRegistry` access, so nothing ordered `registerJob` before `isKnownJobId` and the second
 /// call could win, failing a perfectly good job with "unknown jobId" (CI run 36349558026).
-/// Staying on the `MainActor` with no suspension before `registerJob` makes registration
-/// complete before the next channel message's handler can run at all -- the same ordering
-/// Android's `Compression.kt` gets from the main Looper. Every other `JobRegistry` access
+/// Staying on the `MainActor` with no suspension before `registerJob` removes the reordering
+/// INSIDE these two methods. It is best-effort, not a guarantee: the two calls still arrive as
+/// two separate unstructured `Task { @MainActor in ... }` created by Pigeon, and Swift
+/// promises no ordering between two unstructured tasks (on older runtimes an actor-isolated
+/// task may start on the global executor and then hop). What GUARANTEES the outcome is
+/// `awaitCompressResult`'s bounded 2 s grace loop, which waits for the registration to land.
+/// Android's `Compression.kt` gets real ordering from the main Looper and keeps the same
+/// grace so both platforms behave alike. Every other `JobRegistry` access
 /// happens via explicit `MainActor` hops, both here (`cancel`) and inside `CompressionEngine`.
 final class Compression: CompressHostApi {
   private let flutterApi: CompressVideoFlutterApi
@@ -104,7 +109,9 @@ final class Compression: CompressHostApi {
     // point and before request validation (260927-r4k) -- mirroring Android's Compression.kt
     // (`JobRegistry.resultDeferredFor(jobId)` ahead of its own first suspension) -- so a
     // concurrent awaitCompressResult(jobId) call, issued by a caller on a background isolate
-    // right after this call fires, always finds the jobId known. No `await` here on purpose:
+    // right after this call fires, is expected to find the jobId known (expected, not
+    // guaranteed -- see the class comment; the grace loop in awaitCompressResult is the
+    // guarantee). No `await` here on purpose:
     // an `await` is a suspension point, and a suspension point is exactly where the second
     // call's handler used to overtake this one.
     JobRegistry.registerJob(jobId: jobId)
@@ -136,8 +143,9 @@ final class Compression: CompressHostApi {
   /// IS awaited directly before returning) -- this exists as the documented, symmetric escape
   /// hatch Pigeon's cross-platform contract promises regardless.
   ///
-  /// `@MainActor` so the consumed/known checks below run in channel-handler order with no hop
-  /// (260927-r4k) -- see this class's own doc comment.
+  /// `@MainActor` so the consumed/known checks below run with no hop of their own
+  /// (260927-r4k). That makes channel-handler order likely, not certain -- see this class's
+  /// own doc comment. The grace loop below is what the contract rests on.
   @MainActor
   func awaitCompressResult(jobId: String) async throws -> CompressResultMessage {
     try Self.requireValidJobId(jobId)
@@ -156,11 +164,11 @@ final class Compression: CompressHostApi {
         details: nil
       )
     }
-    // Belt and braces (260927-r4k): startCompress's synchronous MainActor registration already
-    // orders itself ahead of this call whenever the two messages arrive in the order Dart sent
-    // them. Should anything in the messenger ever deliver them the other way round, wait a
-    // bounded 2 s (40 x 50 ms) for the registration to land before concluding the jobId is
-    // genuinely unknown -- still typed, still never a hang.
+    // LOAD-BEARING (260927-r4k), not belt and braces: startCompress's synchronous MainActor
+    // registration usually runs ahead of this call, but Swift does not order the two
+    // unstructured Tasks Pigeon creates for the two messages. When this call runs first, wait
+    // a bounded 2 s (40 x 50 ms) for the registration to land before concluding the jobId is
+    // genuinely unknown -- still typed, still never a hang. Do not shorten or remove this loop.
     var known = JobRegistry.isKnownJobId(jobId)
     var remainingPolls = Self.knownJobIdGracePolls
     while !known && remainingPolls > 0 {
@@ -336,6 +344,10 @@ final class Compression: CompressHostApi {
   /// `awaitCompressResult`'s bounded grace for a jobId `startCompress` has not registered yet:
   /// 40 polls 50 ms apart, 2 s in total. Mirrors `Compression.kt`'s
   /// `KNOWN_JOB_ID_GRACE_POLLS`/`KNOWN_JOB_ID_GRACE_POLL_MS` exactly.
+  ///
+  /// LOAD-BEARING: this grace is the only mechanism that guarantees a background-isolate
+  /// caller's `awaitCompressResult` finds the job `startCompress` registers; the `@MainActor`
+  /// ordering is best-effort. Do not shorten or delete these constants.
   private static let knownJobIdGracePolls = 40
   private static let knownJobIdGracePollNanoseconds: UInt64 = 50_000_000
 
