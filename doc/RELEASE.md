@@ -19,8 +19,7 @@ Do these in order. Tick each box when it is done.
       - MacBook Air: `cd example && flutter build macos --release`
 - [ ] 2. Confirm that the latest CI run on `main` is green for `Android`, `Apple` and
       `Cross-platform parity`. In the `Android` job, check that `Dry-run publish` and
-      `dartdoc: zero warnings (RELS-01)` passed, and the pana step if it is present (see
-      "The pana score" below).
+      `dartdoc: zero warnings (RELS-01)` and `pana: 160/160 pub points (RELS-01)` passed.
       - `gh run list --repo danieljamesjohnson/compress_video --branch main --limit 1`
 - [ ] 3. Run `dart pub publish --dry-run` from the repository root. The last line must be
       `Package has 0 warnings.`
@@ -69,18 +68,19 @@ Run these from the repository root, on a clean checkout of `main`.
 
 ## The pana score
 
-`pana` is the tool pub.dev uses to compute pub points. The plan for this release was to run it
-in CI and fail unless the package is granted every point. That step is **not in CI yet**, and
-pana has **not been run** against this package.
+`pana` is the tool pub.dev uses to compute pub points. CI runs it in the `Android` job, in the
+step `pana: 160/160 pub points (RELS-01)`, and fails unless the package is granted every point.
+On 2026-09-27 the package scored 160 of 160 locally with pana 0.23.19.
 
-The reason: the release plan allowed pana to be installed only if pub.dev listed its publisher
-as `dart.dev`. On 2026-09-27 pub.dev listed it as `tools.dart.dev`, so it was not installed.
-QUESTIONS.md #2 has the details and the one decision needed.
+pana's score before publishing and pub.dev's score after publishing come from the same tool,
+but pub.dev runs its own copy. The first item under "After publishing" is the real check.
 
-Until that is settled, the gates that stand in for the score are `Dry-run publish` at 0
-warnings, `dartdoc: zero warnings (RELS-01)`, and `flutter analyze --fatal-infos` with the
-`public_member_api_docs` lint. They do not prove 160/160. The first item under "After
-publishing" is the real check.
+To run pana by hand, from the repository root:
+
+```sh
+dart pub global activate pana
+dart pub global run pana --flutter-sdk "$(dirname "$(dirname "$(command -v flutter)")")" .
+```
 
 ## For the next version
 

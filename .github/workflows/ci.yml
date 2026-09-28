@@ -289,6 +289,24 @@ jobs:
       - name: Dry-run publish
         run: dart pub publish --dry-run
 
+      - name: "pana: 160/160 pub points (RELS-01)"
+        # D-07, plan 06-04: pana is the tool pub.dev itself uses to compute pub points
+        # (publisher tools.dart.dev, the Dart team's tooling publisher). This step fails unless
+        # the package is granted every point pana can grant. The threshold below is zero and
+        # must stay zero: fix the deduction pana names, never raise the threshold.
+        # The report is written outside the package directory, because pana copies the
+        # directory it scores. On a failure the step prints every section that lost points.
+        # To reproduce locally, from the package root:
+        #   dart pub global activate pana
+        #   dart pub global run pana --flutter-sdk <flutter root> .
+        run: |
+          dart pub global activate pana
+          out="${RUNNER_TEMP:-/tmp}/pana-report.json"
+          code=0
+          dart pub global run pana --exit-code-threshold 0 --flutter-sdk "${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}" --json . > "$out" 2> "${out%.json}.log" || code=$?
+          jq -r '.scores | "pana: \(.grantedPoints)/\(.maxPoints) pub points"' "$out"
+          if [ "$code" -ne 0 ] || ! jq -e '.scores.maxPoints > 0 and .scores.grantedPoints == .scores.maxPoints' "$out" > /dev/null; then jq -r '.report.sections[] | select(.grantedPoints < .maxPoints) | "## \(.title): \(.grantedPoints)/\(.maxPoints)\n\(.summary)"' "$out"; echo "FATAL: pana did not grant every pub point (exit code $code)" >&2; exit 1; fi
+
       - name: "dartdoc: zero warnings (RELS-01)"
         # D-07, plan 06-04: pub.dev scores the package's documentation. `dart doc --dry-run`
         # exits 0 even when it prints warnings, so this step reads its summary line and fails

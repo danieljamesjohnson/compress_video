@@ -37,6 +37,12 @@ satisfied that `tools.dart.dev` is the Dart team, say so and an agent will insta
 fix what it names, and add the CI gate at threshold 0. If you would rather not, the first check
 after publishing (`https://pub.dev/packages/compress_video/score`) is where the score is seen.
 
+**RESOLVED 2026-09-27 (the pana question only):** approved. `tools.dart.dev` is the Dart team's
+tooling publisher, and the plan's `dart.dev` was a mistake in the plan, not a rule about which
+publisher is trusted. pana 0.23.19 was installed and run: the package scores **160 of 160**. CI
+now has the step `pana: 160/160 pub points (RELS-01)`. The publisher choice above is still open
+and still blocks the release.
+
 ## 3. Physical Android phone for hardware checks
 
 The emulator covers builds and most logic. HEVC hardware encoding and HDR tone-map fidelity need a real phone (a Pixel with HLG10 capture is ideal). When one is available, either plug it into danserver over USB or expose `adb` over the tailnet. Not blocking until the codec/HDR phase.
