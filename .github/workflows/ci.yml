@@ -318,6 +318,8 @@ jobs:
         # 160/160; doc/TOOLCHAIN.md records the pin and how to bump it.
         # When pana writes no score (a crash, invalid JSON), the step prints pana's own stderr
         # before failing, so the reason is in the log.
+        # shell: bash gives `bash -eo pipefail`, the shell this step was proven under locally.
+        shell: bash
         run: |
           dart pub global activate pana 0.23.19
           out="${RUNNER_TEMP:-/tmp}/pana-report.json"
@@ -336,6 +338,8 @@ jobs:
         # gate, `public_member_api_docs` under `flutter analyze --fatal-infos` above.
         # To fix a failure, run `dart doc --dry-run` from the package root and correct the
         # reference each warning names. Do not suppress the warning.
+        # shell: bash gives `bash -eo pipefail`, so a crash of `dart doc` is not hidden by tee.
+        shell: bash
         run: |
           dart doc --dry-run 2>&1 | tee dartdoc.log
           grep -q "Found 0 warnings and 0 errors." dartdoc.log || { echo "FATAL: dartdoc reported warnings or errors -- run: dart doc --dry-run" >&2; exit 1; }
