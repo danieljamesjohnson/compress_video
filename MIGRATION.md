@@ -56,7 +56,7 @@ The code compiles unchanged, but the engine under it is new. These are the diffe
 | Trim on iOS | Only applied when `includeAudio` was `false` | Always applied. |
 | `width` and `height` on Android | Swapped for the wrong rotations | The size as displayed, after rotation, on every platform. |
 | `VideoQuality.HighestQuality` | No resize, fixed 3.7 Mbps. A 4K video stayed 4K and looked blocky. | The long side is capped at 1920. A video at or below 1080p is still not resized. |
-| `compressProgress$` | One subscriber. A second `subscribe` threw. `unsubscribe` closed the stream for everyone. | Any number of subscribers. `unsubscribe` stops only its own subscriber. |
+| `compressProgress$` | One subscriber. A second `subscribe` threw. `unsubscribe` closed the stream for everyone. Values sent before the first `subscribe` were kept for it. | Any number of subscribers. `unsubscribe` stops only its own subscriber. A value sent while nobody is subscribed is dropped, so subscribe before you start the compression. |
 | `deleteAllCache` | Deleted the whole plugin folder and crashed on Android | Deletes only the files this plugin wrote, and returns `true`. |
 | `setLogLevel` | Set the native log level | Does nothing. The call is kept so that your code compiles. |
 | A cancelled `compressVideo` | Returned `null` or a `MediaInfo` with `isCancel` set, depending on the platform | Returns `MediaInfo(isCancel: true)` with a `null` `path`. |
@@ -131,7 +131,7 @@ describes what a compression produced. In the new API every name carries its uni
 | `author` | Not provided | Not provided | |
 | `width` | `widthPx` | `widthPx` | Pixels, as displayed |
 | `height` | `heightPx` | `heightPx` | Pixels, as displayed |
-| `orientation` | `rotationDegrees` | Not provided. The output is upright. | Degrees, clockwise |
+| `orientation` | `rotationDegrees` | Not provided. Read `rotationDegrees` from `getMediaInfo(result.outputPath)`. | Degrees, clockwise |
 | `filesize` | `sizeBytes` | `outputBytes`, with `inputBytes` beside it | Bytes |
 | `duration` | `durationMs` | `durationMs` | Milliseconds. An `int`, where the old field was a `double`. |
 | `isCancel` | Not provided | Not provided. A cancelled job throws `CompressVideoException` with reason `cancelled`. | |

@@ -232,10 +232,12 @@ class Subscription {
 
 /// The incumbent's minimal observable, used for [IVideoCompress.compressProgress$].
 ///
-/// Two differences from the incumbent, both supersets of its behaviour: any number of
+/// Three differences from the incumbent. Two are supersets of its behaviour: any number of
 /// subscribers may [subscribe] at once (the incumbent threw on the second), and
 /// [Subscription.unsubscribe] stops only its own subscriber (the incumbent closed the stream
-/// under every subscriber).
+/// under every subscriber). The third is not: a value sent while nobody is subscribed is
+/// dropped, where the incumbent kept it for the first subscriber. Subscribe before starting
+/// the compression.
 @Deprecated(
   'Listen to CompressJob.progress, a Stream<double> -- see MIGRATION.md',
 )
