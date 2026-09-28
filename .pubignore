@@ -24,6 +24,9 @@ example/macos/.symlinks/
 .flutter-plugins
 .flutter-plugins-dependencies
 
+# dartdoc output (repeated from .gitignore)
+doc/api/
+
 # Publish-only exclusions
 corpus/
 .planning/

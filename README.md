@@ -121,7 +121,7 @@ try {
 ```
 
 `compress()` never returns `null` and never lets a raw platform exception escape: every failure,
-including cancellation, resolves `job.result` with a typed [`CompressVideoException`]. The
+including cancellation, resolves `job.result` with a typed `CompressVideoException`. The
 output is never larger than the input — see `doc/PRESETS.md` and the "same on every platform"
 section below.
 
@@ -278,7 +278,7 @@ proven by this package's own automated test suites.
 ### `getThumbnail` / `getThumbnailFile` semantics
 
 * **`positionMs`** — milliseconds from the start of the clip. Negative values throw
-  [`CompressVideoErrorReason.unsupportedInput`] synchronously (no frame before the start of a
+  `CompressVideoErrorReason.unsupportedInput` synchronously (no frame before the start of a
   clip is ever returned). A value beyond the clip's duration is **clamped to the last frame**
   rather than rejected — duration reporting is approximate and both platforms' own frame APIs
   already clamp this way.
@@ -294,7 +294,7 @@ proven by this package's own automated test suites.
 
 ### `CompressVideoErrorReason` values
 
-Every public call throws a [`CompressVideoException`] instead of returning `null` or letting a
+Every public call throws a `CompressVideoException` instead of returning `null` or letting a
 raw platform exception escape. `reason` is one of:
 
 | Reason | Meaning |
@@ -304,7 +304,7 @@ raw platform exception escape. `reason` is one of:
 | `decoderUnavailable` | The platform could not obtain a decoder for the input. |
 | `io` | A platform I/O error not covered by a more specific reason above. |
 | `cancelled` | The operation was cancelled before it completed. |
-| `unknown` | The platform reported an error code this plugin version doesn't recognise; the original code is preserved in [`CompressVideoException.platformDetail`]. |
+| `unknown` | The platform reported an error code this plugin version doesn't recognise; the original code is preserved in `CompressVideoException.platformDetail`. |
 | `encoderUnavailable` | The device could not obtain/configure an encoder for the requested output (compression, later versions). |
 | `outOfSpace` | The destination filesystem has no room for the output (compression, later versions). |
 | `interrupted` | The operation was interrupted by the system before completing and can be retried (Apple engine, later versions). |
@@ -339,7 +339,7 @@ across platforms and what it does not.
   device vs. simulator) and is never compared across platforms
 
 This is not a promise of byte-for-byte or elapsed-time parity anywhere in this package's surface
-— see the `outputBytes` and `elapsedMs` dartdoc on [`CompressResult`] for the same statement at
+— see the `outputBytes` and `elapsedMs` dartdoc on `CompressResult` for the same statement at
 the point a caller reads those fields, and `doc/PRESETS.md` for the actual per-platform measured
 tables (including a real, measured Apple-overshoots/Android-undershoots bitrate divergence) that
 substantiate this section rather than assert it.

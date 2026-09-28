@@ -289,6 +289,19 @@ jobs:
       - name: Dry-run publish
         run: dart pub publish --dry-run
 
+      - name: "dartdoc: zero warnings (RELS-01)"
+        # D-07, plan 06-04: pub.dev scores the package's documentation. `dart doc --dry-run`
+        # exits 0 even when it prints warnings, so this step reads its summary line and fails
+        # unless it says zero warnings and zero errors. The package's README is part of what
+        # dartdoc checks: write `Name` there, not [`Name`]. Per-symbol coverage is a separate
+        # gate, `public_member_api_docs` under `flutter analyze --fatal-infos` above.
+        # To fix a failure, run `dart doc --dry-run` from the package root and correct the
+        # reference each warning names. Do not suppress the warning.
+        run: |
+          dart doc --dry-run 2>&1 | tee dartdoc.log
+          grep -q "Found 0 warnings and 0 errors." dartdoc.log || { echo "FATAL: dartdoc reported warnings or errors -- run: dart doc --dry-run" >&2; exit 1; }
+          rm -f dartdoc.log
+
       - name: Build debug APK
         working-directory: example
         run: flutter build apk --debug

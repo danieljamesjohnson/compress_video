@@ -18,3 +18,6 @@ example/macos/.symlinks/
 **/Flutter/ephemeral/
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# dartdoc output (`dart doc`); generated, never committed or published
+doc/api/
