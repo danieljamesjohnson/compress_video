@@ -400,3 +400,5 @@ _Iteration: 1_
 ## Orchestrator CI resolution (2026-09-28)
 
 Run 36366408783 (`7c3f273`, iteration-2 fixes included): all four jobs green. WR-07's trigger proven by `b19e3b1` (CLAUDE.md-only, no run) and `9c58899` (README-only, run 36370914935 started). Review iteration 3: `approved`.
+
+WR-07 positive proof completed: run 36370914935 (README-only push `9c58899`) finished green — Android job ran (including the README preset-table drift gate and the MIGRATION guard), Apple job correctly skipped by the `changes` gate. The trigger filter is proven in both directions.
