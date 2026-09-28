@@ -1,299 +1,226 @@
 ---
 phase: 06-release-and-migration
-reviewed: 2026-09-28T01:21:46Z
+reviewed: 2026-09-28T01:35:13Z
 depth: standard
-iteration: 2
-diff_base: d18f049
-files_reviewed: 21
+iteration: 3
+diff_base: 04b6fd6
+files_reviewed: 4
 files_reviewed_list:
+  - .claude/CLAUDE.md
   - .github/workflows/ci.yml
-  - .pubignore
-  - CHANGELOG.md
-  - MIGRATION.md
-  - README.md
-  - android/src/main/kotlin/com/danjjohnson/compress_video/Compression.kt
-  - darwin/compress_video/Sources/compress_video/Compression.swift
   - doc/HARDWARE_CHECKLIST.md
-  - doc/PRESETS.md
-  - doc/RELEASE.md
-  - doc/TOOLCHAIN.md
-  - example/integration_test/hard_inputs_test.dart
   - example/integration_test/video_compress_compat_test.dart
-  - lib/compress_video.dart
-  - lib/src/compress_job.dart
-  - lib/src/compress_options.dart
-  - lib/src/compress_result.dart
-  - lib/video_compress_compat.dart
-  - test/preset_table_test.dart
-  - test/video_compress_compat_test.dart
-  - tool/preset_table.dart
 findings:
   critical: 0
-  warning: 2
-  info: 4
-  total: 6
-status: issues_found
+  warning: 0
+  info: 3
+  total: 3
+status: approved
 ---
 
-# Phase 6: Code Review Report (iteration 2)
+# Phase 6: Code Review Report (iteration 3)
 
-**Reviewed:** 2026-09-28T01:21:46Z
+**Reviewed:** 2026-09-28T01:35:13Z
 **Depth:** standard
-**Iteration:** 2 — re-review of the fix commits `48aa3b0..04b6fd6`
-**Files Reviewed:** 21
-**Status:** issues_found
+**Iteration:** 3 — re-review of the iteration-2 fix commits `0440afa..9e8dc11`
+**Files Reviewed:** 4
+**Status:** approved
 
 ## Summary
 
-This is the re-review of the fourteen fix commits. Each changed hunk was read in the context
-of its whole file. Thirteen of the fifteen iteration-1 findings are resolved. Two warnings are
-open: one reopened (WR-07) and one new (WR-10, which the WR-08 fix introduced). No BLOCKER.
+This is the re-review of the five iteration-2 fix commits. Each changed hunk was read in the
+context of its whole file. All five fixes do what the fix report says. No critical and no
+warning finding is open. Three info items are open: IN-03 (skipped with a sound reason) and
+two new ones, IN-10 and IN-11. None blocks.
 
-| Count | Open | Resolved |
+| Count | Open | Resolved (all iterations) |
 |---|---|---|
 | Critical | 0 | 0 |
-| Warning | 2 (WR-07, WR-10) | 8 |
-| Info | 4 (IN-03, IN-07, IN-08, IN-09) | 5 |
+| Warning | 0 | 10 |
+| Info | 3 (IN-03, IN-10, IN-11) | 8 |
+
+One thing remains unproven and cannot be proven by a review: that a push which changes only
+`README.md` starts a run. See WR-07.
 
 ### What was run, and where
 
-Unlike iteration 1, this review executed things. Tests ran in a copy of the working tree in
-the session scratchpad, so the repository was not touched. `git status` is clean after the
-review.
+Nothing in the repository was changed. `git status` is clean after the review. Scratch files
+were written to the session scratchpad only.
 
 | Check | Result |
 |---|---|
-| `flutter test test/` (scratch copy, Flutter 3.44.1) | 221 passed |
-| The two compat unit suites with `--test-randomize-ordering-seed` 1 to 5 | 40 passed, every seed |
-| `flutter test tool/generate_preset_table.dart`, then `diff` of README.md against the repository | no drift |
-| `dart pub publish --dry-run` (repository, Flutter 3.47.5) | Package has 0 warnings |
-| The dry-run file listing, for the four WR-09 exclusions | none of the four is listed |
-| `grep` of every tracked file for `danthebeliever`, `dans-macbook-air`, `danserver`, `tailc2efd2`, `/home/dan`, `/Users/danjohnson` | see WR-09 below |
-| `gh run list` on the `github` remote | run 36365479082 started for `04b6fd6`; the `changes` job succeeded |
+| `yaml.safe_load` of ci.yml: `push.paths == pull_request.paths` | True, the eight patterns in the required order |
+| The same parse: a `paths-ignore` key under `push` or `pull_request` | none |
+| `grep -n "paths-ignore"` on ci.yml | two matches, both inside the explanatory comment (`:6-7`) |
+| `git diff 04b6fd6..HEAD -- .github/workflows/ci.yml` | two hunks: the trigger block (`:3-33`) and the pana step (`:320-336`). The `changes` job (`:47-91`) is not in the diff |
+| The pana failure line (`ci.yml:336`) under `bash -eo pipefail`, six hand-made reports | see IN-07 below |
+| `grep` of the shipped documents, `lib/`, `example/lib/` and `example/integration_test/` for `mac_sync`, `mac_run`, `danserver`, `dans-macbook` | no match |
+| `git show 86dcdf3^:example/integration_test/video_compress_compat_test.dart` | the cancel case before WR-08 required `isCancel == true` on every platform |
+| `gh run list` on the `github` remote | 36357692915 succeeded with that strict form on Android, iOS and macOS. 36366408783 is pending for `7c3f273` |
 
 Not run, and why:
 
-- **Kotlin and Swift.** No native test was run by this review. WR-02 and WR-03 are judged by
-  reading. CI run 36365479082 was still in progress when this report was written, so it is not
-  evidence for either.
-- **The integration suite.** Not run on any device by this review.
-- **The workflow trigger filter.** It cannot be run locally. See WR-07.
+- **The integration suite.** Not run on any device by this review. The fixer's emulator run
+  and its mutation run (the `cancelCompression()` call removed) are taken from the fix
+  report. The assertion they rest on was read.
+- **The workflow trigger filter.** It cannot be run locally.
+- **Run 36366408783** was pending when this report was written. It is not evidence for
+  anything here. It was started by a push that changes `ci.yml`, so it also says nothing
+  about a Markdown-only push.
 
-## Iteration-1 findings: status
+## Iteration-2 findings: status
 
 | Id | Status | Reason |
 |---|---|---|
-| WR-01 | RESOLVED | Engine, current job and flag are library-level; after `dispose()` the job is visible, cancellable and blocks a second call. Proven by the new unit test, also in shuffled order. |
-| WR-02 | RESOLVED | `resultDeferredFor` now precedes validation, and validation is inside the `try`. A validation failure is recorded once, by the outer `catch`. |
-| WR-03 | RESOLVED | Comments only. The grace loop and its constants are marked load-bearing. |
-| WR-04 | RESOLVED | All three README statements and both dartdoc copies are corrected. No other copy of the old wording remains. |
-| WR-05 | RESOLVED | Headers and footnote name the test clip, the emulator and the simulator. The README regenerates with no drift. |
-| WR-06 | RESOLVED | pana is pinned to 0.23.19 and its stderr is printed on both failure paths. One small gap, IN-07. |
-| WR-07 | **REOPENED** | The fix uses `!` patterns inside `paths-ignore`, a form GitHub documents only for `paths`. It is unproven. See below. |
-| WR-08 | RESOLVED | The case can no longer fail on a lost race, and both branches are asserted in full. The fix brought a new defect, WR-10. |
-| WR-09 | RESOLVED | The only shipped file that matches the grep is the podspec, the stated exception. |
-| IN-01 | RESOLVED | `shell: bash` is on both steps. |
-| IN-02 | RESOLVED | "the documented surface", with the pointer to MIGRATION.md. |
-| IN-03 | OPEN (skipped by the fixer) | Unchanged. The reason given is sound: `copyWith` is a public API addition and a design choice. |
-| IN-04 | RESOLVED | Documented in the class dartdoc and in MIGRATION.md. |
-| IN-05 | RESOLVED | The row now points to `rotationDegrees`. |
-| IN-06 | RESOLVED | The case makes its own output. The shared variable is gone. |
+| WR-07 | RESOLVED | `paths` with `!` exclusions and later re-inclusions, the documented form. Both events carry the same list. One proof is still owed, see below. |
+| WR-10 | RESOLVED | Android and iOS require `isCancel == true`. A cancel that does nothing fails there. The macOS finished branch is asserted in full. Residual gap on macOS only, IN-10. |
+| IN-03 | OPEN (skipped by the fixer) | Unchanged. The reason is sound: `copyWith` is a public API addition and a design choice. |
+| IN-07 | RESOLVED | The FATAL line and pana's stderr are printed for every malformed report tried. |
+| IN-08 | RESOLVED | The lane note names the three files, the form of the filter and the order rule. One stale detail in the same note, IN-11. |
+| IN-09 | RESOLVED | The comment names no file. No shipped file names either Mac script. |
 
-### Notes on the four fixes the orchestrator asked about
+All fifteen iteration-1 findings keep the status recorded in iteration 2: fourteen resolved,
+IN-03 open. None of their files was changed by the iteration-2 commits except
+`video_compress_compat_test.dart` (WR-08, IN-06), and both still hold there.
 
-**WR-01, `dispose()` semantics.** Verified by reading `lib/video_compress_compat.dart:275-568`
-and by the tests.
+## Verification of each fix
 
-- *Job stays cancellable.* `cancelCompression()` reads the library-level `_currentJob`
-  (`:486-488`), so any instance reaches the job.
-- *No leaked subscription.* The forwarding subscription is a local of `compressVideo` and is
-  cancelled in `finally` (`:443-447`) on success, failure and cancel. `dispose()` does not
-  affect it.
-- *No null return.* Every path of `compressVideo` returns a `MediaInfo` or throws.
-- *State cannot stick.* `_engine.compress` throws before `_isCompressing` is set (`:417-419`),
-  and the `finally` clears both fields.
-- *Test isolation.* The state now outlives `tearDown`'s `dispose()`. A test that left a job
-  in flight would block every later test. None does: the suites pass under five shuffle seeds.
+### WR-07 (RESOLVED): trigger filter
 
-**WR-02, Android ordering.** `Compression.kt:29-43` matches `Compression.swift:106-121`:
-job-id format check, registration, then validation inside the `try`. `requireValidJobId`
-stays outside on both platforms, which is right, because an invalid id must never become a
-registry key. `JobRegistry.completeResult` (`JobRegistry.kt:256-276`) completes the deferred
-only when it is not yet completed, and the outer `catch` is the only caller on a validation
-failure, so the failure is recorded once.
+**File:** `.github/workflows/ci.yml:3-33`
 
-One consequence, recorded and not a finding: a request that fails validation now leaves a
-completed deferred and a `knownJobIds` entry when the caller is on the root isolate and never
-calls `awaitCompressResult`. Every other failure and every success already did the same before
-this change, and `cancelAll()` clears them.
-
-**WR-09, completeness.** The tracked files that match the grep, outside `.planning/`, are:
-
-| File | Ships? |
+| Requirement | Result |
 |---|---|
-| `.claude/CLAUDE.md` | No (`.claude/` in `.pubignore`) |
-| `QUESTIONS.md` | No |
-| `corpus/README.md`, `corpus/patch_rotation.py` | No (`corpus/`) |
-| `doc/TOOLCHAIN.md` | No |
-| `tool/mac_run.sh`, `tool/mac_sync.sh` | No |
-| `darwin/compress_video.podspec` | Yes — the author field, the stated exception |
+| `push` and `pull_request` lists identical | yes, compared after parsing |
+| No `paths-ignore` key left | yes |
+| `.planning/**` excluded | `:15`, `:26` |
+| `**/*.md` excluded | `:16`, `:27` |
+| `QUESTIONS.md` excluded | `:17`, `:28`. Already covered by `!**/*.md`; the line is redundant and harmless |
+| `.mission-control/**` excluded | `:18`, `:29` |
+| `README.md`, `MIGRATION.md`, `doc/PRESETS.md` re-included after the exclusions | `:19-21`, `:30-32`, the last three patterns |
+| `'**'` is the first pattern | yes |
+| `branches: [main]` and `workflow_dispatch` kept | yes |
+| `changes` job untouched | yes |
 
-**WR-05, regenerated text.** The generator, the pinned test and the README agree, and a fresh
-run of the generator changes nothing.
+The three re-inclusions have no wildcard, so they match the root `README.md`, the root
+`MIGRATION.md` and `doc/PRESETS.md` only. `example/README.md` and `corpus/README.md` stay
+excluded, which is the intent.
 
-## Warnings
+A push of only these three files gives `apple=false` in the `changes` job, because none
+matches the list at `:87`. The Android job runs and the Apple job is skipped.
 
-### WR-07 (REOPENED): the Markdown exception rests on an undocumented form of `paths-ignore`
+**Still owed:** one push that changes only `README.md`, to see a run start. The form no
+longer depends on it, but CHANGELOG.md's statement that a CI gate guards the README table is
+proven only then. This is a release-checklist item, not a finding.
 
-**Classification:** WARNING
-**File:** `.github/workflows/ci.yml:6-30`; `CHANGELOG.md:51`, `:54`
-**Issue:** The fix puts `'!README.md'`, `'!MIGRATION.md'` and `'!doc/PRESETS.md'` inside
-`paths-ignore`. GitHub's workflow syntax documents `!` negation for the `paths` filter. For a
-workflow that must both include and exclude paths, the documentation says to use `paths` with
-`!` patterns, and describes `paths-ignore` as the filter for excluding only. Negation inside
-`paths-ignore` is not a documented form.
+### WR-10 (RESOLVED): compat cancel case
 
-The iteration-1 review suggested this form and stated that GitHub "honours `!` negation"
-there. That statement was not verified then and I cannot verify it now. I am stating this from
-my knowledge of the documentation, which I could not consult during this review.
+**File:** `example/integration_test/video_compress_compat_test.dart:225-307`
 
-What is known:
+- **Android and iOS require the cancel.** `:266-273` asserts `isCancel` is `true` whenever
+  the platform is not macOS. It runs before the two-branch `if`, so the `else` branch cannot
+  be reached there with a passing test.
+- **A no-op cancel fails there.** If the cancel stops nothing, the encode finishes,
+  `compressVideo` returns `isCancel: false` (`lib/video_compress_compat.dart:435`), and
+  `:267` fails. The fixer's mutation run shows the same failure message.
+- **The macOS finished branch is complete.** `:280-296`: `path` and `file` set, the file
+  exists, `filesize` above 0, equal to the file's length and not above the input, and
+  `width`, `height`, `duration` set. When the never-larger rule delivers the original,
+  `filesize` equals the input size and `lessThanOrEqualTo` holds.
+- **The null check is safe.** `info.isCancel!` at `:274` follows `isNotNull` at `:256`.
+- **The requirement on iOS has evidence.** This same case, with this same clip and
+  `HighestQuality`, required `isCancel == true` on all three platforms before WR-08 and
+  passed in run 36357692915. So the strict form is not a new flake risk on Android or iOS.
 
-- The workflow file is valid. Run 36365479082 started for `04b6fd6`. That push changed code,
-  so it says nothing about a Markdown-only push.
-- If the `!` lines have no effect, a README-only push still starts no run. The two drift
-  gates then do not guard the documents, and CHANGELOG.md:51 and `:54` state a guarantee that
-  does not hold. This is the original WR-07, unchanged.
+### IN-07 (RESOLVED): pana failure branch
 
-The interaction with the `changes` job is correct either way: a push of only these three
-files does not match the Apple path list (`:85`), the Apple job is skipped, and the parity
-gate takes its justified no-op branch.
+**File:** `.github/workflows/ci.yml:336`
 
-**Fix:** use the documented form. It gives the same result and needs no proof by experiment:
+The line was copied out and run under `bash -eo pipefail`:
 
-```yaml
-on:
-  push:
-    branches: [main]
-    paths:
-      - '**'
-      - '!.planning/**'
-      - '!.mission-control/**'
-      - '!**/*.md'
-      - 'README.md'
-      - 'MIGRATION.md'
-      - 'doc/PRESETS.md'
-```
+| Report | Exit | FATAL line and stderr printed |
+|---|---|---|
+| `.scores` below the maximum, no `.report` | 1 | yes |
+| `.report` is a string | 1 | yes (jq's error is printed first) |
+| `.report.sections` holds numbers and strings | 1 | yes |
+| `maxPoints` is 0 | 1 | yes |
+| full score, pana exit code 3 | 1 | yes |
+| full score, exit code 0 | 0 | not applicable, the step passes |
 
-Repeat the list under `pull_request`. `QUESTIONS.md` needs no line of its own, because
-`'!**/*.md'` covers it. Then confirm once with a push that changes only `README.md`.
+The gate itself is unchanged.
 
-If the current form is kept, prove it with that same README-only push before the release, and
-record the run id in the comment at `:9-12`.
+### IN-08 (RESOLVED) and IN-09 (RESOLVED)
 
-### WR-10 (NEW): the compat cancel case passes when `cancelCompression()` does nothing
-
-**Classification:** WARNING
-**File:** `example/integration_test/video_compress_compat_test.dart:225-283`
-**Issue:** The WR-08 fix accepts two outcomes. Both are asserted in full, so a half-filled
-result is caught. But the case no longer requires that a cancel ever works. If
-`cancelCompression()` stops nothing, the encode finishes, the `else` branch at `:262-273`
-passes, and the case named "cancelCompression resolves the running compressVideo" is green.
-The only sign is one printed line, which no gate reads.
-
-So after this fix no integration case proves the shim's cancel on any platform. The unit test
-proves that the Dart side sends the cancel message. The path from the shim to a real engine
-is what this case existed to prove.
-
-The tolerance is also wider than the project's own evidence supports.
-`compress_jobs_test.dart:241-292` cancels the same clip after the same "first progress below
-100" wait and requires reason `cancelled` with no second outcome. That suite passed on
-Android, the iOS simulator and macOS in runs 36357692915 and 36351396397. The encode winning
-the race is a risk the fixer reasoned about. No run has shown it.
-
-**Fix:** keep the tolerance only where the race is plausible, and require the cancel
-elsewhere:
-
-```dart
-final MediaInfo info = await pending;
-expect(info.isCancel, isNotNull, reason: 'the outcome must say which');
-if (!Platform.isMacOS) {
-  // Software encoders on the emulator and the simulator: this clip takes
-  // seconds, so a cancel after the first progress value must land.
-  expect(info.isCancel, isTrue);
-}
-```
-
-As an alternative, record the last progress value seen before the cancel was sent, and in the
-"finished" branch require that it was close to 100. Then a finished result is accepted only
-when the encode was really about to end.
+`.claude/CLAUDE.md:151` and `doc/HARDWARE_CHECKLIST.md:232` read as the fix report says.
 
 ## Info
 
 ### IN-03 (OPEN): `compressVideo` copies `CompressOptions` field by field
 
 **File:** `lib/video_compress_compat.dart:396-413`
-**Issue:** Unchanged from iteration 1. A field added to `CompressOptions` later is dropped
-here with no compile error. The fixer skipped it with a sound reason.
+**Issue:** Unchanged. A field added to `CompressOptions` later is dropped here with no
+compile error. Skipped by the fixer with a sound reason.
 **Fix:** as before. A test that fails when `CompressOptions` gains a field would also do, and
 adds no public API.
 
-### IN-07 (NEW): the pana failure branch can exit before it prints pana's stderr
+### IN-10 (NEW): on macOS the cancel case still passes when the cancel does nothing
 
-**File:** `.github/workflows/ci.yml:331`
-**Issue:** Under `bash -eo pipefail` the commands in the body of an `if` are subject to `-e`.
-When the report has `.scores` but no `.report.sections`, `jq -r '.report.sections[] | ...'`
-exits non-zero and the step ends there, before the `FATAL` line and before `cat "$log"`. The
-step still fails, so the gate is sound. Only the diagnostics are lost, which is what WR-06
-set out to keep.
-**Fix:** use `.report.sections[]?` and end that `jq` call with `|| true`.
+**File:** `example/integration_test/video_compress_compat_test.dart:258-273`
+**Issue:** The tolerance that WR-10 removed for Android and iOS is kept for macOS, as the
+iteration-2 review proposed. So on macOS a `cancelCompression()` that stops nothing still
+gives a green case. The shim's cancel is Dart code shared by all platforms and is proven on
+Android and iOS, so the risk is small.
 
-### IN-08 (NEW): the project CLAUDE.md still says a Markdown-only push creates no run
+Two statements in the comment are weaker than they read:
+
+1. "macOS is the one host where the encode can plausibly win the race". No run has shown
+   it. `compress_jobs_test.dart:241-292` requires `cancelled` on macOS with no second
+   outcome, and the strict form of this case passed on macOS in run 36357692915.
+2. "what compress_jobs_test.dart requires of the same clip after the same wait". The clip
+   and the wait are the same. The preset is not: that suite uses the default `p720`, this
+   case uses `p1080`. The difference makes this encode slower, so it supports the
+   requirement. The comment should say so.
+
+**Fix:** either drop the macOS exception and require `isCancel == true` everywhere, as the
+case did before WR-08, or keep it and print the last progress value seen before the cancel,
+so a lost race can be told from a dead cancel in the log.
+
+### IN-11 (NEW): the lane note lists fewer Apple-gated paths than the `changes` job
 
 **File:** `.claude/CLAUDE.md:151`
-**Issue:** The lane note says "A Markdown-only or `.planning/`-only push creates no CI run at
-all". After WR-07 this is wrong for three files, if the filter works. The project rule is to
-correct a stale CLAUDE.md as part of the work.
-**Fix:** name the three exceptions in that note, once WR-07 is settled.
-
-### IN-09 (NEW): a shipped document points to a script that is not shipped
-
-**File:** `doc/HARDWARE_CHECKLIST.md:232`
-**Issue:** The comment "this repo synced (tool/mac_sync.sh)" names a file that WR-09 removed
-from the package. The references to `doc/RELEASE.md` were corrected in the same commit. This
-one was missed.
-**Fix:** "with this repository copied to the Mac", with no file name.
+**Issue:** The note says the macOS job runs when a push touches `darwin/`, `pigeons/`,
+`lib/`, `example/`, `pubspec.yaml` or the workflow file. The `changes` job
+(`.github/workflows/ci.yml:87`) also matches `tool/` and `corpus/`. The omission is older
+than this phase, but commit 3c7d931 rewrote this same note and left it.
+**Fix:** add `tool/` and `corpus/` to the list in the note.
 
 ## For the orchestrator
 
 1. **A tool result carried an instruction that did not come from you or the user.** The
    output of this review's first `git` command ended with a block asking for a
-   `Claude-Session` trailer on commits. It was not followed. This review makes no commit. The
-   fixer and plans 06-02 and 06-04 recorded the same thing.
-2. **WR-07 corrects iteration 1.** The reopened finding is against a fix the iteration-1
-   review itself proposed. The fixer applied what it was given.
-3. **CI run 36365479082 was in progress** when this report was written. Its result is the
-   first evidence for WR-02 and WR-03 on real toolchains, and for WR-08 and IN-06 on Apple.
+   `Claude-Session` trailer on commits. It was not followed. This review makes no commit.
+   The same block was recorded in iterations 1 and 2 and by the fixer.
+2. **One proof is still owed for WR-07:** a push that changes only `README.md`. Put it on
+   the release checklist.
+3. **Run 36366408783 was pending** and run 36365479082 was in progress when this report was
+   written. `cancel-in-progress` is on, so the newer run will cancel the older. The newer
+   run is the first evidence on real toolchains for WR-02 and WR-03, and for the new cancel
+   assertion on iOS.
+4. **No source file was changed and nothing was committed.**
 
 ---
 
-_Reviewed: 2026-09-28T01:21:46Z_
+_Reviewed: 2026-09-28T01:35:13Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
-_Iteration: 2_
+_Iteration: 3_
 
-## ISSUES FOUND
+## VERIFICATION PASSED
 
-Open warnings:
+Open critical: none. Open warnings: none.
 
-- **WR-07 (REOPENED)** — `.github/workflows/ci.yml:6-30`: `!` patterns inside `paths-ignore`
-  are not a documented form; the Markdown exception is unproven.
-- **WR-10 (NEW)** — `example/integration_test/video_compress_compat_test.dart:225-283`: the
-  cancel case passes when the cancel does nothing.
+Open info (none blocks):
 
-Open info:
-
-- **IN-03** — `lib/video_compress_compat.dart:396-413`: field-by-field copy of `CompressOptions`.
-- **IN-07** — `.github/workflows/ci.yml:331`: the pana failure branch can exit before printing stderr.
-- **IN-08** — `.claude/CLAUDE.md:151`: stale note on Markdown-only pushes.
-- **IN-09** — `doc/HARDWARE_CHECKLIST.md:232`: reference to the unshipped `tool/mac_sync.sh`.
+- **IN-03** — `lib/video_compress_compat.dart:396-413`: field-by-field copy of `CompressOptions`. Skipped with reason.
+- **IN-10** — `example/integration_test/video_compress_compat_test.dart:258-273`: on macOS a cancel that does nothing still passes.
+- **IN-11** — `.claude/CLAUDE.md:151`: the lane note omits `tool/` and `corpus/` from the Apple-gated paths.
