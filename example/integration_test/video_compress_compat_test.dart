@@ -222,12 +222,13 @@ void main() {
       expect(_startsLikeJpeg(firstFrame), isTrue);
     }, timeout: const Timeout(Duration(seconds: 40)));
 
-    testWidgets('cancelCompression resolves the running compressVideo, typed, as '
-        'cancelled or as finished', (WidgetTester tester) async {
+    testWidgets('cancelCompression stops the running compressVideo, which '
+        'resolves as cancelled', (WidgetTester tester) async {
       final String path = await _copyClip(
         'portrait_hibitrate_1080p60.mp4',
         'cancel',
       );
+      final int inputBytes = await File(path).length();
 
       final Completer<void> sawProgress = Completer<void>();
       final Subscription subscription = VideoCompress.compressProgress$
@@ -248,14 +249,28 @@ void main() {
       await sawProgress.future.timeout(const Duration(seconds: 30));
       await VideoCompress.cancelCompression();
 
-      // The cancel races the encode it is cancelling (WR-08): two channel hops lie between
-      // the progress event and the cancel reaching the platform, and a fast host can finish
-      // this clip first. Both outcomes are legal. What is never legal is an untyped or
-      // half-filled result, so each outcome is checked in full. An immediate cancel, with
-      // no wait for progress, is not used: on Apple the job is registered for cancellation
-      // only after the input was probed, and a cancel sent before that is dropped.
+      // An immediate cancel, with no wait for progress, is not used: on Apple the job is
+      // registered for cancellation only after the input was probed, and a cancel sent
+      // before that is dropped.
       final MediaInfo info = await pending;
       expect(info.isCancel, isNotNull, reason: 'the outcome must say which');
+
+      // WR-10: a cancel that does nothing must fail this case. On Android and iOS the
+      // cancel is required to land, with no second outcome. This is what
+      // compress_jobs_test.dart requires of the same clip after the same wait, and the
+      // encoders this suite runs on there need seconds for it.
+      // macOS is the one host where the encode can plausibly win the race (WR-08): it has
+      // a hardware encoder, and two channel hops lie between the progress event and the
+      // cancel reaching the platform. There, and only there, a finished result is
+      // accepted, and only when it is a complete one.
+      if (!Platform.isMacOS) {
+        expect(
+          info.isCancel,
+          isTrue,
+          reason:
+              'cancelCompression() was sent mid-flight and must stop the encode',
+        );
+      }
       if (info.isCancel!) {
         expect(info.path, isNull);
         expect(info.file, isNull);
@@ -270,6 +285,15 @@ void main() {
           reason: 'a compression that reports success must have its output',
         );
         expect(info.filesize, greaterThan(0));
+        expect(info.filesize, await info.file!.length());
+        expect(
+          info.filesize,
+          lessThanOrEqualTo(inputBytes),
+          reason: 'a delivered file is never larger than its input',
+        );
+        expect(info.width, isNotNull);
+        expect(info.height, isNotNull);
+        expect(info.duration, isNotNull);
       }
       expect(VideoCompress.isCompressing, isFalse);
       expect(
