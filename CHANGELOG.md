@@ -43,9 +43,10 @@ depended on this repository by git. Each item says what to change.
 
 ### Added in 1.0.0
 
-* **The compatibility import.** `package:compress_video/video_compress_compat.dart` has the whole
-  public surface of `video_compress` 3.1.4 (`VideoCompress`, `VideoQuality`, `MediaInfo`,
-  `compressProgress$`) on the new engine. Every symbol is marked `@Deprecated` and names its
+* **The compatibility import.** `package:compress_video/video_compress_compat.dart` has the
+  documented surface of `video_compress` 3.1.4 (`VideoCompress`, `VideoQuality`, `MediaInfo`,
+  `compressProgress$`) on the new engine; `MIGRATION.md` lists the few names that are not
+  provided. Every symbol is marked `@Deprecated` and names its
   replacement. A failure throws a typed exception where the old package returned `null`.
 * **`MIGRATION.md`.** Every old name next to its new call, the `MediaInfo` fields, and what each
   `VideoQuality` value maps to. A test keeps the guide in agreement with the code.
