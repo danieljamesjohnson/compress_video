@@ -175,7 +175,8 @@ class CompressVideo {
   /// waiting, and its [CompressJob.progress] stream emits only once it actually starts. Every
   /// job's [CompressJob.progress] and [CompressJob.result] are fully independent of every other
   /// job regardless of queue position; there is no global progress stream and no "is
-  /// compressing" singleton anywhere in this package. Two [CompressVideo] instances queue
+  /// compressing" singleton anywhere in this library (both exist only in the deprecated
+  /// `video_compress_compat.dart` import). Two [CompressVideo] instances queue
   /// completely independently (D-04).
   CompressJob compress(
     String path, {

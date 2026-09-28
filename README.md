@@ -60,7 +60,9 @@ dependencies:
 Every quantity that crosses the Dart/native boundary carries its unit in its name —
 `durationMs`, `positionMs`, `sizeBytes`, `widthPx`, `heightPx`, `videoBitrateBps`,
 `frameRateFps`, `rotationDegrees`. There is no ambiguous bare `duration` or `position` anywhere
-in the public API.
+in `package:compress_video/compress_video.dart`. The deprecated compatibility import
+(`video_compress_compat.dart`) keeps the old names `duration`, `position` and `startTime` on
+purpose, so existing code compiles; [MIGRATION.md](MIGRATION.md) states the unit of each.
 
 ## Usage
 
@@ -173,8 +175,10 @@ final batchCompressVideo = CompressVideo(maxConcurrentJobs: 3);
   or waits — check `CompressJob.isQueued` to tell which. A queued job's `progress` stream emits
   nothing until it actually starts.
 * Every job keeps its own `progress` stream and its own `result`, regardless of queue position —
-  there is no global progress stream and no "is compressing" flag anywhere in this package (the
-  defect class this plugin exists to avoid, `video_compress` issues #317 and #307).
+  there is no global progress stream and no "is compressing" flag anywhere in
+  `package:compress_video/compress_video.dart` (the defect class this plugin exists to avoid,
+  `video_compress` issues #317 and #307). Both exist only in the deprecated compatibility
+  import, as `compressProgress$` and `isCompressing`, for code that has not migrated yet.
 * Cancelling a job that is still queued resolves `result` with the same typed `cancelled`
   failure a cancelled *running* job produces, without ever reaching the platform — a caller
   cannot tell from the exception whether the job had started.
@@ -305,9 +309,9 @@ raw platform exception escape. `reason` is one of:
 | `io` | A platform I/O error not covered by a more specific reason above. |
 | `cancelled` | The operation was cancelled before it completed. |
 | `unknown` | The platform reported an error code this plugin version doesn't recognise; the original code is preserved in `CompressVideoException.platformDetail`. |
-| `encoderUnavailable` | The device could not obtain/configure an encoder for the requested output (compression, later versions). |
-| `outOfSpace` | The destination filesystem has no room for the output (compression, later versions). |
-| `interrupted` | The operation was interrupted by the system before completing and can be retried (Apple engine, later versions). |
+| `encoderUnavailable` | The device could not obtain/configure an encoder for the requested output. |
+| `outOfSpace` | The destination filesystem has no room for the output. |
+| `interrupted` | The operation was interrupted by the system before completing and can be retried. Raised on both Android and Apple. |
 
 ## Supported platforms
 

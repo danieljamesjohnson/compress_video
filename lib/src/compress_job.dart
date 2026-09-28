@@ -124,8 +124,9 @@ void _noOpCancelWhileQueued() {}
 /// A running or finished compression job, returned synchronously by `CompressVideo.compress`
 /// (D-01) while the platform call it wraps proceeds asynchronously.
 ///
-/// There is no global progress stream and no "is compressing" singleton anywhere in this
-/// package -- every [CompressJob] is fully independent, and two jobs started together never
+/// There is no global progress stream and no "is compressing" singleton anywhere in the main
+/// library (both exist only in the deprecated `video_compress_compat.dart` import) -- every
+/// [CompressJob] is fully independent, and two jobs started together never
 /// share state. A job may sit briefly in a queued state (see [isQueued]) before its platform
 /// call is issued, when `CompressVideo`'s own concurrency limit is holding it back; a job's
 /// [progress] and [result] behave identically regardless of whether it started immediately or
