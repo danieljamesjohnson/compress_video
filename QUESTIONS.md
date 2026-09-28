@@ -43,6 +43,15 @@ publisher is trusted. pana 0.23.19 was installed and run: the package scores **1
 now has the step `pana: 160/160 pub points (RELS-01)`. The publisher choice above is still open
 and still blocks the release.
 
+**Update 2026-09-28 (phase close):** Phase 6 is complete on the agent side. Final CI run of record
+36366408783 is green on all four jobs (pana 160/160 and dartdoc 0 warnings on the hosted runner,
+compat suite on Android emulator, iOS simulator and macOS host, parity). Verification
+(06-VERIFICATION.md) is `human_needed` on exactly two items, both yours: (a) choose the publisher
+and run the publish per `doc/RELEASE.md` (`dart pub publish`, tag `v1.0.0`, GitHub release), and
+(b) re-run `doc/HARDWARE_CHECKLIST.md` on a physical Android phone and the MacBook Air first
+(#3, #4, #8). One notification was sent for this on 2026-09-28. Nothing else is waiting on an
+agent.
+
 ## 3. Physical Android phone for hardware checks
 
 The emulator covers builds and most logic. HEVC hardware encoding and HDR tone-map fidelity need a real phone (a Pixel with HLG10 capture is ideal). When one is available, either plug it into danserver over USB or expose `adb` over the tailnet. Not blocking until the codec/HDR phase.
