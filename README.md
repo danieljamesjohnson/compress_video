@@ -411,3 +411,7 @@ HEVC and HDR, and `doc/PRESETS.md` for measured bitrate/byte tables.
 
 Planning for this project lives in `.planning/` (GSD). Research that led here:
 `.planning/research/sources/VIDEO_COMPRESS_BRIEF.md`.
+
+CI regenerates the preset table above and checks `MIGRATION.md` against the code on every
+push that touches `README.md`, `MIGRATION.md` or `doc/PRESETS.md`, so the documentation
+cannot drift from the constants it describes.
