@@ -6,12 +6,26 @@ on:
     paths-ignore:
       - '.planning/**'
       - '**/*.md'
+      # WR-07: these three documents are guarded by CI gates (the README preset-table drift
+      # gate and test/migration_doc_test.dart), so a push that changes only one of them must
+      # still start a run. A `!` pattern after '**/*.md' takes the file back out of the
+      # ignore list; every other Markdown file stays ignored.
+      - '!README.md'
+      - '!MIGRATION.md'
+      - '!doc/PRESETS.md'
       - 'QUESTIONS.md'
       - '.mission-control/**'
   pull_request:
     paths-ignore:
       - '.planning/**'
       - '**/*.md'
+      # WR-07: these three documents are guarded by CI gates (the README preset-table drift
+      # gate and test/migration_doc_test.dart), so a push that changes only one of them must
+      # still start a run. A `!` pattern after '**/*.md' takes the file back out of the
+      # ignore list; every other Markdown file stays ignored.
+      - '!README.md'
+      - '!MIGRATION.md'
+      - '!doc/PRESETS.md'
       - 'QUESTIONS.md'
       - '.mission-control/**'
   workflow_dispatch:
