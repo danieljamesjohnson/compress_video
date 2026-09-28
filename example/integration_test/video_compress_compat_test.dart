@@ -88,9 +88,6 @@ bool _startsLikeJpeg(List<int> bytes) =>
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  /// Path of the LowQuality case's output. The last case checks that deleteAllCache removed it.
-  String? lowQualityOutputPath;
-
   tearDownAll(() {
     // ignore: avoid_print
     print(
@@ -161,7 +158,6 @@ void main() {
         );
 
         final MediaInfo info = await pending;
-        lowQualityOutputPath = info.path;
 
         // A 1080x1920 portrait clip under a long-side cap of 640.
         expect(info.width, 360);
@@ -309,13 +305,14 @@ void main() {
     testWidgets('deleteAllCache clears compressVideo outputs', (
       WidgetTester tester,
     ) async {
-      final String? outputPath = lowQualityOutputPath;
-      expect(
-        outputPath,
-        isNotNull,
-        reason: 'the LowQuality case must have run and passed first',
+      // Its own output, so a failure of an earlier case is not reported a second time here.
+      final String path = await _copyClip('small_480p.mp4', 'delete_cache');
+      final MediaInfo info = await VideoCompress.compressVideo(
+        path,
+        quality: VideoQuality.LowQuality,
       );
-      expect(await File(outputPath!).exists(), isTrue);
+      final String outputPath = info.path!;
+      expect(await File(outputPath).exists(), isTrue);
 
       final bool cleared = await VideoCompress.deleteAllCache();
 
