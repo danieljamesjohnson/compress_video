@@ -12,11 +12,25 @@ pubspec.lock
 .DS_Store
 .venv*/
 
+# GSD run-scoped sentinels (repeated from .gitignore)
+.gsd/
+
+# Flutter plugin build artifacts (repeated from .gitignore)
+example/ios/Pods/
+example/macos/Pods/
+example/ios/.symlinks/
+example/macos/.symlinks/
+**/Flutter/ephemeral/
+.flutter-plugins
+.flutter-plugins-dependencies
+
 # Publish-only exclusions
 corpus/
 .planning/
 .mission-control/
 .claude/
+.github/
+example/integration_test/_scratch/
 QUESTIONS.md
 
 # NOTE: example/assets/corpus/ is deliberately NOT excluded — the example app needs its

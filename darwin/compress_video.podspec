@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'compress_video'
-  s.version          = '0.1.0'
+  s.version          = '1.0.0'
   s.summary          = 'Compress phone-recorded video, with typed media info and thumbnails.'
   s.description      = <<-DESC
 A Flutter plugin that compresses a video, reads its media info and makes rotation-correct

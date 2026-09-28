@@ -40,7 +40,20 @@ Everything below is on a typed platform-channel contract (via
 * **Thumbnails** — a rotation-correct poster frame at any timestamp, as JPEG bytes or written to
   a file.
 
-Not yet published to pub.dev — see CHANGELOG.md for what has landed so far.
+## Install
+
+```sh
+flutter pub add compress_video
+```
+
+Or add it to `pubspec.yaml` under `dependencies:`:
+
+```yaml
+dependencies:
+  compress_video: ^1.0.0
+```
+
+[CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 
 ## Unit convention
 

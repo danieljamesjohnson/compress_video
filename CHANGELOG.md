@@ -1,4 +1,62 @@
-## Unreleased
+## 1.0.0
+
+The first release on pub.dev. `compress_video` is the drop-in successor to `video_compress`: one
+call turns a phone video into a smaller H.264/AAC MP4 on Android, iOS and macOS, the output is
+never larger than the input, no call ever returns `null`, and an app that still uses the old
+package can switch by changing one import.
+
+### Breaking changes (since 0.1.0)
+
+0.1.0 was a development version and was never published, so these matter only to an app that
+depended on this repository by git. Each item says what to change.
+
+* **`CompressVideo`'s constructor is no longer `const`.** The job queue is state that belongs to
+  one instance. Fix: remove `const` from every `const CompressVideo(...)`, and declare a shared
+  instance as `final` instead of `const`.
+* **Jobs beyond `maxConcurrentJobs` now wait in a queue.** The default is 1, so two `compress()`
+  calls on the same `CompressVideo` run one after the other, not at the same time.
+  `CompressJob.isQueued` says whether a job has started. Fix: pass
+  `CompressVideo(maxConcurrentJobs: n)` to run `n` jobs at once, or use one instance per job.
+* **`CompressVideoErrorReason.encoderUnavailable`, `outOfSpace` and `interrupted` are now real
+  outcomes.** A `switch` over the reason must handle all three; `interrupted` means the system
+  stopped the job and the same call can be tried again. Fix: add the three cases, or a default
+  branch.
+* **`CompressOptions.validate()` no longer rejects `VideoCodec.hevc` or `HdrMode.keepHdr`.** Both
+  are now supported options. A device that cannot do either still returns a file, and reports it
+  with `CompressResult.hevcFallback` and `CompressResult.toneMapped`. Fix: check those two flags
+  instead of catching the rejection.
+* **`CompressResult.toneMapped`, `hevcFallback` and `audioReencoded` can now be `true`.** They
+  were always `false` while HDR, HEVC and unusual audio were not supported. When
+  `usedOriginal` is `true`, all of them are `false`. Fix: nothing, unless the app assumed they
+  were constant.
+* **An unexpected error is now a `CompressVideoException` with reason `unknown`.** Before, a
+  non-platform error from `getMediaInfo`, `getThumbnail`, `getThumbnailFile`, `estimate` or
+  `clearCache` could escape as its own type. Fix: catch `CompressVideoException`; the original
+  error is in `platformDetail`.
+* **Waiting on a job that was never started fails after about 2 seconds, not at once.** This
+  applies to the platform method `awaitCompressResult`, which the package calls for a job started
+  from a background isolate. The wait closes a race on Apple where the result was requested
+  before the job was registered. An app that uses only the public API does not reach this case.
+  Fix: nothing.
+
+`CompressResult` and `CompressEstimate` have no new required constructor parameters.
+
+### Added in 1.0.0
+
+* **The compatibility import.** `package:compress_video/video_compress_compat.dart` has the whole
+  public surface of `video_compress` 3.1.4 (`VideoCompress`, `VideoQuality`, `MediaInfo`,
+  `compressProgress$`) on the new engine. Every symbol is marked `@Deprecated` and names its
+  replacement. A failure throws a typed exception where the old package returned `null`.
+* **`MIGRATION.md`.** Every old name next to its new call, the `MediaInfo` fields, and what each
+  `VideoQuality` value maps to. A test keeps the guide in agreement with the code.
+* **A generated preset table in the README.** "Presets at a glance" is built from the preset
+  constants and the measurements in `doc/PRESETS.md` by
+  `flutter test tool/generate_preset_table.dart`. A CI gate fails when the table is out of date.
+* **A pub.dev score gate.** CI runs `pana` and fails unless the package is granted every point,
+  and a second gate fails on any dartdoc warning.
+* **`doc/RELEASE.md`.** The release procedure, starting with the hardware checklist.
+
+### Everything else since 0.1.0
 
 * **Jobs, isolates and background execution (Phase 5)** — three additions, landed together and
   documented together in the README's "Jobs beyond the foreground" section, in the order a caller
