@@ -28,16 +28,19 @@ class Compression(
     ): CompressResultMessage {
         requireMainLooper("startCompress")
         requireValidJobId(jobId)
-        Arguments.requireValidCompressRequest(request)
 
-        // Pre-registered BEFORE any async/suspending work below, so a concurrent
-        // awaitCompressResult(jobId) call -- issued by a caller on a background isolate right
-        // after firing this call, per 05-02 -- can never lose a race against a fast job finishing
-        // first (confirmed live: a cheap clip can finish in ~220ms). See
+        // Pre-registered BEFORE request validation and before any async/suspending work below,
+        // so a concurrent awaitCompressResult(jobId) call -- issued by a caller on a background
+        // isolate right after firing this call, per 05-02 -- can never lose a race against a
+        // fast job finishing first (confirmed live: a cheap clip can finish in ~220ms). See
         // JobRegistry.resultDeferredFor.
         JobRegistry.resultDeferredFor(jobId)
 
         return try {
+            // Inside the try, after registration (mirrors Compression.swift): a request that
+            // fails validation is still a known job whose typed failure completeResult records,
+            // rather than an "unknown jobId" after awaitCompressResult's full grace.
+            Arguments.requireValidCompressRequest(request)
             val inputFile = Arguments.requireReadableMediaFile(path)
             val inputInfo = probe.getMediaInfo(path)
 
