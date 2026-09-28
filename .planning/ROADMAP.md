@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Apple Compression to Parity** - The same calls and behaviour on iOS and macOS, via CocoaPods and SPM, with the example app on all three platforms
 - [ ] **Phase 4: Codecs, HDR and Hard Inputs** - HDR tone-mapping, HEVC with fallback, 5.1/PCM/no-audio sources and the real-clip corpus in CI
 - [ ] **Phase 5: Jobs, Isolates and Background** - Job queue with concurrency limit, background-isolate calls, Android foreground service, honest iOS interruption
-- [ ] **Phase 6: Release and Migration** - Published on pub.dev at 160/160 with preset tables, migration guide and a `video_compress` compatibility layer
+- [ ] **Phase 6: Release and Migration** - Published on pub.dev at 160/160 with preset tables, migration guide and a `video_compress` compatibility layer (4/4 plans complete 2026-09-28; publish-ready at 160/160 in CI; the publish itself and the hardware re-run are Dan's steps — QUESTIONS.md #2, #3, #4, #8)
 
 ## Phase Details
 
@@ -269,16 +269,16 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — `video_compress_compat.dart`: the incumbent's verbs, `VideoQuality` mapping and progress stream on the new engine, unit-tested and snippet-compiled (RELS-03)
-- [ ] 06-03-PLAN.md — Generated README preset table from the constants and doc/PRESETS.md, complete non-goals section, CI drift gate (RELS-02)
+- [x] 06-01-PLAN.md — `video_compress_compat.dart`: the incumbent's verbs, `VideoQuality` mapping and progress stream on the new engine, unit-tested and snippet-compiled (RELS-03)
+- [x] 06-03-PLAN.md — Generated README preset table from the constants and doc/PRESETS.md, complete non-goals section, CI drift gate (RELS-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02-PLAN.md — MIGRATION.md for every old API and `VideoQuality` value, plus the compat integration suite on Android, iOS and macOS with parity (RELS-03)
+- [x] 06-02-PLAN.md — MIGRATION.md for every old API and `VideoQuality` value, plus the compat integration suite on Android, iOS and macOS with parity (RELS-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-04-PLAN.md — 1.0.0, CHANGELOG breaking changes, pana/dartdoc gates, doc/RELEASE.md; the real publish and hardware re-run stay Dan's deferred steps (RELS-01)
+- [x] 06-04-PLAN.md — 1.0.0, CHANGELOG breaking changes, pana/dartdoc gates, doc/RELEASE.md; the real publish and hardware re-run stay Dan's deferred steps (RELS-01)
 **Research**: Skip. pub.dev publishing and scoring are well documented.
 **Notes**: Publishing needs a verified pub.dev publisher, or Dan's decision to publish under his Google account (QUESTIONS.md #2).
 

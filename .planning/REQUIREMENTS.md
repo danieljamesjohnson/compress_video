@@ -58,8 +58,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Release and migration
 
 - [ ] **RELS-01**: Package is published on pub.dev as `compress_video` and scores 160/160 pub points (documentation, example, platform declarations, analysis clean)
-- [ ] **RELS-02**: README contains a plain-English table of what each preset does on each platform (resolution, bitrate, fps) and a section on what the plugin deliberately does not do
-- [ ] **RELS-03**: A migration guide maps every `video_compress` API and `VideoQuality` enum value to the new API, and a compatibility layer exposes the old verbs (`compressVideo`, `getMediaInfo`, `getFileThumbnail`, `cancelCompression`, `deleteAllCache`) over the new engine so a dependent can switch with a one-line import change
+- [x] **RELS-02**: README contains a plain-English table of what each preset does on each platform (resolution, bitrate, fps) and a section on what the plugin deliberately does not do
+- [x] **RELS-03**: A migration guide maps every `video_compress` API and `VideoQuality` enum value to the new API, and a compatibility layer exposes the old verbs (`compressVideo`, `getMediaInfo`, `getFileThumbnail`, `cancelCompression`, `deleteAllCache`) over the new engine so a dependent can switch with a one-line import change
 
 ## v2 Requirements
 
@@ -131,8 +131,8 @@ the requirements that name all platforms explicitly (CORE-01, CORE-07, BULD-04).
 | BULD-05 | Phase 1 | Complete |
 | TEST-01 | Phase 4 | Pending |
 | RELS-01 | Phase 6 | Pending |
-| RELS-02 | Phase 6 | Pending |
-| RELS-03 | Phase 6 | Pending |
+| RELS-02 | Phase 6 | Complete |
+| RELS-03 | Phase 6 | Complete |
 
 **Coverage:**
 

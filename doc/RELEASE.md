@@ -78,7 +78,7 @@ but pub.dev runs its own copy. The first item under "After publishing" is the re
 To run pana by hand, from the repository root:
 
 ```sh
-dart pub global activate pana
+dart pub global activate pana 0.23.19   # the version CI pins; bump both together
 dart pub global run pana --flutter-sdk "$(dirname "$(dirname "$(command -v flutter)")")" .
 ```
 
