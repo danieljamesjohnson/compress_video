@@ -272,6 +272,18 @@ class ObservableBuilder<T> {
 
 IVideoCompress? _instance;
 
+// The engine and the state of the one compression in flight belong to the library, not to an
+// IVideoCompress instance, so they outlive dispose(). The incumbent's cancelCompression was a
+// process-wide native call that stopped the running job whichever Dart object sent it; with
+// per-instance state, dispose() followed by cancelCompression() would reach a new instance
+// that knows no job, and a second compression could start beside the first.
+final CompressVideo _sharedEngine = CompressVideo(maxConcurrentJobs: 1);
+
+/// The compression in flight, or `null`. Set and cleared together with [_isCompressing].
+CompressJob? _currentJob;
+
+bool _isCompressing = false;
+
 /// The incumbent's entry point: one shared [IVideoCompress], created on first use and
 /// replaced after [IVideoCompress.dispose].
 @Deprecated('Construct a CompressVideo() where you need it -- see MIGRATION.md')
@@ -281,13 +293,17 @@ IVideoCompress get VideoCompress => _instance ??= IVideoCompress._();
 ///
 /// Obtained from the top-level `VideoCompress` getter. It keeps the incumbent's contract of
 /// one compression at a time with one shared progress stream: [isCompressing] is `true`
-/// exactly while a compression started here is in flight, and [compressProgress$] carries
-/// that compression's progress.
+/// exactly while a compression started through this library is in flight, and
+/// [compressProgress$] carries that compression's progress.
+///
+/// The compression in flight belongs to the library, not to this object. After [dispose],
+/// the next `VideoCompress` still reports it through [isCompressing], still stops it with
+/// [cancelCompression], and still refuses a second [compressVideo].
 @Deprecated('Use CompressVideo -- see MIGRATION.md')
 class IVideoCompress {
-  IVideoCompress._() : _engine = CompressVideo(maxConcurrentJobs: 1);
+  IVideoCompress._();
 
-  final CompressVideo _engine;
+  CompressVideo get _engine => _sharedEngine;
 
   /// Progress of the compression in flight, 0 to 100, delivered to every subscriber.
   ///
@@ -296,12 +312,9 @@ class IVideoCompress {
   final ObservableBuilder<double> compressProgress$ =
       ObservableBuilder<double>();
 
-  bool _isCompressing = false;
-
-  /// The compression in flight, or `null`. Set and cleared together with [_isCompressing].
-  CompressJob? _currentJob;
-
-  /// Whether a compression started through this object is in flight.
+  /// Whether a compression started through this library is in flight.
+  ///
+  /// Still `true` after [dispose] while that compression runs.
   ///
   /// The engine itself has no such global: each [CompressJob] is independent.
   @Deprecated(
@@ -462,6 +475,9 @@ class IVideoCompress {
 
   /// Stops the compression in flight. Does nothing when there is none.
   ///
+  /// As with the incumbent, this works after [dispose] too: the compression in flight is
+  /// stopped whichever `VideoCompress` instance started it.
+  ///
   /// The pending [compressVideo] call then resolves to a [MediaInfo] with
   /// [MediaInfo.isCancel] `true`.
   @Deprecated('Use CompressJob.cancel() -- see MIGRATION.md')
@@ -532,8 +548,13 @@ class IVideoCompress {
 
   /// Drops the shared instance, so the next read of `VideoCompress` creates a new one.
   ///
-  /// As with the incumbent, this does not cancel a compression that is still in flight, and
-  /// subscribers of this object's [compressProgress$] are not moved to the new instance.
+  /// As with the incumbent, this does not cancel a compression that is still in flight. That
+  /// compression stays visible and cancellable: the next `VideoCompress` reports it through
+  /// [isCompressing], stops it with [cancelCompression], and refuses a second
+  /// [compressVideo] until it has finished.
+  ///
+  /// Subscribers of this object's [compressProgress$] are not moved to the new instance. A
+  /// compression in flight keeps sending its progress to the object that started it.
   @Deprecated(
     'Nothing to dispose: CompressVideo holds no global state -- see '
     'MIGRATION.md',

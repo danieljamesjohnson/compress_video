@@ -110,7 +110,7 @@ jobs at once live there, not in the compat import.
 | `quality` (thumbnails) | JPEG quality, 1 to 100. The default is 100. | `quality`, 1 to 100. The default is 80. |
 | `deleteAllCache` | Same. Returns `true`. | `CompressVideo().clearCache()` |
 | `setLogLevel` | Does nothing | Remove the call. |
-| `dispose` | Drops the shared instance | Remove the call. `CompressVideo` has nothing to dispose. |
+| `dispose` | Drops the shared instance. A compression in flight keeps running, and `isCompressing` and `cancelCompression` still reach it afterwards. | Remove the call. `CompressVideo` has nothing to dispose. |
 | `channel` | Not provided. There is no hand-written channel to expose. | Not provided. The platform contract is typed and private. |
 | `initProcessCallback` | Not provided. It was a protected member. | Not provided. |
 | `setProcessingStatus` | Not provided. It was a protected member. | Not provided. |

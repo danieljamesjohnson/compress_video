@@ -540,6 +540,37 @@ void main() {
       expect(VideoCompress.isCompressing, isFalse);
     });
 
+    test('after dispose() the compression in flight is still visible, still '
+        'cancellable, and still blocks a second compressVideo', () async {
+      final IVideoCompress first = VideoCompress;
+      final Future<MediaInfo> pending = first.compressVideo('/a.mp4');
+      final String jobId = fake.startedJobIds.single;
+
+      first.dispose();
+      expect(identical(first, VideoCompress), isFalse);
+
+      expect(VideoCompress.isCompressing, isTrue);
+      await expectLater(
+        () => VideoCompress.compressVideo('/b.mp4'),
+        throwsA(isA<StateError>()),
+      );
+      expect(fake.startedPaths, <String>['/a.mp4']);
+
+      await VideoCompress.cancelCompression();
+      expect(fake.cancelledJobIds, <String>[jobId]);
+
+      fake.completeFailure(jobId, 'cancelled');
+      final MediaInfo info = await pending;
+      expect(info.isCancel, isTrue);
+      expect(VideoCompress.isCompressing, isFalse);
+
+      // The slot is free again on the new instance.
+      final Future<MediaInfo> next = VideoCompress.compressVideo('/c.mp4');
+      expect(fake.startedPaths, <String>['/a.mp4', '/c.mp4']);
+      fake.completeSuccess(fake.startedJobIds.last);
+      await next;
+    });
+
     test('cancelCompression with nothing in flight completes and sends no '
         'cancel', () async {
       await expectLater(VideoCompress.cancelCompression(), completes);
