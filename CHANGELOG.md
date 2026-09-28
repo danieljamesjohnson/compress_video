@@ -52,8 +52,8 @@ depended on this repository by git. Each item says what to change.
 * **A generated preset table in the README.** "Presets at a glance" is built from the preset
   constants and the measurements in `doc/PRESETS.md` by
   `flutter test tool/generate_preset_table.dart`. A CI gate fails when the table is out of date.
-* **A pub.dev score gate.** CI runs `pana` and fails unless the package is granted every point,
-  and a second gate fails on any dartdoc warning.
+* **A documentation gate.** CI fails on any dartdoc warning, next to the existing gates for
+  `dart pub publish --dry-run` at 0 warnings and for dartdoc on every public symbol.
 * **`doc/RELEASE.md`.** The release procedure, starting with the hardware checklist.
 
 ### Everything else since 0.1.0

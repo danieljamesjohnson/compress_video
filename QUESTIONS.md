@@ -19,6 +19,24 @@ Until this is done, Apple-side phases will build Swift code without verification
 
 No verified publisher exists for your account yet. Before the release phase, either create one (needs a domain you control, e.g. `danjjohnson.com`) or decide to publish under your Google account. Not blocking until the last phase.
 
+**Update 2026-09-27 (06-04): this now blocks the release.** The package is ready to publish as
+1.0.0: `dart pub publish --dry-run` reports `Package has 0 warnings.` (572 KB archive), dartdoc
+reports 0 warnings, and both are CI gates. The only thing between the package and pub.dev is your
+publisher choice, then the one command in `doc/RELEASE.md`. Both options are written out there
+(item 4 of the pre-publish checklist). This blocks ROADMAP criterion 1 ("live on pub.dev at
+160/160"). No agent will publish, tag or create the release.
+
+**One more decision, also 2026-09-27: may agents install `pana`?** `pana` is the tool pub.dev
+uses to compute pub points. The release plan allowed installing it only if pub.dev listed its
+publisher as `dart.dev`. pub.dev lists it as `tools.dart.dev`
+(`curl -s https://pub.dev/api/packages/pana/publisher` gives `{"publisherId":"tools.dart.dev"}`).
+That publisher's own page says "Tooling packages published by the Dart Team", and `dartdoc` is
+under the same publisher. It was still not what the plan required, so pana was **not installed,
+not run, and has no CI step**. The pana score of this package is therefore unknown. If you are
+satisfied that `tools.dart.dev` is the Dart team, say so and an agent will install pana, run it,
+fix what it names, and add the CI gate at threshold 0. If you would rather not, the first check
+after publishing (`https://pub.dev/packages/compress_video/score`) is where the score is seen.
+
 ## 3. Physical Android phone for hardware checks
 
 The emulator covers builds and most logic. HEVC hardware encoding and HDR tone-map fidelity need a real phone (a Pixel with HLG10 capture is ideal). When one is available, either plug it into danserver over USB or expose `adb` over the tailnet. Not blocking until the codec/HDR phase.
@@ -48,6 +66,10 @@ carries the same caveat. When a physical phone is available, re-run the estimate
 against its hardware encoder and tighten (or confirm) the tolerance — see `02-07-SUMMARY.md`
 Deviations. Not blocking; grouped with this phone's other hardware-encoder verification work.
 
+**Update 2026-09-27 (06-04):** the release now waits on this. Item 1 of the pre-publish
+checklist in `doc/RELEASE.md` is a re-run of `doc/HARDWARE_CHECKLIST.md` against a release
+build, and it needs this.
+
 ## 4. Real phone clips for the test corpus
 
 Phase 1 ships an ffmpeg-generated corpus that mirrors phone structure (rotation display matrix, AAC, no-audio, already-small). Real clips are still needed for the rotation/HDR checks that every competitor got wrong. When convenient, get these onto danserver (the feedback drop at http://danserver/drop, or `scp` into `~/CodeProjects/compress-video/corpus/incoming/`):
@@ -57,6 +79,10 @@ Phase 1 ships an ffmpeg-generated corpus that mirrors phone structure (rotation 
 - any short clip with 5.1 audio if you have one (optional)
 
 Not blocking until Phase 4 (Codecs, HDR and Hard Inputs).
+
+**Update 2026-09-27 (06-04):** the release now waits on this. Item 1 of the pre-publish
+checklist in `doc/RELEASE.md` is a re-run of `doc/HARDWARE_CHECKLIST.md` against a release
+build, and it needs this.
 
 ## 5. GitHub repository visibility — RESOLVED 2026-09-21 (Dan: "make it public"; repo is now public, Actions minutes uncapped)
 
@@ -179,6 +205,10 @@ proceeded normally. Same ask as the rows above: leave the MacBook Air open or on
 sleep-on-adapter off. When it next answers, resume with `bash tool/mac_sync.sh && bash
 tool/mac_run.sh ios integration_test/compress_test.dart` (03-09 task 1's own precondition),
 then execute `03-09-PLAN.md` task 1 exactly as written.
+
+**Update 2026-09-27 (06-04):** the release now waits on this. Item 1 of the pre-publish
+checklist in `doc/RELEASE.md` is a re-run of `doc/HARDWARE_CHECKLIST.md` against a release
+build, and the Apple half of it needs the MacBook Air awake.
 
 ## 9. JOBS-04 scope decision: `compress()` from a background isolate hangs — engine limitation, not fixable in-package
 

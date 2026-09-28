@@ -1,5 +1,8 @@
 # Hardware Checklist
 
+**Before every pub.dev release:** re-run this against a release build before every pub.dev
+release. It is the first item of the pre-publish checklist in [doc/RELEASE.md](RELEASE.md).
+
 Checks that can only be proven on real hardware — a physical Android phone, a real iPhone (for
 Dolby Vision), and (for the parts CI's simulator/emulator can already prove) an Apple Silicon
 device. Every item names the exact command to run and the exact result that counts as a pass.
