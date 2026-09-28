@@ -206,7 +206,7 @@ class CompressEstimate {
   /// The formula's DESIGNED target is plus or minus 15 percent of the byte count a real encode
   /// produces for a genuinely-compressible source.
   ///
-  /// Measured live on this project's danserver emulator's software H.264 encoder, at every one
+  /// Measured live on this project's development emulator's software H.264 encoder, at every one
   /// of the four presets against this project's high-bitrate corpus clip, the real encode's
   /// actual byte count diverged from this prediction by far more than 15 percent in three of
   /// the four cases (measured 7.9 to 67.0 percent, not monotonic with resolution) -- consistent

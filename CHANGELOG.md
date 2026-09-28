@@ -54,7 +54,8 @@ depended on this repository by git. Each item says what to change.
   `flutter test tool/generate_preset_table.dart`. A CI gate fails when the table is out of date.
 * **A pub.dev score gate.** CI runs `pana` and fails unless the package is granted every point,
   and a second gate fails on any dartdoc warning.
-* **`doc/RELEASE.md`.** The release procedure, starting with the hardware checklist.
+* **`doc/RELEASE.md`.** The release procedure, starting with the hardware checklist. It is in
+  the repository and is not part of the published package.
 
 ### Everything else since 0.1.0
 

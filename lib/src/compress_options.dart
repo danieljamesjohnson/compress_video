@@ -265,7 +265,7 @@ class CompressOptions {
   /// This tolerance is the formula's designed target, verified as exact arithmetic in
   /// `SizeGuardTest.kt`. A software encoder's *actual* rate control can still diverge from a
   /// requested bitrate by more than 15 percent on very short, already-downscaled clips --
-  /// measured live on this project's danserver emulator (02-03-SUMMARY.md, QUESTIONS.md);
+  /// measured live on this project's development emulator (02-03-SUMMARY.md, QUESTIONS.md);
   /// re-verification against a physical device's hardware encoder is tracked separately.
   final double? targetSizeMb;
 

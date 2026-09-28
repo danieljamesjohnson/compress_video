@@ -1,7 +1,8 @@
 # Hardware Checklist
 
 **Before every pub.dev release:** re-run this against a release build before every pub.dev
-release. It is the first item of the pre-publish checklist in [doc/RELEASE.md](RELEASE.md).
+release. It is the first item of the pre-publish checklist in `doc/RELEASE.md`, which is in the
+repository and not in the published package.
 
 Checks that can only be proven on real hardware — a physical Android phone, a real iPhone (for
 Dolby Vision), and (for the parts CI's simulator/emulator can already prove) an Apple Silicon
@@ -139,7 +140,7 @@ and the measured relative-error percentages here once tested.
 
 ## Dolby Vision profile 8 (QUESTIONS.md #4)
 
-**Status: not yet run — no real Dolby Vision clip exists on danserver.**
+**Status: not yet run — no real Dolby Vision clip exists on the development host.**
 
 `hdr_dolbyvision_p8.mp4` is a reserved corpus slot (`corpus/README.md`), not a generated file —
 ffmpeg cannot author Dolby Vision RPU metadata. This case is real-iPhone-clip-only until Dan
@@ -161,7 +162,7 @@ H.264 reporting both `toneMapped: true` and `hevcFallback: true` — the same du
 once one exists. A new test case for this clip belongs in `hard_inputs_test.dart` at that point;
 none exists yet because there is nothing to run it against.
 
-**When run:** not yet run — no real Dolby Vision clip exists on danserver yet (QUESTIONS.md #4).
+**When run:** not yet run — no real Dolby Vision clip exists on the development host yet (QUESTIONS.md #4).
 
 ## Real Android phone backgrounding walkthrough (05-03/05-05, JOBS-05)
 

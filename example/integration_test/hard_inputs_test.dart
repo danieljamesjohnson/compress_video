@@ -589,7 +589,7 @@ void main() {
     /// typed `unsupportedInput` error -- never a crash, never washed-out HDR passed through
     /// silently, and never any other reason.
     ///
-    /// Confirmed live on the danserver emulator (compress_video_api35, API 35,
+    /// Confirmed live on the development emulator (compress_video_api35, API 35,
     /// swiftshader_indirect software GL): BOTH attempts fail on this specific hardware.
     /// `HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL` fails with `ExportException.errorCode`
     /// 5001 (`ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED`) -- logcat traces the root cause to the

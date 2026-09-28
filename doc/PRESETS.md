@@ -2,7 +2,7 @@
 
 ## Android
 
-**Measured on:** the danserver API 35 x86_64 `google_apis` emulator (`emulator-5554`), whose only
+**Measured on:** the development host's API 35 x86_64 `google_apis` emulator (`emulator-5554`), whose only
 H.264 encoder is the software `c2.android.avc.encoder` (02-RESEARCH.md Pitfall 3) — no hardware
 encoder is available on this device.
 
@@ -116,7 +116,7 @@ HEVC at `p720`'s nominal 2,500,000bps should not expect the same file size or qu
 H.264 `p720` row above; this project has not re-derived a separate HEVC bitrate ladder.
 
 **The HEVC-success and keep-HDR-success branches are now CI-proven, but no bitrate or byte-size
-number has been measured for either yet (04-05).** `compress_video_api35` (the danserver Android
+number has been measured for either yet (04-05).** `compress_video_api35` (the development host's Android
 emulator) and the iOS Simulator both still report zero hardware HEVC encoders of any kind
 (04-RESEARCH.md, verified live), so on those two CI targets every HEVC opt-in and keep-HDR case
 in `hard_inputs_test.dart` still exercises the fallback branch. The macOS CI host, however, DOES

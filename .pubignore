@@ -36,5 +36,13 @@ corpus/
 example/integration_test/_scratch/
 QUESTIONS.md
 
+# Maintainer-only procedure and build-host tooling (WR-09): of no use to a package user, and
+# they name private hosts. tool/preset_table.dart and tool/generate_preset_table.dart stay,
+# because test/preset_table_test.dart imports one.
+doc/RELEASE.md
+doc/TOOLCHAIN.md
+tool/mac_run.sh
+tool/mac_sync.sh
+
 # NOTE: example/assets/corpus/ is deliberately NOT excluded — the example app needs its
 # bundled clips to run, and the example app itself is part of what pub.dev shows.

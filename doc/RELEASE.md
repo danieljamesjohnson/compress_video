@@ -24,9 +24,9 @@ Do these in order. Tick each box when it is done.
 - [ ] 3. Run `dart pub publish --dry-run` from the repository root. The last line must be
       `Package has 0 warnings.`
 - [ ] 4. Decide the publisher (QUESTIONS.md #2). There are two options.
-      - **Option A: publish under the Google account.** Publish as
-        `danthebeliever@gmail.com`. The package page shows that address as the uploader. The
-        package can be moved to a verified publisher later.
+      - **Option A: publish under the Google account.** Publish as your Google account.
+        The package page shows that account's address as the uploader. The package can be
+        moved to a verified publisher later.
       - **Option B: publish under a verified publisher.** First create the publisher: on
         pub.dev, open the account menu, choose "Create publisher", and enter a domain you
         control, for example `danjjohnson.com`. pub.dev asks you to verify the domain in
