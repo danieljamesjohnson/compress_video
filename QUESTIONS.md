@@ -15,7 +15,7 @@ On the Mac:
 
 Until this is done, Apple-side phases will build Swift code without verification and the roadmap orders Android phases first.
 
-## 2. pub.dev publisher
+## 2. pub.dev publisher — RESOLVED 2026-09-29 (Dan: publish under the Google account; `dart pub publish` run from danserver with Dan completing the Google sign-in; pub.dev accepted compress_video 1.0.0; tag v1.0.0 pushed to both remotes; GitHub release created)
 
 No verified publisher exists for your account yet. Before the release phase, either create one (needs a domain you control, e.g. `danjjohnson.com`) or decide to publish under your Google account. Not blocking until the last phase.
 
